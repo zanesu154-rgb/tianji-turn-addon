@@ -535,7 +535,13 @@ function shouldSkipJsText(text) {
     if (isAlreadyKey(stripped)) return true;
     if (stripped.startsWith('./') || stripped.startsWith('/')) return true;
     if (/\.(js|json|png|ogg|wav)$/.test(stripped)) return true;
-    if (/^[a-zA-Z0-9_:]+$/.test(stripped)) return true;
+
+    // 含 @ → 技术标识符
+    if (stripped.includes('@')) return true;
+
+    // 纯小写字母数字下划线冒号 → 技术标识符（如 splint、minecraft）
+    if (/^[a-z0-9_:]+$/.test(stripped)) return true;
+
     return false;
 }
 
@@ -873,13 +879,13 @@ async function processFile(file) {
                 let existingZh = {};
                 const zhFile = zip.file(zhPath);
                 if (zhFile) {
-                    try { existingZh = parseLang(await zhFile.async('string')); } catch (e) {}
+                    try { existingZh = parseLang(await zhFile.async('string')); } catch (e) { }
                 }
 
                 let existingEn = {};
                 const enFile = zip.file(enPath);
                 if (enFile) {
-                    try { existingEn = parseLang(await enFile.async('string')); } catch (e) {}
+                    try { existingEn = parseLang(await enFile.async('string')); } catch (e) { }
                 }
 
                 const packEntries = ctx.langEntries.filter(([k]) => k.startsWith('pack.'));
@@ -899,7 +905,7 @@ async function processFile(file) {
                     try {
                         langs = JSON.parse(await langFile.async('string'));
                         if (!Array.isArray(langs)) langs = ['en_US'];
-                    } catch (e) {}
+                    } catch (e) { }
                 }
                 if (!langs.includes('zh_CN')) {
                     langs.push('zh_CN');
