@@ -1,6 +1,5 @@
 /* ================================================================
- *  栈主的附加包汉化工具 - 第二版
- *  新增：对话/交易/UI/JS + en_US 反向补充 + 合并已有 zh_CN
+ *  栈主的附加包汉化工具 - 第二版 + JS 处理
  * ================================================================ */
 
 const state = {
@@ -74,15 +73,13 @@ function parseLang(content) {
         if (!trimmed || trimmed.startsWith('#')) continue;
         const eq = trimmed.indexOf('=');
         if (eq === -1) continue;
-        const key = trimmed.substring(0, eq);
-        const value = trimmed.substring(eq + 1);
-        result[key] = value;
+        result[trimmed.substring(0, eq)] = trimmed.substring(eq + 1);
     }
     return result;
 }
 
 // ================================================================
-//  处理上下文
+//  上下文
 // ================================================================
 
 class ProcessContext {
@@ -90,21 +87,15 @@ class ProcessContext {
         this.langEntries = [];
         this.usedKeys = new Set();
         this.referencedKeys = new Set();
-        this.logger = {
-            logKey: (k, v, f) => log(`  键: ${k}=${v}`, 'info'),
-            logProcessed: (f, type) => log(`[${type}] ${f}`, 'info'),
-            logSkipped: (f, reason) => log(`[跳过] ${f}: ${reason}`, 'warn'),
-        };
     }
 
     addKey(key, value, filepath) {
         this.langEntries.push([key, value]);
-        this.logger.logKey(key, value, filepath);
     }
 }
 
 // ================================================================
-//  核心：_replace_field
+//  核心：replaceField
 // ================================================================
 
 function replaceField(container, fieldName, baseKey, ctx, filepath, useRawtext = false) {
@@ -114,27 +105,18 @@ function replaceField(container, fieldName, baseKey, ctx, filepath, useRawtext =
 
     if (value && typeof value === 'object' && 'rawtext' in value) {
         const raw = value.rawtext || [];
-        if (raw[0] && raw[0].translate) {
-            ctx.referencedKeys.add(raw[0].translate);
-        }
+        if (raw[0] && raw[0].translate) ctx.referencedKeys.add(raw[0].translate);
         return false;
     }
 
     let current, isStringForm;
-
     if (typeof value === 'string') {
-        if (isAlreadyKey(value)) {
-            ctx.referencedKeys.add(value);
-            return false;
-        }
+        if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); return false; }
         current = value;
         isStringForm = true;
     } else if (value && typeof value === 'object' && 'value' in value) {
         if (typeof value.value !== 'string') return false;
-        if (isAlreadyKey(value.value)) {
-            ctx.referencedKeys.add(value.value);
-            return false;
-        }
+        if (isAlreadyKey(value.value)) { ctx.referencedKeys.add(value.value); return false; }
         current = value.value;
         isStringForm = false;
     } else {
@@ -151,30 +133,26 @@ function replaceField(container, fieldName, baseKey, ctx, filepath, useRawtext =
         newValue = newKey;
     }
 
-    if (isStringForm) {
-        container[fieldName] = newValue;
-    } else {
-        value.value = newValue;
-    }
+    if (isStringForm) container[fieldName] = newValue;
+    else value.value = newValue;
 
     return true;
 }
 
 // ================================================================
-//  命令处理：title → titleraw
+//  命令处理
 // ================================================================
 
 const SELECTOR = '@[a-z](?:\\[[^\\]]*\\])?';
-const TITLE_RE = new RegExp(
-    `(title\\s+${SELECTOR}\\s+(?:actionbar|title|subtitle)\\s+)(.+?)(?=;|$)`,
-    's'
-);
 
 function translateCommand(cmd, identifier, ctx, filepath) {
     let replaced = false;
+    const titleRe = new RegExp(
+        `(title\\s+${SELECTOR}\\s+(?:actionbar|title|subtitle)\\s+)(.+?)(?=;|$)`,
+        's'
+    );
 
-    // title → titleraw
-    const m = TITLE_RE.exec(cmd);
+    const m = titleRe.exec(cmd);
     if (m) {
         const text = m[2].trim();
         if (!isAlreadyKey(text) && !text.startsWith('{')) {
@@ -191,12 +169,8 @@ function translateCommand(cmd, identifier, ctx, filepath) {
         }
     }
 
-    // tellraw 的 "text":"..."
     cmd = cmd.replace(/("text"\s*:\s*")([^"]+)(")/g, (match, p1, text, p3) => {
-        if (isAlreadyKey(text)) {
-            ctx.referencedKeys.add(text);
-            return match;
-        }
+        if (isAlreadyKey(text)) { ctx.referencedKeys.add(text); return match; }
         const key = makeUniqueKey(`entity.${identifier}.message`, ctx.usedKeys);
         const escaped = escapeLangValue(text);
         ctx.addKey(key, escaped, filepath);
@@ -211,20 +185,14 @@ function scanCommands(obj, identifier, ctx, filepath) {
     let replaced = false;
 
     function scan(node) {
-        if (Array.isArray(node)) {
-            for (const item of node) scan(item);
-            return;
-        }
+        if (Array.isArray(node)) { for (const item of node) scan(item); return; }
         if (!node || typeof node !== 'object') return;
 
         for (const [key, value] of Object.entries(node)) {
             if (key === 'command') {
                 if (typeof value === 'string') {
                     const [newCmd, changed] = translateCommand(value, identifier, ctx, filepath);
-                    if (changed) {
-                        node[key] = newCmd;
-                        replaced = true;
-                    }
+                    if (changed) { node[key] = newCmd; replaced = true; }
                 } else if (Array.isArray(value)) {
                     const newList = [];
                     let changed = false;
@@ -233,14 +201,9 @@ function scanCommands(obj, identifier, ctx, filepath) {
                             const [newCmd, c] = translateCommand(item, identifier, ctx, filepath);
                             if (c) changed = true;
                             newList.push(newCmd);
-                        } else {
-                            newList.push(item);
-                        }
+                        } else newList.push(item);
                     }
-                    if (changed) {
-                        node[key] = newList;
-                        replaced = true;
-                    }
+                    if (changed) { node[key] = newList; replaced = true; }
                 }
             } else {
                 scan(value);
@@ -312,7 +275,6 @@ function processEntity(json, filepath, ctx) {
         if (replaceField(nameable, 'name', baseKey, ctx, filepath, false)) replaced = true;
     }
 
-    // interact_text
     const interact = components['minecraft:interact'];
     if (Array.isArray(interact)) {
         let counter = 0;
@@ -325,16 +287,13 @@ function processEntity(json, filepath, ctx) {
         }
     }
 
-    // trade_table.display_name
     const tradeTable = components['minecraft:trade_table'];
     if (tradeTable && typeof tradeTable === 'object') {
         if (replaceField(tradeTable, 'display_name',
             `trade.${identifier}.name`, ctx, filepath, false)) replaced = true;
     }
 
-    // 命令
     if (scanCommands(json, identifier, ctx, filepath)) replaced = true;
-
     return replaced;
 }
 
@@ -345,7 +304,6 @@ function processEntity(json, filepath, ctx) {
 function processDialogue(json, filepath, ctx) {
     const dialogue = json['minecraft:npc_dialogue'];
     if (!dialogue) return false;
-
     const scenes = dialogue.scenes;
     if (!Array.isArray(scenes)) return false;
 
@@ -377,14 +335,9 @@ function processDialogue(json, filepath, ctx) {
                         const [newCmd, c] = translateCommand(item, sceneTag, ctx, filepath);
                         if (c) changed = true;
                         newList.push(newCmd);
-                    } else {
-                        newList.push(item);
-                    }
+                    } else newList.push(item);
                 }
-                if (changed) {
-                    button.commands = newList;
-                    replaced = true;
-                }
+                if (changed) { button.commands = newList; replaced = true; }
             }
         }
 
@@ -396,14 +349,9 @@ function processDialogue(json, filepath, ctx) {
                     const [newCmd, c] = translateCommand(item, sceneTag, ctx, filepath);
                     if (c) changed = true;
                     newList.push(newCmd);
-                } else {
-                    newList.push(item);
-                }
+                } else newList.push(item);
             }
-            if (changed) {
-                scene.on_close_commands = newList;
-                replaced = true;
-            }
+            if (changed) { scene.on_close_commands = newList; replaced = true; }
         }
     }
 
@@ -426,9 +374,8 @@ function processLore(obj, fileBase, ctx, filepath) {
 
         if (typeof item === 'string') {
             if (!item.trim() || isAlreadyKey(item)) continue;
-            const baseKey = `trade.${fileBase}.lore_${counter}`;
+            const key = makeUniqueKey(`trade.${fileBase}.lore_${counter}`, ctx.usedKeys);
             counter++;
-            const key = makeUniqueKey(baseKey, ctx.usedKeys);
             ctx.addKey(key, escapeLangValue(item), filepath);
             lore[i] = key;
             replaced = true;
@@ -437,18 +384,13 @@ function processLore(obj, fileBase, ctx, filepath) {
             for (let j = 0; j < raw.length; j++) {
                 const node = raw[j];
                 if (!node || typeof node !== 'object') continue;
-                if ('translate' in node) {
-                    ctx.referencedKeys.add(node.translate);
-                    continue;
-                }
+                if ('translate' in node) { ctx.referencedKeys.add(node.translate); continue; }
                 if (typeof node.text === 'string') {
                     const text = node.text;
                     if (!text.trim() || isAlreadyKey(text)) continue;
-                    const baseKey = `trade.${fileBase}.lore_${counter}`;
+                    const key = makeUniqueKey(`trade.${fileBase}.lore_${counter}`, ctx.usedKeys);
                     counter++;
-                    const key = makeUniqueKey(baseKey, ctx.usedKeys);
                     ctx.addKey(key, escapeLangValue(text), filepath);
-
                     const newNode = { translate: key };
                     if (node.with) newNode.with = node.with;
                     raw[j] = newNode;
@@ -472,10 +414,7 @@ function processTrading(json, filepath, ctx) {
     }
 
     function scan(obj) {
-        if (Array.isArray(obj)) {
-            for (const item of obj) scan(item);
-            return;
-        }
+        if (Array.isArray(obj)) { for (const item of obj) scan(item); return; }
         if (!obj || typeof obj !== 'object') return;
 
         const func = obj.function;
@@ -505,25 +444,17 @@ function processUI(json, filepath, ctx) {
     let counter = 0;
 
     function scan(obj) {
-        if (Array.isArray(obj)) {
-            for (const item of obj) scan(item);
-            return;
-        }
+        if (Array.isArray(obj)) { for (const item of obj) scan(item); return; }
         if (!obj || typeof obj !== 'object') return;
 
         for (const [key, value] of Object.entries(obj)) {
             if (key === 'text' && typeof value === 'string') {
                 if (value.startsWith('$') || value.startsWith('#')) continue;
-                if (isAlreadyKey(value)) {
-                    ctx.referencedKeys.add(value);
-                    continue;
-                }
+                if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
                 const baseKey = `ui.${uiBase}.text_${counter}`;
                 counter++;
                 if (replaceField(obj, 'text', baseKey, ctx, filepath, true)) replaced = true;
-            } else {
-                scan(value);
-            }
+            } else scan(value);
         }
     }
 
@@ -563,14 +494,151 @@ function processManifest(json, filepath, ctx) {
 }
 
 // ================================================================
+//  处理器：JS
+// ================================================================
+
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildApiPattern(method) {
+    const m = escapeRegex(method);
+    return new RegExp(
+        `(?:\\.${m}|\\["${m}"\\]|\\['${m}'\\])\\s*\\(\\s*(["'\`])((?:\\\\\\1|(?!\\1).)*)\\1`,
+        'g'
+    );
+}
+
+const JS_API_PATTERNS = [
+    ['title', 'title'],
+    ['body', 'body'],
+    ['button', 'button'],
+    ['button1', 'button'],
+    ['button2', 'button'],
+    ['label', 'label'],
+    ['slider', 'slider'],
+    ['dropdown', 'dropdown'],
+    ['textField', 'textfield'],
+    ['toggle', 'toggle'],
+    ['sendMessage', 'sendmessage'],
+    ['setTitle', 'settitle'],
+    ['setSubtitle', 'setsubtitle'],
+    ['setActionBar', 'setactionbar'],
+    ['actionBar', 'actionbar'],
+    ['runCommand', 'command'],
+].map(([method, category]) => [buildApiPattern(method), category]);
+
+function shouldSkipJsText(text) {
+    const stripped = text.trim();
+    if (!stripped) return true;
+    if (/^\d+$/.test(stripped)) return true;
+    if (isAlreadyKey(stripped)) return true;
+    if (stripped.startsWith('./') || stripped.startsWith('/')) return true;
+    if (/\.(js|json|png|ogg|wav)$/.test(stripped)) return true;
+    if (/^[a-zA-Z0-9_:]+$/.test(stripped)) return true;
+    return false;
+}
+
+function translateCommandString(cmd, category, fileBase, ctx, filepath) {
+    let replaced = false;
+    const titleRe = new RegExp(
+        `(title\\s+${SELECTOR}\\s+(?:actionbar|title|subtitle)\\s+)(.+?)(?=;|$)`,
+        's'
+    );
+
+    const m = titleRe.exec(cmd);
+    if (m) {
+        const text = m[2].trim();
+        if (!isAlreadyKey(text) && !text.startsWith('{')) {
+            const key = makeUniqueKey(`script.${category}.${fileBase}`, ctx.usedKeys);
+            const escaped = escapeLangValue(text);
+            ctx.addKey(key, escaped, filepath);
+
+            const before = cmd.substring(0, m.index);
+            const after = cmd.substring(m.index + m[0].length);
+            const prefix = m[1].replace('title ', 'titleraw ');
+            const replacement = `${prefix}{"rawtext":[{"translate":"${key}"}]}`;
+            cmd = `${before}${replacement}${after}`;
+            replaced = true;
+        }
+    }
+
+    cmd = cmd.replace(/("text"\s*:\s*")([^"]+)(")/g, (match, p1, text, p3) => {
+        if (isAlreadyKey(text)) { ctx.referencedKeys.add(text); return match; }
+        const key = makeUniqueKey(`script.${category}.${fileBase}`, ctx.usedKeys);
+        const escaped = escapeLangValue(text);
+        ctx.addKey(key, escaped, filepath);
+        replaced = true;
+        return `"translate":"${key}"`;
+    });
+
+    return [cmd, replaced];
+}
+
+function processJsFile(content, filepath, ctx) {
+    const fileBase = filepath.split('/').pop()
+        .replace(/\.(js|ts|mjs|cjs)$/i, '')
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .toLowerCase();
+
+    let replaced = false;
+
+    for (const [pattern, category] of JS_API_PATTERNS) {
+        const re = new RegExp(pattern.source, pattern.flags);
+        let newContent = '';
+        let lastIndex = 0;
+        let m;
+
+        re.lastIndex = 0;
+        while ((m = re.exec(content)) !== null) {
+            const matchStart = m.index;
+            const matchEnd = m.index + m[0].length;
+            const quote = m[1];
+            const text = m[2];
+
+            // 模板字符串插值
+            if (quote === '`' && text.includes('${')) continue;
+            if (shouldSkipJsText(text)) continue;
+
+            // 拼接检查
+            const tail = content.substring(matchEnd, matchEnd + 5).trimStart();
+            if (tail.startsWith('+') || tail.startsWith('${')) continue;
+
+            let replacement;
+            if (category === 'command') {
+                const [newCmd, changed] = translateCommandString(text, category, fileBase, ctx, filepath);
+                if (!changed) continue;
+                replaced = true;
+                const escapedCmd = quote === '"' ? newCmd.replace(/"/g, '\\"') : newCmd;
+                replacement = m[0].replace(quote + text + quote, `${quote}${escapedCmd}${quote}`);
+            } else {
+                const key = makeUniqueKey(`script.${category}.${fileBase}`, ctx.usedKeys);
+                const escaped = escapeLangValue(text);
+                ctx.addKey(key, escaped, filepath);
+                replaced = true;
+                replacement = m[0].replace(
+                    quote + text + quote,
+                    `{ rawtext: [{ translate: "${key}" }] }`
+                );
+            }
+
+            newContent += content.substring(lastIndex, matchStart) + replacement;
+            lastIndex = matchEnd;
+        }
+        newContent += content.substring(lastIndex);
+        content = newContent;
+    }
+
+    return { content, changed: replaced };
+}
+
+// ================================================================
 //  路径判断
 // ================================================================
 
 function matchDir(rel, ...dirs) {
     const parts = rel.replace(/\\/g, '/').split('/');
-    for (const d of dirs) {
-        if (parts.includes(d)) return true;
-    }
+    for (const d of dirs) if (parts.includes(d)) return true;
     return false;
 }
 
@@ -579,9 +647,7 @@ function shouldSkip(filename, rel) {
     if (['.DS_Store', 'Thumbs.db', 'desktop.ini'].includes(filename)) return true;
     const skipDirs = ['__MACOSX', 'node_modules', '.git', '.vscode'];
     const parts = rel.replace(/\\/g, '/').split('/');
-    for (const p of parts) {
-        if (skipDirs.includes(p)) return true;
-    }
+    for (const p of parts) if (skipDirs.includes(p)) return true;
     return false;
 }
 
@@ -624,18 +690,6 @@ function stripJsonComments(content) {
     return result;
 }
 
-function decodeUnicode(text) {
-    const special = { '\n': '\\n', '\r': '\\r', '\t': '\\t', '\\': '\\\\', '"': '\\"' };
-    const replacer = (match, hex) => {
-        const ch = String.fromCharCode(parseInt(hex, 16));
-        return special[ch] || ch;
-    };
-    text = text.replace(/\\u\{([0-9a-fA-F]+)\}/g, replacer);
-    text = text.replace(/\\u([0-9a-fA-F]{4})/g, replacer);
-    text = text.replace(/\\x([0-9a-fA-F]{2})/g, replacer);
-    return text;
-}
-
 function deobfuscateJson(content) {
     const cleaned = stripJsonComments(content);
     try {
@@ -647,7 +701,7 @@ function deobfuscateJson(content) {
 }
 
 // ================================================================
-//  lang 合并（含 en_US 反向补充）
+//  lang 合并
 // ================================================================
 
 function mergeLang(existing, newEntries) {
@@ -729,9 +783,32 @@ async function processFile(file) {
 
             const filename = name.split('/').pop();
             const rel = name.substring(0, name.lastIndexOf('/')).toLowerCase();
+            const lowerName = filename.toLowerCase();
 
             if (shouldSkip(filename, rel)) continue;
-            if (!filename.toLowerCase().endsWith('.json')) continue;
+
+            // ---- JS 文件 ----
+            if (lowerName.endsWith('.js') || lowerName.endsWith('.ts') ||
+                lowerName.endsWith('.mjs') || lowerName.endsWith('.cjs')) {
+                let content;
+                try {
+                    content = await zip.files[name].async('string');
+                } catch (e) {
+                    log(`[跳过] ${name}: 读取失败`, 'warn');
+                    continue;
+                }
+
+                const { content: newContent, changed } = processJsFile(content, name, ctx);
+                if (changed) {
+                    updatedFiles[name] = newContent;
+                    processedCount++;
+                    log(`[脚本] ${name}`, 'info');
+                }
+                continue;
+            }
+
+            // ---- JSON 文件 ----
+            if (!lowerName.endsWith('.json')) continue;
 
             let content;
             try {
@@ -752,9 +829,8 @@ async function processFile(file) {
             }
 
             let replaced = false;
-            const filenameLower = filename.toLowerCase();
 
-            if (filenameLower === 'manifest.json') {
+            if (lowerName === 'manifest.json') {
                 replaced = processManifest(data, name, ctx);
             } else if (matchDir(rel, 'trading', 'trades', 'trade_tables')) {
                 replaced = processTrading(data, name, ctx);
@@ -780,7 +856,7 @@ async function processFile(file) {
         log(`处理: ${processedCount} 个文件`);
         log(`生成键: ${ctx.langEntries.length} 条`);
 
-        // 写回文件
+        // 写回
         setProgress(80, '写入文件...');
         for (const [path, content] of Object.entries(updatedFiles)) {
             zip.file(path, content);
@@ -794,38 +870,26 @@ async function processFile(file) {
                 const zhPath = `${textsDir}/zh_CN.lang`;
                 const enPath = `${textsDir}/en_US.lang`;
 
-                // 读已有 zh_CN
                 let existingZh = {};
                 const zhFile = zip.file(zhPath);
                 if (zhFile) {
-                    try {
-                        existingZh = parseLang(await zhFile.async('string'));
-                        log(`[lang] 已有 zh_CN: ${Object.keys(existingZh).length} 条`, 'info');
-                    } catch (e) {}
+                    try { existingZh = parseLang(await zhFile.async('string')); } catch (e) {}
                 }
 
-                // 读已有 en_US
                 let existingEn = {};
                 const enFile = zip.file(enPath);
                 if (enFile) {
-                    try {
-                        existingEn = parseLang(await enFile.async('string'));
-                        log(`[lang] 已有 en_US: ${Object.keys(existingEn).length} 条`, 'info');
-                    } catch (e) {}
+                    try { existingEn = parseLang(await enFile.async('string')); } catch (e) {}
                 }
 
-                // 分离 pack.* 键
                 const packEntries = ctx.langEntries.filter(([k]) => k.startsWith('pack.'));
                 const otherEntries = ctx.langEntries.filter(([k]) => !k.startsWith('pack.'));
 
-                // 合并
                 const [merged, added, skipped] = mergeLang(existingZh, [...otherEntries, ...packEntries]);
                 const enFilled = fillFromEnUs(merged, existingEn);
 
                 zip.file(zhPath, langToString(merged));
-                log(`[lang] 新增 ${added} 条，跳过已有 ${skipped} 条`, 'info');
-                log(`[lang] 从 en_US 反向补充 ${enFilled} 条`, 'info');
-                log(`[lang] 最终 ${Object.keys(merged).length} 条 → ${zhPath}`, 'info');
+                log(`[lang] ${zhPath}: 新增 ${added}，跳过 ${skipped}，从 en_US 补 ${enFilled}`, 'info');
 
                 // languages.json
                 const langJsonPath = `${textsDir}/languages.json`;
@@ -840,7 +904,6 @@ async function processFile(file) {
                 if (!langs.includes('zh_CN')) {
                     langs.push('zh_CN');
                     zip.file(langJsonPath, JSON.stringify(langs, null, 2));
-                    log(`[languages.json] 添加 zh_CN`, 'info');
                 }
             }
         }
@@ -857,7 +920,7 @@ async function processFile(file) {
         state.resultName = `${state.originalName}_zh_modified.mcaddon`;
 
         setProgress(100, '完成！');
-        log(`✅ 处理完成，输出: ${state.resultName}`, 'info');
+        log(`✅ 处理完成: ${state.resultName}`, 'info');
 
         downloadLogBtn.disabled = false;
         downloadResultBtn.disabled = false;
