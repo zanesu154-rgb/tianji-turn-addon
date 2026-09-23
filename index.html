@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>栈主的附加包汉化工具</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 标题 -->
+        <header class="header">
+            <h1>栈主的附加包汉化工具</h1>
+        </header>
+
+        <!-- 上传区 -->
+        <div id="drop-zone" class="drop-zone">
+            <div class="plus-icon">+</div>
+            <p class="drop-text">点击上传 mcaddon 文件</p>
+            <p class="drop-hint">或拖拽到此处</p>
+            <input type="file" id="file-input" accept=".mcaddon,.zip" hidden>
+        </div>
+
+        <!-- 输出区 -->
+        <div class="output-section">
+            <div class="output-header">
+                <span>转换进度</span>
+                <span id="progress-text">等待中...</span>
+            </div>
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+        </div>
+
+        <!-- 下载按钮 -->
+        <div class="download-section">
+            <button id="download-log" class="btn btn-secondary" disabled>
+                📄 下载日志
+            </button>
+            <button id="download-result" class="btn btn-primary" disabled>
+                📦 下载转换后文件
+            </button>
+        </div>
+
+        <!-- 日志区 -->
+        <div id="log" class="log"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
