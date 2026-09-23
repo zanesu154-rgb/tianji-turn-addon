@@ -1,16 +1,14 @@
 /* ================================================================
- *  栈主的附加包汉化工具
- *  纯前端，浏览器内处理 .mcaddon
+ *  栈主的附加包汉化工具 - 第二版
+ *  新增：对话/交易/UI/JS + en_US 反向补充 + 合并已有 zh_CN
  * ================================================================ */
 
-// ---- 全局状态 ----
 const state = {
     originalFile: null,
     originalName: '',
     resultBlob: null,
     resultName: '',
     logContent: '',
-    progress: 0,
 };
 
 // ---- DOM ----
@@ -29,7 +27,6 @@ const logEl = document.getElementById('log');
 function log(msg, type = 'info') {
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
     state.logContent += line + '\n';
-
     logEl.classList.add('visible');
     const span = document.createElement('span');
     span.className = `log-${type}`;
@@ -39,7 +36,6 @@ function log(msg, type = 'info') {
 }
 
 function setProgress(percent, text) {
-    state.progress = percent;
     progressFill.style.width = `${percent}%`;
     if (text) progressText.textContent = text;
 }
@@ -70,20 +66,34 @@ function makeUniqueKey(baseKey, usedKeys) {
     return key;
 }
 
+function parseLang(content) {
+    const result = {};
+    if (!content) return result;
+    for (const line of content.split('\n')) {
+        const trimmed = line.replace(/\r$/, '');
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq === -1) continue;
+        const key = trimmed.substring(0, eq);
+        const value = trimmed.substring(eq + 1);
+        result[key] = value;
+    }
+    return result;
+}
+
 // ================================================================
 //  处理上下文
 // ================================================================
 
 class ProcessContext {
     constructor() {
-        this.langEntries = [];      // [(key, value)]
+        this.langEntries = [];
         this.usedKeys = new Set();
         this.referencedKeys = new Set();
         this.logger = {
             logKey: (k, v, f) => log(`  键: ${k}=${v}`, 'info'),
             logProcessed: (f, type) => log(`[${type}] ${f}`, 'info'),
             logSkipped: (f, reason) => log(`[跳过] ${f}: ${reason}`, 'warn'),
-            logDeobfuscated: (f, type) => log(`[反混淆-${type}] ${f}`, 'info'),
         };
     }
 
@@ -97,17 +107,11 @@ class ProcessContext {
 //  核心：_replace_field
 // ================================================================
 
-/**
- * 替换 container[fieldName]。
- * useRawtext=false → 纯字符串
- * useRawtext=true  → RawText
- */
 function replaceField(container, fieldName, baseKey, ctx, filepath, useRawtext = false) {
     if (!container || typeof container !== 'object') return false;
 
     const value = container[fieldName];
 
-    // 已是 rawtext → 跳过
     if (value && typeof value === 'object' && 'rawtext' in value) {
         const raw = value.rawtext || [];
         if (raw[0] && raw[0].translate) {
@@ -157,21 +161,109 @@ function replaceField(container, fieldName, baseKey, ctx, filepath, useRawtext =
 }
 
 // ================================================================
+//  命令处理：title → titleraw
+// ================================================================
+
+const SELECTOR = '@[a-z](?:\\[[^\\]]*\\])?';
+const TITLE_RE = new RegExp(
+    `(title\\s+${SELECTOR}\\s+(?:actionbar|title|subtitle)\\s+)(.+?)(?=;|$)`,
+    's'
+);
+
+function translateCommand(cmd, identifier, ctx, filepath) {
+    let replaced = false;
+
+    // title → titleraw
+    const m = TITLE_RE.exec(cmd);
+    if (m) {
+        const text = m[2].trim();
+        if (!isAlreadyKey(text) && !text.startsWith('{')) {
+            const key = makeUniqueKey(`entity.${identifier}.message`, ctx.usedKeys);
+            const escaped = escapeLangValue(text);
+            ctx.addKey(key, escaped, filepath);
+
+            const before = cmd.substring(0, m.index);
+            const after = cmd.substring(m.index + m[0].length);
+            const prefix = m[1].replace('title ', 'titleraw ');
+            const replacement = `${prefix}{"rawtext":[{"translate":"${key}"}]}`;
+            cmd = `${before}${replacement}${after}`;
+            replaced = true;
+        }
+    }
+
+    // tellraw 的 "text":"..."
+    cmd = cmd.replace(/("text"\s*:\s*")([^"]+)(")/g, (match, p1, text, p3) => {
+        if (isAlreadyKey(text)) {
+            ctx.referencedKeys.add(text);
+            return match;
+        }
+        const key = makeUniqueKey(`entity.${identifier}.message`, ctx.usedKeys);
+        const escaped = escapeLangValue(text);
+        ctx.addKey(key, escaped, filepath);
+        replaced = true;
+        return `"translate":"${key}"`;
+    });
+
+    return [cmd, replaced];
+}
+
+function scanCommands(obj, identifier, ctx, filepath) {
+    let replaced = false;
+
+    function scan(node) {
+        if (Array.isArray(node)) {
+            for (const item of node) scan(item);
+            return;
+        }
+        if (!node || typeof node !== 'object') return;
+
+        for (const [key, value] of Object.entries(node)) {
+            if (key === 'command') {
+                if (typeof value === 'string') {
+                    const [newCmd, changed] = translateCommand(value, identifier, ctx, filepath);
+                    if (changed) {
+                        node[key] = newCmd;
+                        replaced = true;
+                    }
+                } else if (Array.isArray(value)) {
+                    const newList = [];
+                    let changed = false;
+                    for (const item of value) {
+                        if (typeof item === 'string') {
+                            const [newCmd, c] = translateCommand(item, identifier, ctx, filepath);
+                            if (c) changed = true;
+                            newList.push(newCmd);
+                        } else {
+                            newList.push(item);
+                        }
+                    }
+                    if (changed) {
+                        node[key] = newList;
+                        replaced = true;
+                    }
+                }
+            } else {
+                scan(value);
+            }
+        }
+    }
+
+    scan(obj);
+    return replaced;
+}
+
+// ================================================================
 //  处理器：物品
 // ================================================================
 
 function processItem(json, filepath, ctx) {
     const item = json['minecraft:item'];
     if (!item) return false;
-
     const identifier = item.description?.identifier;
     if (!identifier) return false;
-
     const components = item.components || {};
-    return replaceField(
-        components, 'minecraft:display_name',
-        `item.${identifier}.name`, ctx, filepath, false
-    );
+    return replaceField(components, 'minecraft:display_name',
+        `item.${identifier}.name`, ctx, filepath, false);
 }
 
 // ================================================================
@@ -181,15 +273,11 @@ function processItem(json, filepath, ctx) {
 function processBlock(json, filepath, ctx) {
     const block = json['minecraft:block'];
     if (!block) return false;
-
     const identifier = block.description?.identifier;
     if (!identifier) return false;
-
     const components = block.components || {};
-    return replaceField(
-        components, 'minecraft:display_name',
-        `tile.${identifier}.name`, ctx, filepath, false
-    );
+    return replaceField(components, 'minecraft:display_name',
+        `tile.${identifier}.name`, ctx, filepath, false);
 }
 
 // ================================================================
@@ -199,24 +287,19 @@ function processBlock(json, filepath, ctx) {
 function processEntity(json, filepath, ctx) {
     const entity = json['minecraft:entity'];
     if (!entity) return false;
-
     const identifier = entity.description?.identifier;
     if (!identifier) return false;
 
     let replaced = false;
     const baseKey = `entity.${identifier}.name`;
-
     const components = entity.components || {};
 
-    // boss.name
     const boss = components['minecraft:boss'];
     if (boss && typeof boss === 'object') {
         if (replaceField(boss, 'name', baseKey, ctx, filepath, false)) replaced = true;
     }
 
-    // component_groups 里的 boss
-    const groups = entity.component_groups || {};
-    for (const groupData of Object.values(groups)) {
+    for (const groupData of Object.values(entity.component_groups || {})) {
         if (!groupData || typeof groupData !== 'object') continue;
         const b = groupData['minecraft:boss'];
         if (b && typeof b === 'object') {
@@ -224,7 +307,6 @@ function processEntity(json, filepath, ctx) {
         }
     }
 
-    // nameable.name
     const nameable = components['minecraft:nameable'];
     if (nameable && typeof nameable === 'object') {
         if (replaceField(nameable, 'name', baseKey, ctx, filepath, false)) replaced = true;
@@ -246,11 +328,206 @@ function processEntity(json, filepath, ctx) {
     // trade_table.display_name
     const tradeTable = components['minecraft:trade_table'];
     if (tradeTable && typeof tradeTable === 'object') {
-        if (replaceField(tradeTable, 'display_name', `trade.${identifier}.name`, ctx, filepath, false)) {
-            replaced = true;
+        if (replaceField(tradeTable, 'display_name',
+            `trade.${identifier}.name`, ctx, filepath, false)) replaced = true;
+    }
+
+    // 命令
+    if (scanCommands(json, identifier, ctx, filepath)) replaced = true;
+
+    return replaced;
+}
+
+// ================================================================
+//  处理器：对话
+// ================================================================
+
+function processDialogue(json, filepath, ctx) {
+    const dialogue = json['minecraft:npc_dialogue'];
+    if (!dialogue) return false;
+
+    const scenes = dialogue.scenes;
+    if (!Array.isArray(scenes)) return false;
+
+    let replaced = false;
+    const fileBase = filepath.split('/').pop().replace('.json', '');
+
+    for (const scene of scenes) {
+        if (!scene || typeof scene !== 'object') continue;
+        const sceneTag = scene.scene_tag || fileBase;
+
+        if (replaceField(scene, 'npc_name', `dialogue.${sceneTag}.npc_name`,
+            ctx, filepath, true)) replaced = true;
+        if (replaceField(scene, 'text', `dialogue.${sceneTag}.text`,
+            ctx, filepath, true)) replaced = true;
+
+        const buttons = scene.buttons || [];
+        for (let i = 0; i < buttons.length; i++) {
+            const button = buttons[i];
+            if (!button || typeof button !== 'object') continue;
+
+            if (replaceField(button, 'name', `dialogue.${sceneTag}.button_${i}`,
+                ctx, filepath, true)) replaced = true;
+
+            if (Array.isArray(button.commands)) {
+                const newList = [];
+                let changed = false;
+                for (const item of button.commands) {
+                    if (typeof item === 'string') {
+                        const [newCmd, c] = translateCommand(item, sceneTag, ctx, filepath);
+                        if (c) changed = true;
+                        newList.push(newCmd);
+                    } else {
+                        newList.push(item);
+                    }
+                }
+                if (changed) {
+                    button.commands = newList;
+                    replaced = true;
+                }
+            }
+        }
+
+        if (Array.isArray(scene.on_close_commands)) {
+            const newList = [];
+            let changed = false;
+            for (const item of scene.on_close_commands) {
+                if (typeof item === 'string') {
+                    const [newCmd, c] = translateCommand(item, sceneTag, ctx, filepath);
+                    if (c) changed = true;
+                    newList.push(newCmd);
+                } else {
+                    newList.push(item);
+                }
+            }
+            if (changed) {
+                scene.on_close_commands = newList;
+                replaced = true;
+            }
         }
     }
 
+    return replaced;
+}
+
+// ================================================================
+//  处理器：交易
+// ================================================================
+
+function processLore(obj, fileBase, ctx, filepath) {
+    const lore = obj.lore;
+    if (!Array.isArray(lore)) return false;
+
+    let replaced = false;
+    let counter = 0;
+
+    for (let i = 0; i < lore.length; i++) {
+        const item = lore[i];
+
+        if (typeof item === 'string') {
+            if (!item.trim() || isAlreadyKey(item)) continue;
+            const baseKey = `trade.${fileBase}.lore_${counter}`;
+            counter++;
+            const key = makeUniqueKey(baseKey, ctx.usedKeys);
+            ctx.addKey(key, escapeLangValue(item), filepath);
+            lore[i] = key;
+            replaced = true;
+        } else if (item && typeof item === 'object' && 'rawtext' in item) {
+            const raw = item.rawtext || [];
+            for (let j = 0; j < raw.length; j++) {
+                const node = raw[j];
+                if (!node || typeof node !== 'object') continue;
+                if ('translate' in node) {
+                    ctx.referencedKeys.add(node.translate);
+                    continue;
+                }
+                if (typeof node.text === 'string') {
+                    const text = node.text;
+                    if (!text.trim() || isAlreadyKey(text)) continue;
+                    const baseKey = `trade.${fileBase}.lore_${counter}`;
+                    counter++;
+                    const key = makeUniqueKey(baseKey, ctx.usedKeys);
+                    ctx.addKey(key, escapeLangValue(text), filepath);
+
+                    const newNode = { translate: key };
+                    if (node.with) newNode.with = node.with;
+                    raw[j] = newNode;
+                    replaced = true;
+                }
+            }
+        }
+    }
+
+    return replaced;
+}
+
+function processTrading(json, filepath, ctx) {
+    let replaced = false;
+    const fileBase = filepath.split('/').pop().replace('.json', '');
+
+    const tradeTable = json['minecraft:trade_table'];
+    if (tradeTable && typeof tradeTable === 'object') {
+        if (replaceField(tradeTable, 'display_name',
+            `trade.${fileBase}.name`, ctx, filepath, false)) replaced = true;
+    }
+
+    function scan(obj) {
+        if (Array.isArray(obj)) {
+            for (const item of obj) scan(item);
+            return;
+        }
+        if (!obj || typeof obj !== 'object') return;
+
+        const func = obj.function;
+        if (func === 'set_name') {
+            if (replaceField(obj, 'name', `trade.${fileBase}.set_name`,
+                ctx, filepath, false)) replaced = true;
+        } else if (func === 'set_lore') {
+            if (processLore(obj, fileBase, ctx, filepath)) replaced = true;
+        }
+
+        for (const [key, value] of Object.entries(obj)) {
+            if (key !== 'name' && key !== 'lore') scan(value);
+        }
+    }
+
+    scan(json);
+    return replaced;
+}
+
+// ================================================================
+//  处理器：UI
+// ================================================================
+
+function processUI(json, filepath, ctx) {
+    let replaced = false;
+    const uiBase = filepath.split('/').pop().replace('.json', '');
+    let counter = 0;
+
+    function scan(obj) {
+        if (Array.isArray(obj)) {
+            for (const item of obj) scan(item);
+            return;
+        }
+        if (!obj || typeof obj !== 'object') return;
+
+        for (const [key, value] of Object.entries(obj)) {
+            if (key === 'text' && typeof value === 'string') {
+                if (value.startsWith('$') || value.startsWith('#')) continue;
+                if (isAlreadyKey(value)) {
+                    ctx.referencedKeys.add(value);
+                    continue;
+                }
+                const baseKey = `ui.${uiBase}.text_${counter}`;
+                counter++;
+                if (replaceField(obj, 'text', baseKey, ctx, filepath, true)) replaced = true;
+            } else {
+                scan(value);
+            }
+        }
+    }
+
+    scan(json);
     return replaced;
 }
 
@@ -286,7 +563,7 @@ function processManifest(json, filepath, ctx) {
 }
 
 // ================================================================
-//  文件路径判断
+//  路径判断
 // ================================================================
 
 function matchDir(rel, ...dirs) {
@@ -316,88 +593,43 @@ function stripJsonComments(content) {
     let result = '';
     let i = 0;
     const n = content.length;
-    let inLineComment = false;
-    let inBlockComment = false;
-    let inString = false;
-    let stringChar = null;
+    let inLineComment = false, inBlockComment = false, inString = false, stringChar = null;
 
     while (i < n) {
         const c = content[i];
 
         if (inLineComment) {
-            if (c === '\n') {
-                inLineComment = false;
-                result += c;
-            }
-            i++;
-            continue;
+            if (c === '\n') { inLineComment = false; result += c; }
+            i++; continue;
         }
-
         if (inBlockComment) {
             if (c === '*' && i + 1 < n && content[i + 1] === '/') {
-                inBlockComment = false;
-                i += 2;
-                continue;
+                inBlockComment = false; i += 2; continue;
             }
-            i++;
-            continue;
+            i++; continue;
         }
-
         if (inString) {
-            if (c === '\\' && i + 1 < n) {
-                result += c + content[i + 1];
-                i += 2;
-                continue;
-            }
-            if (c === stringChar) {
-                inString = false;
-                stringChar = null;
-            }
-            result += c;
-            i++;
-            continue;
+            if (c === '\\' && i + 1 < n) { result += c + content[i + 1]; i += 2; continue; }
+            if (c === stringChar) { inString = false; stringChar = null; }
+            result += c; i++; continue;
         }
-
         if (c === '/' && i + 1 < n) {
-            if (content[i + 1] === '/') {
-                inLineComment = true;
-                i += 2;
-                continue;
-            }
-            if (content[i + 1] === '*') {
-                inBlockComment = true;
-                i += 2;
-                continue;
-            }
+            if (content[i + 1] === '/') { inLineComment = true; i += 2; continue; }
+            if (content[i + 1] === '*') { inBlockComment = true; i += 2; continue; }
         }
+        if (c === '"' || c === "'") { inString = true; stringChar = c; result += c; i++; continue; }
 
-        if (c === '"' || c === "'") {
-            inString = true;
-            stringChar = c;
-            result += c;
-            i++;
-            continue;
-        }
-
-        result += c;
-        i++;
+        result += c; i++;
     }
-
     return result;
 }
 
 function decodeUnicode(text) {
-    const special = {
-        '\n': '\\n', '\r': '\\r', '\t': '\\t',
-        '\\': '\\\\', '"': '\\"',
-    };
-
+    const special = { '\n': '\\n', '\r': '\\r', '\t': '\\t', '\\': '\\\\', '"': '\\"' };
     const replacer = (match, hex) => {
-        const code = parseInt(hex, 16);
-        const ch = String.fromCharCode(code);
+        const ch = String.fromCharCode(parseInt(hex, 16));
         return special[ch] || ch;
     };
-
     text = text.replace(/\\u\{([0-9a-fA-F]+)\}/g, replacer);
     text = text.replace(/\\u([0-9a-fA-F]{4})/g, replacer);
     text = text.replace(/\\x([0-9a-fA-F]{2})/g, replacer);
@@ -412,6 +644,42 @@ function deobfuscateJson(content) {
     } catch (e) {
         return { data: null, changed: false };
     }
+}
+
+// ================================================================
+//  lang 合并（含 en_US 反向补充）
+// ================================================================
+
+function mergeLang(existing, newEntries) {
+    const merged = { ...existing };
+    let added = 0, skipped = 0;
+    for (const [key, value] of newEntries) {
+        if (key in merged) skipped++;
+        else { merged[key] = value; added++; }
+    }
+    return [merged, added, skipped];
+}
+
+function shouldCopy(key, value) {
+    if (!value) return false;
+    if (value === key) return false;
+    if (value.startsWith('#')) return false;
+    return true;
+}
+
+function fillFromEnUs(merged, enUs) {
+    let filled = 0;
+    for (const [key, value] of Object.entries(enUs)) {
+        if (!(key in merged) && shouldCopy(key, value)) {
+            merged[key] = value;
+            filled++;
+        }
+    }
+    return filled;
+}
+
+function langToString(entries) {
+    return Object.entries(entries).map(([k, v]) => `${k}=${v}`).join('\n');
 }
 
 // ================================================================
@@ -434,29 +702,26 @@ async function processFile(file) {
     log(`文件大小: ${(file.size / 1024).toFixed(1)} KB`);
 
     try {
-        // ---- 1. 读取 zip ----
-        setProgress(5, '读取压缩包...');
         const zip = await JSZip.loadAsync(file);
-
-        const allFiles = Object.keys(zip.files).filter(name => !zip.files[name].dir);
+        const allFiles = Object.keys(zip.files).filter(n => !zip.files[n].dir);
         log(`共 ${allFiles.length} 个文件`);
 
-        // ---- 2. 反混淆 + 扫描 ----
         const ctx = new ProcessContext();
-        const updatedFiles = {};   // {path: content}
+        const updatedFiles = {};
         let processedCount = 0;
         let deobCount = 0;
 
-        // 找到包根目录（含 manifest.json 的）
+        // 找包根
         const packRoots = [];
         for (const name of allFiles) {
-            if (name.endsWith('/manifest.json') || name === 'manifest.json') {
+            if (name.endsWith('manifest.json')) {
                 const dir = name.substring(0, name.lastIndexOf('/'));
                 packRoots.push(dir);
             }
         }
         log(`找到 ${packRoots.length} 个包`);
 
+        // 遍历
         for (let i = 0; i < allFiles.length; i++) {
             const name = allFiles[i];
             const percent = 10 + Math.floor((i / allFiles.length) * 70);
@@ -476,7 +741,6 @@ async function processFile(file) {
                 continue;
             }
 
-            // 反混淆
             const { data, changed } = deobfuscateJson(content);
             if (changed) {
                 deobCount++;
@@ -487,17 +751,23 @@ async function processFile(file) {
                 continue;
             }
 
-            // 扫描
             let replaced = false;
             const filenameLower = filename.toLowerCase();
+
             if (filenameLower === 'manifest.json') {
                 replaced = processManifest(data, name, ctx);
+            } else if (matchDir(rel, 'trading', 'trades', 'trade_tables')) {
+                replaced = processTrading(data, name, ctx);
             } else if (matchDir(rel, 'items', 'item', 'item_definitions')) {
                 replaced = processItem(data, name, ctx);
             } else if (matchDir(rel, 'blocks', 'block', 'block_definitions')) {
                 replaced = processBlock(data, name, ctx);
             } else if (matchDir(rel, 'entities', 'entity')) {
                 replaced = processEntity(data, name, ctx);
+            } else if (matchDir(rel, 'dialogue', 'dialogues')) {
+                replaced = processDialogue(data, name, ctx);
+            } else if (matchDir(rel, 'ui')) {
+                replaced = processUI(data, name, ctx);
             }
 
             if (replaced || changed) {
@@ -510,31 +780,60 @@ async function processFile(file) {
         log(`处理: ${processedCount} 个文件`);
         log(`生成键: ${ctx.langEntries.length} 条`);
 
-        // ---- 3. 写入更新后的文件 ----
+        // 写回文件
         setProgress(80, '写入文件...');
         for (const [path, content] of Object.entries(updatedFiles)) {
             zip.file(path, content);
         }
 
-        // ---- 4. 生成 lang ----
+        // 生成 lang
         setProgress(85, '生成 lang...');
         if (ctx.langEntries.length > 0) {
-            const langContent = ctx.langEntries.map(([k, v]) => `${k}=${v}`).join('\n');
-
-            // 找 pack roots，写到 texts/zh_CN.lang
             for (const root of packRoots) {
                 const textsDir = root ? `${root}/texts` : 'texts';
-                zip.file(`${textsDir}/zh_CN.lang`, langContent);
-                log(`[lang] 写入 ${textsDir}/zh_CN.lang`, 'info');
+                const zhPath = `${textsDir}/zh_CN.lang`;
+                const enPath = `${textsDir}/en_US.lang`;
 
-                // 更新 languages.json
+                // 读已有 zh_CN
+                let existingZh = {};
+                const zhFile = zip.file(zhPath);
+                if (zhFile) {
+                    try {
+                        existingZh = parseLang(await zhFile.async('string'));
+                        log(`[lang] 已有 zh_CN: ${Object.keys(existingZh).length} 条`, 'info');
+                    } catch (e) {}
+                }
+
+                // 读已有 en_US
+                let existingEn = {};
+                const enFile = zip.file(enPath);
+                if (enFile) {
+                    try {
+                        existingEn = parseLang(await enFile.async('string'));
+                        log(`[lang] 已有 en_US: ${Object.keys(existingEn).length} 条`, 'info');
+                    } catch (e) {}
+                }
+
+                // 分离 pack.* 键
+                const packEntries = ctx.langEntries.filter(([k]) => k.startsWith('pack.'));
+                const otherEntries = ctx.langEntries.filter(([k]) => !k.startsWith('pack.'));
+
+                // 合并
+                const [merged, added, skipped] = mergeLang(existingZh, [...otherEntries, ...packEntries]);
+                const enFilled = fillFromEnUs(merged, existingEn);
+
+                zip.file(zhPath, langToString(merged));
+                log(`[lang] 新增 ${added} 条，跳过已有 ${skipped} 条`, 'info');
+                log(`[lang] 从 en_US 反向补充 ${enFilled} 条`, 'info');
+                log(`[lang] 最终 ${Object.keys(merged).length} 条 → ${zhPath}`, 'info');
+
+                // languages.json
                 const langJsonPath = `${textsDir}/languages.json`;
                 let langs = ['en_US'];
-                const existing = zip.file(langJsonPath);
-                if (existing) {
+                const langFile = zip.file(langJsonPath);
+                if (langFile) {
                     try {
-                        const content = await existing.async('string');
-                        langs = JSON.parse(content);
+                        langs = JSON.parse(await langFile.async('string'));
                         if (!Array.isArray(langs)) langs = ['en_US'];
                     } catch (e) {}
                 }
@@ -546,7 +845,7 @@ async function processFile(file) {
             }
         }
 
-        // ---- 5. 打包 ----
+        // 打包
         setProgress(90, '打包中...');
         const blob = await zip.generateAsync({
             type: 'blob',
