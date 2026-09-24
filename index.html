@@ -10,22 +10,30 @@
     <div class="container">
         <!-- 标题 -->
         <header class="header">
+            <div class="logo">🌏</div>
             <h1>栈主的附加包汉化工具</h1>
+            <p class="subtitle">一键汉化 Minecraft 基岩版附加包</p>
         </header>
 
         <!-- 上传区 -->
         <div id="drop-zone" class="drop-zone">
-            <div class="plus-icon">+</div>
-            <p class="drop-text">点击上传 mcaddon 文件</p>
-            <p class="drop-hint">或拖拽到此处</p>
+            <div class="drop-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+            </div>
+            <p class="drop-title">点击上传 mcaddon 文件</p>
+            <p class="drop-hint">或拖拽文件到此处</p>
             <input type="file" id="file-input" accept=".mcaddon,.zip" hidden>
         </div>
 
         <!-- 输出区 -->
         <div class="output-section">
             <div class="output-header">
-                <span>转换进度</span>
-                <span id="progress-text">等待中...</span>
+                <span class="output-label">转换进度</span>
+                <span id="progress-text" class="output-status">等待中...</span>
             </div>
             <div class="progress-bar">
                 <div id="progress-fill" class="progress-fill"></div>
@@ -35,15 +43,35 @@
         <!-- 下载按钮 -->
         <div class="download-section">
             <button id="download-log" class="btn btn-secondary" disabled>
-                📄 下载日志
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                下载日志
             </button>
             <button id="download-result" class="btn btn-primary" disabled>
-                📦 下载转换后文件
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                下载转换后文件
             </button>
         </div>
 
-        <!-- 日志区 -->
-        <div id="log" class="log"></div>
+        <!-- 日志 -->
+        <div class="log-section">
+            <div class="log-header">
+                <span class="log-label">处理日志</span>
+                <button id="toggle-log" class="toggle-btn">展开</button>
+            </div>
+            <div id="log" class="log collapsed"></div>
+        </div>
+
+        <!-- 页脚 -->
+        <footer class="footer">
+            <p>由 <a href="https://github.com/zanesu154-rgb" target="_blank">栈主</a> 制作 · 纯前端处理，文件不上传</p>
+        </footer>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>

@@ -24,10 +24,19 @@ const logEl = document.getElementById('log');
 //  工具函数
 // ================================================================
 
+let logAutoExpanded = false;
+
 function log(msg, type = 'info') {
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
     state.logContent += line + '\n';
     logEl.classList.add('visible');
+
+    if (!logAutoExpanded) {
+        logEl.classList.remove('collapsed');
+        toggleLogBtn.textContent = '收起';
+        logAutoExpanded = true;
+    }
+
     const span = document.createElement('span');
     span.className = `log-${type}`;
     span.textContent = line + '\n';
@@ -913,11 +922,11 @@ async function processFile(file) {
 
                 let existingZh = {};
                 const zhFile = zip.file(zhPath);
-                if (zhFile) { try { existingZh = parseLang(await zhFile.async('string')); } catch (e) {} }
+                if (zhFile) { try { existingZh = parseLang(await zhFile.async('string')); } catch (e) { } }
 
                 let existingEn = {};
                 const enFile = zip.file(enPath);
-                if (enFile) { try { existingEn = parseLang(await enFile.async('string')); } catch (e) {} }
+                if (enFile) { try { existingEn = parseLang(await enFile.async('string')); } catch (e) { } }
 
                 const packEntries = ctx.langEntries.filter(([k]) => k.startsWith('pack.'));
                 const otherEntries = ctx.langEntries.filter(([k]) => !k.startsWith('pack.'));
@@ -935,7 +944,7 @@ async function processFile(file) {
                     try {
                         langs = JSON.parse(await langFile.async('string'));
                         if (!Array.isArray(langs)) langs = ['en_US'];
-                    } catch (e) {}
+                    } catch (e) { }
                 }
                 if (!langs.includes('zh_CN')) {
                     langs.push('zh_CN');
@@ -1020,4 +1029,16 @@ dropZone.addEventListener('drop', async (e) => {
     dropZone.classList.remove('dragover');
     const file = e.dataTransfer.files[0];
     if (file) await processFile(file);
+});
+
+// ================================================================
+//  日志折叠
+// ================================================================
+
+const toggleLogBtn = document.getElementById('toggle-log');
+
+toggleLogBtn.addEventListener('click', () => {
+    const log = document.getElementById('log');
+    log.classList.toggle('collapsed');
+    toggleLogBtn.textContent = log.classList.contains('collapsed') ? '展开' : '收起';
 });
