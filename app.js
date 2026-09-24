@@ -1,5 +1,6 @@
 /* ================================================================
- *  栈主的附加包汉化工具 - 第二版 + JS 处理
+ *  栈主的附加包汉化工具 - 第四版
+ *  JSON + JS + mcfunction + 空键过滤
  * ================================================================ */
 
 const state = {
@@ -44,6 +45,11 @@ function isAlreadyKey(text) {
     if (text.includes(' ')) return false;
     if (/[\u4e00-\u9fff]/.test(text)) return false;
     return /^[a-z0-9_:]+(\.[a-z0-9_:]+)+$/.test(text);
+}
+
+function isEmptyText(text) {
+    if (typeof text !== 'string') return true;
+    return text.trim() === '';
 }
 
 function escapeLangValue(value) {
@@ -112,11 +118,13 @@ function replaceField(container, fieldName, baseKey, ctx, filepath, useRawtext =
     let current, isStringForm;
     if (typeof value === 'string') {
         if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); return false; }
+        if (isEmptyText(value)) return false;   // ← 空键过滤
         current = value;
         isStringForm = true;
     } else if (value && typeof value === 'object' && 'value' in value) {
         if (typeof value.value !== 'string') return false;
         if (isAlreadyKey(value.value)) { ctx.referencedKeys.add(value.value); return false; }
+        if (isEmptyText(value.value)) return false;   // ← 空键过滤
         current = value.value;
         isStringForm = false;
     } else {
@@ -145,7 +153,7 @@ function replaceField(container, fieldName, baseKey, ctx, filepath, useRawtext =
 
 const SELECTOR = '@[a-z](?:\\[[^\\]]*\\])?';
 
-function translateCommand(cmd, identifier, ctx, filepath) {
+function translateCommand(cmd, prefix, ctx, filepath, keyPrefix = 'entity') {
     let replaced = false;
     const titleRe = new RegExp(
         `(title\\s+${SELECTOR}\\s+(?:actionbar|title|subtitle)\\s+)(.+?)(?=;|$)`,
@@ -155,15 +163,15 @@ function translateCommand(cmd, identifier, ctx, filepath) {
     const m = titleRe.exec(cmd);
     if (m) {
         const text = m[2].trim();
-        if (!isAlreadyKey(text) && !text.startsWith('{')) {
-            const key = makeUniqueKey(`entity.${identifier}.message`, ctx.usedKeys);
+        if (!isAlreadyKey(text) && !text.startsWith('{') && !isEmptyText(text)) {
+            const key = makeUniqueKey(`${keyPrefix}.${prefix}.message`, ctx.usedKeys);
             const escaped = escapeLangValue(text);
             ctx.addKey(key, escaped, filepath);
 
             const before = cmd.substring(0, m.index);
             const after = cmd.substring(m.index + m[0].length);
-            const prefix = m[1].replace('title ', 'titleraw ');
-            const replacement = `${prefix}{"rawtext":[{"translate":"${key}"}]}`;
+            const prefixCmd = m[1].replace('title ', 'titleraw ');
+            const replacement = `${prefixCmd}{"rawtext":[{"translate":"${key}"}]}`;
             cmd = `${before}${replacement}${after}`;
             replaced = true;
         }
@@ -171,7 +179,8 @@ function translateCommand(cmd, identifier, ctx, filepath) {
 
     cmd = cmd.replace(/("text"\s*:\s*")([^"]+)(")/g, (match, p1, text, p3) => {
         if (isAlreadyKey(text)) { ctx.referencedKeys.add(text); return match; }
-        const key = makeUniqueKey(`entity.${identifier}.message`, ctx.usedKeys);
+        if (isEmptyText(text)) return match;   // ← 空键过滤
+        const key = makeUniqueKey(`${keyPrefix}.${prefix}.message`, ctx.usedKeys);
         const escaped = escapeLangValue(text);
         ctx.addKey(key, escaped, filepath);
         replaced = true;
@@ -373,7 +382,7 @@ function processLore(obj, fileBase, ctx, filepath) {
         const item = lore[i];
 
         if (typeof item === 'string') {
-            if (!item.trim() || isAlreadyKey(item)) continue;
+            if (isEmptyText(item) || isAlreadyKey(item)) continue;   // ← 空键过滤
             const key = makeUniqueKey(`trade.${fileBase}.lore_${counter}`, ctx.usedKeys);
             counter++;
             ctx.addKey(key, escapeLangValue(item), filepath);
@@ -387,7 +396,7 @@ function processLore(obj, fileBase, ctx, filepath) {
                 if ('translate' in node) { ctx.referencedKeys.add(node.translate); continue; }
                 if (typeof node.text === 'string') {
                     const text = node.text;
-                    if (!text.trim() || isAlreadyKey(text)) continue;
+                    if (isEmptyText(text) || isAlreadyKey(text)) continue;   // ← 空键过滤
                     const key = makeUniqueKey(`trade.${fileBase}.lore_${counter}`, ctx.usedKeys);
                     counter++;
                     ctx.addKey(key, escapeLangValue(text), filepath);
@@ -450,6 +459,7 @@ function processUI(json, filepath, ctx) {
         for (const [key, value] of Object.entries(obj)) {
             if (key === 'text' && typeof value === 'string') {
                 if (value.startsWith('$') || value.startsWith('#')) continue;
+                if (isEmptyText(value)) continue;   // ← 空键过滤
                 if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
                 const baseKey = `ui.${uiBase}.text_${counter}`;
                 counter++;
@@ -472,7 +482,7 @@ function processManifest(json, filepath, ctx) {
 
     let replaced = false;
 
-    if (typeof header.name === 'string' && !isAlreadyKey(header.name)) {
+    if (typeof header.name === 'string' && !isAlreadyKey(header.name) && !isEmptyText(header.name)) {
         if (!ctx.usedKeys.has('pack.name')) {
             ctx.addKey('pack.name', escapeLangValue(header.name), filepath);
             ctx.usedKeys.add('pack.name');
@@ -481,7 +491,7 @@ function processManifest(json, filepath, ctx) {
         replaced = true;
     }
 
-    if (typeof header.description === 'string' && !isAlreadyKey(header.description)) {
+    if (typeof header.description === 'string' && !isAlreadyKey(header.description) && !isEmptyText(header.description)) {
         if (!ctx.usedKeys.has('pack.description')) {
             ctx.addKey('pack.description', escapeLangValue(header.description), filepath);
             ctx.usedKeys.add('pack.description');
@@ -535,13 +545,8 @@ function shouldSkipJsText(text) {
     if (isAlreadyKey(stripped)) return true;
     if (stripped.startsWith('./') || stripped.startsWith('/')) return true;
     if (/\.(js|json|png|ogg|wav)$/.test(stripped)) return true;
-
-    // 含 @ → 技术标识符
     if (stripped.includes('@')) return true;
-
-    // 纯小写字母数字下划线冒号 → 技术标识符（如 splint、minecraft）
     if (/^[a-z0-9_:]+$/.test(stripped)) return true;
-
     return false;
 }
 
@@ -555,7 +560,7 @@ function translateCommandString(cmd, category, fileBase, ctx, filepath) {
     const m = titleRe.exec(cmd);
     if (m) {
         const text = m[2].trim();
-        if (!isAlreadyKey(text) && !text.startsWith('{')) {
+        if (!isAlreadyKey(text) && !text.startsWith('{') && !isEmptyText(text)) {
             const key = makeUniqueKey(`script.${category}.${fileBase}`, ctx.usedKeys);
             const escaped = escapeLangValue(text);
             ctx.addKey(key, escaped, filepath);
@@ -571,6 +576,7 @@ function translateCommandString(cmd, category, fileBase, ctx, filepath) {
 
     cmd = cmd.replace(/("text"\s*:\s*")([^"]+)(")/g, (match, p1, text, p3) => {
         if (isAlreadyKey(text)) { ctx.referencedKeys.add(text); return match; }
+        if (isEmptyText(text)) return match;   // ← 空键过滤
         const key = makeUniqueKey(`script.${category}.${fileBase}`, ctx.usedKeys);
         const escaped = escapeLangValue(text);
         ctx.addKey(key, escaped, filepath);
@@ -602,11 +608,10 @@ function processJsFile(content, filepath, ctx) {
             const quote = m[1];
             const text = m[2];
 
-            // 模板字符串插值
             if (quote === '`' && text.includes('${')) continue;
+            if (isEmptyText(text)) continue;   // ← 空键过滤
             if (shouldSkipJsText(text)) continue;
 
-            // 拼接检查
             const tail = content.substring(matchEnd, matchEnd + 5).trimStart();
             if (tail.startsWith('+') || tail.startsWith('${')) continue;
 
@@ -636,6 +641,39 @@ function processJsFile(content, filepath, ctx) {
     }
 
     return { content, changed: replaced };
+}
+
+// ================================================================
+//  处理器：mcfunction
+// ================================================================
+
+function processMcFunction(content, filepath, ctx) {
+    const fileBase = filepath.split('/').pop()
+        .replace(/\.mcfunction$/i, '')
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .toLowerCase();
+
+    const lines = content.split('\n');
+    const newLines = [];
+    let replaced = false;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) {
+            newLines.push(line);
+            continue;
+        }
+
+        const [newLine, changed] = translateCommand(trimmed, fileBase, ctx, filepath, 'function');
+        if (changed) {
+            newLines.push(newLine);
+            replaced = true;
+        } else {
+            newLines.push(line);
+        }
+    }
+
+    return { content: newLines.join('\n'), changed: replaced };
 }
 
 // ================================================================
@@ -771,7 +809,6 @@ async function processFile(file) {
         let processedCount = 0;
         let deobCount = 0;
 
-        // 找包根
         const packRoots = [];
         for (const name of allFiles) {
             if (name.endsWith('manifest.json')) {
@@ -781,7 +818,6 @@ async function processFile(file) {
         }
         log(`找到 ${packRoots.length} 个包`);
 
-        // 遍历
         for (let i = 0; i < allFiles.length; i++) {
             const name = allFiles[i];
             const percent = 10 + Math.floor((i / allFiles.length) * 70);
@@ -793,16 +829,12 @@ async function processFile(file) {
 
             if (shouldSkip(filename, rel)) continue;
 
-            // ---- JS 文件 ----
+            // ---- JS ----
             if (lowerName.endsWith('.js') || lowerName.endsWith('.ts') ||
                 lowerName.endsWith('.mjs') || lowerName.endsWith('.cjs')) {
                 let content;
-                try {
-                    content = await zip.files[name].async('string');
-                } catch (e) {
-                    log(`[跳过] ${name}: 读取失败`, 'warn');
-                    continue;
-                }
+                try { content = await zip.files[name].async('string'); }
+                catch (e) { log(`[跳过] ${name}`, 'warn'); continue; }
 
                 const { content: newContent, changed } = processJsFile(content, name, ctx);
                 if (changed) {
@@ -813,26 +845,31 @@ async function processFile(file) {
                 continue;
             }
 
-            // ---- JSON 文件 ----
+            // ---- mcfunction ----
+            if (lowerName.endsWith('.mcfunction')) {
+                let content;
+                try { content = await zip.files[name].async('string'); }
+                catch (e) { log(`[跳过] ${name}`, 'warn'); continue; }
+
+                const { content: newContent, changed } = processMcFunction(content, name, ctx);
+                if (changed) {
+                    updatedFiles[name] = newContent;
+                    processedCount++;
+                    log(`[函数] ${name}`, 'info');
+                }
+                continue;
+            }
+
+            // ---- JSON ----
             if (!lowerName.endsWith('.json')) continue;
 
             let content;
-            try {
-                content = await zip.files[name].async('string');
-            } catch (e) {
-                log(`[跳过] ${name}: 读取失败`, 'warn');
-                continue;
-            }
+            try { content = await zip.files[name].async('string'); }
+            catch (e) { log(`[跳过] ${name}`, 'warn'); continue; }
 
             const { data, changed } = deobfuscateJson(content);
-            if (changed) {
-                deobCount++;
-                log(`[反混淆] ${name}`, 'info');
-            }
-            if (!data) {
-                log(`[跳过] ${name}: 解析失败`, 'warn');
-                continue;
-            }
+            if (changed) { deobCount++; log(`[反混淆] ${name}`, 'info'); }
+            if (!data) { log(`[跳过] ${name}: 解析失败`, 'warn'); continue; }
 
             let replaced = false;
 
@@ -862,13 +899,11 @@ async function processFile(file) {
         log(`处理: ${processedCount} 个文件`);
         log(`生成键: ${ctx.langEntries.length} 条`);
 
-        // 写回
         setProgress(80, '写入文件...');
         for (const [path, content] of Object.entries(updatedFiles)) {
             zip.file(path, content);
         }
 
-        // 生成 lang
         setProgress(85, '生成 lang...');
         if (ctx.langEntries.length > 0) {
             for (const root of packRoots) {
@@ -878,15 +913,11 @@ async function processFile(file) {
 
                 let existingZh = {};
                 const zhFile = zip.file(zhPath);
-                if (zhFile) {
-                    try { existingZh = parseLang(await zhFile.async('string')); } catch (e) { }
-                }
+                if (zhFile) { try { existingZh = parseLang(await zhFile.async('string')); } catch (e) {} }
 
                 let existingEn = {};
                 const enFile = zip.file(enPath);
-                if (enFile) {
-                    try { existingEn = parseLang(await enFile.async('string')); } catch (e) { }
-                }
+                if (enFile) { try { existingEn = parseLang(await enFile.async('string')); } catch (e) {} }
 
                 const packEntries = ctx.langEntries.filter(([k]) => k.startsWith('pack.'));
                 const otherEntries = ctx.langEntries.filter(([k]) => !k.startsWith('pack.'));
@@ -897,7 +928,6 @@ async function processFile(file) {
                 zip.file(zhPath, langToString(merged));
                 log(`[lang] ${zhPath}: 新增 ${added}，跳过 ${skipped}，从 en_US 补 ${enFilled}`, 'info');
 
-                // languages.json
                 const langJsonPath = `${textsDir}/languages.json`;
                 let langs = ['en_US'];
                 const langFile = zip.file(langJsonPath);
@@ -905,7 +935,7 @@ async function processFile(file) {
                     try {
                         langs = JSON.parse(await langFile.async('string'));
                         if (!Array.isArray(langs)) langs = ['en_US'];
-                    } catch (e) { }
+                    } catch (e) {}
                 }
                 if (!langs.includes('zh_CN')) {
                     langs.push('zh_CN');
@@ -914,7 +944,6 @@ async function processFile(file) {
             }
         }
 
-        // 打包
         setProgress(90, '打包中...');
         const blob = await zip.generateAsync({
             type: 'blob',
