@@ -1,6 +1,6 @@
 /* ================================================================
- *  栈主的附加包汉化工具 - 第四版
- *  JSON + JS + mcfunction + 空键过滤
+ *  栈主的附加包汉化工具 - 第六版
+ *  + runCommandAsync + 内层解压
  * ================================================================ */
 
 const state = {
@@ -11,6 +11,8 @@ const state = {
     logContent: '',
 };
 
+let logAutoExpanded = false;
+
 // ---- DOM ----
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
@@ -19,12 +21,11 @@ const progressText = document.getElementById('progress-text');
 const downloadLogBtn = document.getElementById('download-log');
 const downloadResultBtn = document.getElementById('download-result');
 const logEl = document.getElementById('log');
+const toggleLogBtn = document.getElementById('toggle-log');
 
 // ================================================================
 //  工具函数
 // ================================================================
-
-let logAutoExpanded = false;
 
 function log(msg, type = 'info') {
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
@@ -33,7 +34,7 @@ function log(msg, type = 'info') {
 
     if (!logAutoExpanded) {
         logEl.classList.remove('collapsed');
-        toggleLogBtn.textContent = '收起';
+        if (toggleLogBtn) toggleLogBtn.textContent = '收起';
         logAutoExpanded = true;
     }
 
@@ -94,6 +95,52 @@ function parseLang(content) {
 }
 
 // ================================================================
+//  内层解压
+// ================================================================
+
+async function extractInnerPacks(zip, logFn) {
+    let extracted = 0;
+    let maxDepth = 5;
+
+    while (maxDepth-- > 0) {
+        const innerPacks = [];
+        for (const [path, file] of Object.entries(zip.files)) {
+            if (file.dir) continue;
+            const lower = path.toLowerCase();
+            if (lower.endsWith('.mcpack') || lower.endsWith('.mcaddon')) {
+                innerPacks.push(path);
+            }
+        }
+
+        if (innerPacks.length === 0) break;
+
+        for (const packPath of innerPacks) {
+            try {
+                const blob = await zip.files[packPath].async('blob');
+                const innerZip = await JSZip.loadAsync(blob);
+
+                const baseDir = packPath.substring(0, packPath.lastIndexOf('.'));
+
+                for (const [innerPath, innerFile] of Object.entries(innerZip.files)) {
+                    if (innerFile.dir) continue;
+                    const newPath = `${baseDir}/${innerPath}`;
+                    const content = await innerFile.async('blob');
+                    zip.file(newPath, content);
+                }
+
+                zip.remove(packPath);
+                extracted++;
+                logFn(`[解压] ${packPath} → ${baseDir}/`, 'info');
+            } catch (e) {
+                logFn(`[解压失败] ${packPath}: ${e.message}`, 'warn');
+            }
+        }
+    }
+
+    return extracted;
+}
+
+// ================================================================
 //  上下文
 // ================================================================
 
@@ -127,13 +174,13 @@ function replaceField(container, fieldName, baseKey, ctx, filepath, useRawtext =
     let current, isStringForm;
     if (typeof value === 'string') {
         if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); return false; }
-        if (isEmptyText(value)) return false;   // ← 空键过滤
+        if (isEmptyText(value)) return false;
         current = value;
         isStringForm = true;
     } else if (value && typeof value === 'object' && 'value' in value) {
         if (typeof value.value !== 'string') return false;
         if (isAlreadyKey(value.value)) { ctx.referencedKeys.add(value.value); return false; }
-        if (isEmptyText(value.value)) return false;   // ← 空键过滤
+        if (isEmptyText(value.value)) return false;
         current = value.value;
         isStringForm = false;
     } else {
@@ -188,7 +235,7 @@ function translateCommand(cmd, prefix, ctx, filepath, keyPrefix = 'entity') {
 
     cmd = cmd.replace(/("text"\s*:\s*")([^"]+)(")/g, (match, p1, text, p3) => {
         if (isAlreadyKey(text)) { ctx.referencedKeys.add(text); return match; }
-        if (isEmptyText(text)) return match;   // ← 空键过滤
+        if (isEmptyText(text)) return match;
         const key = makeUniqueKey(`${keyPrefix}.${prefix}.message`, ctx.usedKeys);
         const escaped = escapeLangValue(text);
         ctx.addKey(key, escaped, filepath);
@@ -391,7 +438,7 @@ function processLore(obj, fileBase, ctx, filepath) {
         const item = lore[i];
 
         if (typeof item === 'string') {
-            if (isEmptyText(item) || isAlreadyKey(item)) continue;   // ← 空键过滤
+            if (isEmptyText(item) || isAlreadyKey(item)) continue;
             const key = makeUniqueKey(`trade.${fileBase}.lore_${counter}`, ctx.usedKeys);
             counter++;
             ctx.addKey(key, escapeLangValue(item), filepath);
@@ -405,7 +452,7 @@ function processLore(obj, fileBase, ctx, filepath) {
                 if ('translate' in node) { ctx.referencedKeys.add(node.translate); continue; }
                 if (typeof node.text === 'string') {
                     const text = node.text;
-                    if (isEmptyText(text) || isAlreadyKey(text)) continue;   // ← 空键过滤
+                    if (isEmptyText(text) || isAlreadyKey(text)) continue;
                     const key = makeUniqueKey(`trade.${fileBase}.lore_${counter}`, ctx.usedKeys);
                     counter++;
                     ctx.addKey(key, escapeLangValue(text), filepath);
@@ -468,7 +515,7 @@ function processUI(json, filepath, ctx) {
         for (const [key, value] of Object.entries(obj)) {
             if (key === 'text' && typeof value === 'string') {
                 if (value.startsWith('$') || value.startsWith('#')) continue;
-                if (isEmptyText(value)) continue;   // ← 空键过滤
+                if (isEmptyText(value)) continue;
                 if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
                 const baseKey = `ui.${uiBase}.text_${counter}`;
                 counter++;
@@ -545,6 +592,7 @@ const JS_API_PATTERNS = [
     ['setActionBar', 'setactionbar'],
     ['actionBar', 'actionbar'],
     ['runCommand', 'command'],
+    ['runCommandAsync', 'command'],
 ].map(([method, category]) => [buildApiPattern(method), category]);
 
 function shouldSkipJsText(text) {
@@ -585,7 +633,7 @@ function translateCommandString(cmd, category, fileBase, ctx, filepath) {
 
     cmd = cmd.replace(/("text"\s*:\s*")([^"]+)(")/g, (match, p1, text, p3) => {
         if (isAlreadyKey(text)) { ctx.referencedKeys.add(text); return match; }
-        if (isEmptyText(text)) return match;   // ← 空键过滤
+        if (isEmptyText(text)) return match;
         const key = makeUniqueKey(`script.${category}.${fileBase}`, ctx.usedKeys);
         const escaped = escapeLangValue(text);
         ctx.addKey(key, escaped, filepath);
@@ -618,7 +666,7 @@ function processJsFile(content, filepath, ctx) {
             const text = m[2];
 
             if (quote === '`' && text.includes('${')) continue;
-            if (isEmptyText(text)) continue;   // ← 空键过滤
+            if (isEmptyText(text)) continue;
             if (shouldSkipJsText(text)) continue;
 
             const tail = content.substring(matchEnd, matchEnd + 5).trimStart();
@@ -801,6 +849,7 @@ async function processFile(file) {
     state.resultName = '';
     logEl.innerHTML = '';
     logEl.classList.remove('visible');
+    logAutoExpanded = false;
     downloadLogBtn.disabled = true;
     downloadResultBtn.disabled = true;
     setProgress(0, '加载中...');
@@ -810,6 +859,13 @@ async function processFile(file) {
 
     try {
         const zip = await JSZip.loadAsync(file);
+
+        // ---- 解压内层 .mcpack ----
+        const innerCount = await extractInnerPacks(zip, log);
+        if (innerCount > 0) {
+            log(`解压了 ${innerCount} 个内层包`, 'info');
+        }
+
         const allFiles = Object.keys(zip.files).filter(n => !zip.files[n].dir);
         log(`共 ${allFiles.length} 个文件`);
 
@@ -922,11 +978,11 @@ async function processFile(file) {
 
                 let existingZh = {};
                 const zhFile = zip.file(zhPath);
-                if (zhFile) { try { existingZh = parseLang(await zhFile.async('string')); } catch (e) { } }
+                if (zhFile) { try { existingZh = parseLang(await zhFile.async('string')); } catch (e) {} }
 
                 let existingEn = {};
                 const enFile = zip.file(enPath);
-                if (enFile) { try { existingEn = parseLang(await enFile.async('string')); } catch (e) { } }
+                if (enFile) { try { existingEn = parseLang(await enFile.async('string')); } catch (e) {} }
 
                 const packEntries = ctx.langEntries.filter(([k]) => k.startsWith('pack.'));
                 const otherEntries = ctx.langEntries.filter(([k]) => !k.startsWith('pack.'));
@@ -944,7 +1000,7 @@ async function processFile(file) {
                     try {
                         langs = JSON.parse(await langFile.async('string'));
                         if (!Array.isArray(langs)) langs = ['en_US'];
-                    } catch (e) { }
+                    } catch (e) {}
                 }
                 if (!langs.includes('zh_CN')) {
                     langs.push('zh_CN');
@@ -1005,6 +1061,18 @@ downloadLogBtn.addEventListener('click', () => {
 });
 
 // ================================================================
+//  日志折叠
+// ================================================================
+
+if (toggleLogBtn) {
+    toggleLogBtn.addEventListener('click', () => {
+        const log = document.getElementById('log');
+        log.classList.toggle('collapsed');
+        toggleLogBtn.textContent = log.classList.contains('collapsed') ? '展开' : '收起';
+    });
+}
+
+// ================================================================
 //  文件选择
 // ================================================================
 
@@ -1029,16 +1097,4 @@ dropZone.addEventListener('drop', async (e) => {
     dropZone.classList.remove('dragover');
     const file = e.dataTransfer.files[0];
     if (file) await processFile(file);
-});
-
-// ================================================================
-//  日志折叠
-// ================================================================
-
-const toggleLogBtn = document.getElementById('toggle-log');
-
-toggleLogBtn.addEventListener('click', () => {
-    const log = document.getElementById('log');
-    log.classList.toggle('collapsed');
-    toggleLogBtn.textContent = log.classList.contains('collapsed') ? '展开' : '收起';
 });
