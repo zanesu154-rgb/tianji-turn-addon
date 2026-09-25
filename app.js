@@ -121,9 +121,40 @@ async function extractInnerPacks(zip, logFn) {
 
                 const baseDir = packPath.substring(0, packPath.lastIndexOf('.'));
 
+                // 收集内层所有文件路径
+                const innerFiles = [];
                 for (const [innerPath, innerFile] of Object.entries(innerZip.files)) {
                     if (innerFile.dir) continue;
-                    const newPath = `${baseDir}/${innerPath}`;
+                    innerFiles.push(innerPath);
+                }
+
+                // 判断是否有单一顶层文件夹
+                let stripPrefix = '';
+                if (innerFiles.length > 0) {
+                    // 提取所有路径的第一段
+                    const firstSegments = new Set();
+                    for (const p of innerFiles) {
+                        const seg = p.split('/')[0];
+                        firstSegments.add(seg);
+                    }
+                    // 如果只有一个顶层段，且所有文件都在它下面
+                    if (firstSegments.size === 1) {
+                        const topDir = [...firstSegments][0];
+                        // 检查所有文件是否都在 topDir/ 下
+                        const allInTop = innerFiles.every(p => p.startsWith(topDir + '/'));
+                        if (allInTop) {
+                            stripPrefix = topDir + '/';
+                            logFn(`[解压] ${packPath} 去掉顶层文件夹 "${topDir}/"`, 'info');
+                        }
+                    }
+                }
+
+                for (const [innerPath, innerFile] of Object.entries(innerZip.files)) {
+                    if (innerFile.dir) continue;
+                    const relativePath = stripPrefix && innerPath.startsWith(stripPrefix)
+                        ? innerPath.substring(stripPrefix.length)
+                        : innerPath;
+                    const newPath = `${baseDir}/${relativePath}`;
                     const content = await innerFile.async('blob');
                     zip.file(newPath, content);
                 }
