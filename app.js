@@ -971,28 +971,44 @@ async function processFile(file) {
 
         setProgress(85, '生成 lang...');
         if (ctx.langEntries.length > 0) {
+            // 分离 pack.* 和其他
+            const packEntries = ctx.langEntries.filter(([k]) => k.startsWith('pack.'));
+            const otherEntries = ctx.langEntries.filter(([k]) => !k.startsWith('pack.'));
+
             for (const root of packRoots) {
+                const packType = await readPackType(zip, root);
                 const textsDir = root ? `${root}/texts` : 'texts';
                 const zhPath = `${textsDir}/zh_CN.lang`;
                 const enPath = `${textsDir}/en_US.lang`;
 
                 let existingZh = {};
                 const zhFile = zip.file(zhPath);
-                if (zhFile) { try { existingZh = parseLang(await zhFile.async('string')); } catch (e) {} }
+                if (zhFile) { try { existingZh = parseLang(await zhFile.async('string')); } catch (e) { } }
 
                 let existingEn = {};
                 const enFile = zip.file(enPath);
-                if (enFile) { try { existingEn = parseLang(await enFile.async('string')); } catch (e) {} }
+                if (enFile) { try { existingEn = parseLang(await enFile.async('string')); } catch (e) { } }
 
-                const packEntries = ctx.langEntries.filter(([k]) => k.startsWith('pack.'));
-                const otherEntries = ctx.langEntries.filter(([k]) => !k.startsWith('pack.'));
+                let merged, added, skipped;
 
-                const [merged, added, skipped] = mergeLang(existingZh, [...otherEntries, ...packEntries]);
-                const enFilled = fillFromEnUs(merged, existingEn);
+                if (packType === 'data') {
+                    // 行为包：只写 pack.*
+                    if (packEntries.length === 0) {
+                        log(`[lang] ${root || '(root)'}: 行为包无 pack.* 键，跳过`, 'info');
+                        continue;
+                    }
+                    [merged, added, skipped] = mergeLang(existingZh, packEntries);
+                    zip.file(zhPath, langToString(merged));
+                    log(`[lang] ${zhPath}: [行为包] 新增 ${added}，跳过 ${skipped}`, 'info');
+                } else {
+                    // 资源包：写所有
+                    [merged, added, skipped] = mergeLang(existingZh, [...otherEntries, ...packEntries]);
+                    const enFilled = fillFromEnUs(merged, existingEn);
+                    zip.file(zhPath, langToString(merged));
+                    log(`[lang] ${zhPath}: [资源包] 新增 ${added}，跳过 ${skipped}，从 en_US 补 ${enFilled}`, 'info');
+                }
 
-                zip.file(zhPath, langToString(merged));
-                log(`[lang] ${zhPath}: 新增 ${added}，跳过 ${skipped}，从 en_US 补 ${enFilled}`, 'info');
-
+                // languages.json
                 const langJsonPath = `${textsDir}/languages.json`;
                 let langs = ['en_US'];
                 const langFile = zip.file(langJsonPath);
@@ -1000,7 +1016,7 @@ async function processFile(file) {
                     try {
                         langs = JSON.parse(await langFile.async('string'));
                         if (!Array.isArray(langs)) langs = ['en_US'];
-                    } catch (e) {}
+                    } catch (e) { }
                 }
                 if (!langs.includes('zh_CN')) {
                     langs.push('zh_CN');
@@ -1029,6 +1045,25 @@ async function processFile(file) {
         log(`❌ 错误: ${e.message}`, 'error');
         setProgress(0, '处理失败');
         console.error(e);
+    }
+}
+
+async function readPackType(zip, packRoot) {
+    const manifestPath = packRoot ? `${packRoot}/manifest.json` : 'manifest.json';
+    const file = zip.file(manifestPath);
+    if (!file) return null;
+
+    try {
+        const content = await file.async('string');
+        const data = JSON.parse(content);
+        const header = data.header || {};
+        const modules = data.modules || [];
+
+        let t = header.type;
+        if (!t && modules.length > 0) t = modules[0].type;
+        return t || null;
+    } catch (e) {
+        return null;
     }
 }
 
