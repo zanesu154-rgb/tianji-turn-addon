@@ -681,6 +681,12 @@ function translateCommandString(cmd, category, fileBase, ctx, filepath) {
     return [cmd, replaced];
 }
 
+// 对象字面量的白名单 key
+const OBJECT_TEXT_KEYS = [
+    'name', 'title', 'body', 'text', 'label',
+    'description', 'message', 'tooltip', 'hint', 'tip',
+];
+
 function processJsFile(content, filepath, ctx) {
     const fileBase = filepath.split('/').pop()
         .replace(/\.(js|ts|mjs|cjs)$/i, '')
@@ -689,6 +695,7 @@ function processJsFile(content, filepath, ctx) {
 
     let replaced = false;
 
+    // ---- 1. API 调用 ----
     for (const [pattern, category] of JS_API_PATTERNS) {
         const re = new RegExp(pattern.source, pattern.flags);
         let newContent = '';
@@ -733,6 +740,82 @@ function processJsFile(content, filepath, ctx) {
         newContent += content.substring(lastIndex);
         content = newContent;
     }
+
+    // ---- 2. 裸命令字符串（含 tellraw / title）----
+    const commandRe = /(["'])((?:\\.|(?!\1).)*)\1/gs;
+    let newContent2 = '';
+    let lastIndex2 = 0;
+    let m2;
+
+    commandRe.lastIndex = 0;
+    while ((m2 = commandRe.exec(content)) !== null) {
+        const matchStart = m2.index;
+        const matchEnd = m2.index + m2[0].length;
+        const quote = m2[1];
+        const text = m2[2];
+
+        // 只处理含命令关键词的
+        if (!/\b(tellraw|title)\b/.test(text)) continue;
+
+        // 检查是否在 JS API 调用参数里（已处理过的）
+        // 简单方法：看前面 20 字符是否含 .runCommand / .runCommandAsync
+        const before = content.substring(Math.max(0, matchStart - 30), matchStart);
+        if (/\.runCommand(Async)?\s*\(\s*$/.test(before)) continue;
+
+        // 检查前后是否有拼接
+        const tail = content.substring(matchEnd, matchEnd + 5).trimStart();
+        if (tail.startsWith('+') || tail.startsWith('${')) continue;
+
+        const [newCmd, changed] = translateCommandString(text, 'command', fileBase, ctx, filepath);
+        if (!changed) continue;
+
+        replaced = true;
+        const escapedCmd = quote === '"' ? newCmd.replace(/"/g, '\\"') : newCmd;
+        newContent2 += content.substring(lastIndex2, matchStart) + `${quote}${escapedCmd}${quote}`;
+        lastIndex2 = matchEnd;
+    }
+    newContent2 += content.substring(lastIndex2);
+    content = newContent2;
+
+    // ---- 3. 对象字面量白名单 key ----
+    const objKeyAlt = OBJECT_TEXT_KEYS.map(k => escapeRegex(k)).join('|');
+    const objRe = new RegExp(
+        `(?<![a-zA-Z0-9_])(${objKeyAlt})\\s*:\\s*(["'\`])((?:\\\\\\2|(?!\\2).)*)\\2`,
+        'gs'   // ← 加 s
+    );
+
+    let newContent3 = '';
+    let lastIndex3 = 0;
+    let m3;
+
+    objRe.lastIndex = 0;
+    while ((m3 = objRe.exec(content)) !== null) {
+        const matchStart = m3.index;
+        const matchEnd = m3.index + m3[0].length;
+        const keyName = m3[1];
+        const quote = m3[2];
+        const text = m3[3];
+
+        // 模板字符串插值 → 跳过
+        if (quote === '`' && text.includes('${')) continue;
+        if (isEmptyText(text)) continue;
+        if (isAlreadyKey(text)) continue;
+        if (shouldSkipJsText(text)) continue;
+        if (text.startsWith('textures/') || text.startsWith('textures\\')) continue;
+
+        const category = keyName.toLowerCase();
+        const key = makeUniqueKey(`script.${category}.${fileBase}`, ctx.usedKeys);
+        const escaped = escapeLangValue(text);
+        ctx.addKey(key, escaped, filepath);
+        replaced = true;
+
+        // 保持原引号类型
+        const replacement = `${keyName}: ${quote}${key}${quote}`;
+        newContent3 += content.substring(lastIndex3, matchStart) + replacement;
+        lastIndex3 = matchEnd;
+    }
+    newContent3 += content.substring(lastIndex3);
+    content = newContent3;
 
     return { content, changed: replaced };
 }
