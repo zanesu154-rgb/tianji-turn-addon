@@ -738,6 +738,52 @@ function processJsFile(content, filepath, ctx) {
 }
 
 // ================================================================
+//  处理器：animations
+// ================================================================
+
+function processAnimationFile(json, filepath, ctx) {
+    let replaced = false;
+    const fileBase = filepath.split('/').pop().replace('.json', '');
+
+    function scan(obj) {
+        if (Array.isArray(obj)) {
+            for (let i = 0; i < obj.length; i++) {
+                if (typeof obj[i] === 'string') {
+                    const text = obj[i];
+                    // 含命令关键词才处理
+                    if (!/\b(title|tellraw)\b/.test(text)) continue;
+                    const [newCmd, changed] = translateCommand(text, fileBase, ctx, filepath, 'animation');
+                    if (changed) {
+                        obj[i] = newCmd;
+                        replaced = true;
+                    }
+                } else {
+                    scan(obj[i]);
+                }
+            }
+            return;
+        }
+        if (!obj || typeof obj !== 'object') return;
+
+        for (const [key, value] of Object.entries(obj)) {
+            if (typeof value === 'string') {
+                if (!/\b(title|tellraw)\b/.test(value)) continue;
+                const [newCmd, changed] = translateCommand(value, fileBase, ctx, filepath, 'animation');
+                if (changed) {
+                    obj[key] = newCmd;
+                    replaced = true;
+                }
+            } else {
+                scan(value);
+            }
+        }
+    }
+
+    scan(json);
+    return replaced;
+}
+
+// ================================================================
 //  处理器：mcfunction
 // ================================================================
 
@@ -987,6 +1033,8 @@ async function processFile(file) {
                 replaced = processEntity(data, name, ctx);
             } else if (matchDir(rel, 'dialogue', 'dialogues')) {
                 replaced = processDialogue(data, name, ctx);
+            } else if (matchDir(rel, 'animations', 'animation')) {
+                replaced = processAnimationFile(data, name, ctx);
             } else if (matchDir(rel, 'ui')) {
                 replaced = processUI(data, name, ctx);
             }
