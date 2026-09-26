@@ -911,22 +911,14 @@ async function processFile(file) {
         let processedCount = 0;
         let deobCount = 0;
 
-        // 找包根
         const packRoots = [];
-        log(`[调试] allFiles 数量: ${allFiles.length}`);
-        log(`[调试] 含 manifest.json 的文件:`);
         for (const name of allFiles) {
             if (name.endsWith('manifest.json')) {
                 const dir = name.substring(0, name.lastIndexOf('/'));
-                // 只保留非空目录
-                if (dir && dir !== '.') {
-                    packRoots.push(dir);
-                }
+                packRoots.push(dir);
             }
         }
-        // 去重
-        const uniqueRoots = [...new Set(packRoots)];
-        log(`找到 ${uniqueRoots.length} 个包: [${uniqueRoots.join(', ')}]`);
+        log(`找到 ${packRoots.length} 个包`);
 
         for (let i = 0; i < allFiles.length; i++) {
             const name = allFiles[i];
@@ -1016,6 +1008,7 @@ async function processFile(file) {
 
         setProgress(85, '生成 lang...');
         if (ctx.langEntries.length > 0) {
+            // 分离 pack.* 和其他
             const packEntries = ctx.langEntries.filter(([k]) => k.startsWith('pack.'));
             const otherEntries = ctx.langEntries.filter(([k]) => !k.startsWith('pack.'));
 
@@ -1025,7 +1018,6 @@ async function processFile(file) {
                 const zhPath = `${textsDir}/zh_CN.lang`;
                 const enPath = `${textsDir}/en_US.lang`;
 
-                // 读已有
                 let existingZh = {};
                 const zhFile = zip.file(zhPath);
                 if (zhFile) { try { existingZh = parseLang(await zhFile.async('string')); } catch (e) { } }
@@ -1034,35 +1026,23 @@ async function processFile(file) {
                 const enFile = zip.file(enPath);
                 if (enFile) { try { existingEn = parseLang(await enFile.async('string')); } catch (e) { } }
 
-                // ---- en_US：同步创建/补齐 ----
-                let enMerged, enAdded, enSkipped;
+                let merged, added, skipped;
+
                 if (packType === 'data') {
                     // 行为包：只写 pack.*
-                    [enMerged, enAdded, enSkipped] = mergeLang(existingEn, packEntries);
-                    zip.file(enPath, langToString(enMerged));
-                    log(`[lang] ${enPath}: [行为包] 新增 ${enAdded}，跳过 ${enSkipped}`, 'info');
-                } else {
-                    // 资源包：写所有
-                    [enMerged, enAdded, enSkipped] = mergeLang(existingEn, [...otherEntries, ...packEntries]);
-                    zip.file(enPath, langToString(enMerged));
-                    log(`[lang] ${enPath}: [资源包] 新增 ${enAdded}，跳过 ${enSkipped}`, 'info');
-                }
-
-                // ---- zh_CN：合并 + 从 en_US 补充 ----
-                let zhMerged, zhAdded, zhSkipped;
-                if (packType === 'data') {
                     if (packEntries.length === 0) {
-                        log(`[lang] ${root || '(root)'}: 行为包无 pack.* 键，跳过 zh_CN`, 'info');
+                        log(`[lang] ${root || '(root)'}: 行为包无 pack.* 键，跳过`, 'info');
                         continue;
                     }
-                    [zhMerged, zhAdded, zhSkipped] = mergeLang(existingZh, packEntries);
-                    zip.file(zhPath, langToString(zhMerged));
-                    log(`[lang] ${zhPath}: [行为包] 新增 ${zhAdded}，跳过 ${zhSkipped}`, 'info');
+                    [merged, added, skipped] = mergeLang(existingZh, packEntries);
+                    zip.file(zhPath, langToString(merged));
+                    log(`[lang] ${zhPath}: [行为包] 新增 ${added}，跳过 ${skipped}`, 'info');
                 } else {
-                    [zhMerged, zhAdded, zhSkipped] = mergeLang(existingZh, [...otherEntries, ...packEntries]);
-                    const enFilled = fillFromEnUs(zhMerged, enMerged);
-                    zip.file(zhPath, langToString(zhMerged));
-                    log(`[lang] ${zhPath}: [资源包] 新增 ${zhAdded}，跳过 ${zhSkipped}，从 en_US 补 ${enFilled}`, 'info');
+                    // 资源包：写所有
+                    [merged, added, skipped] = mergeLang(existingZh, [...otherEntries, ...packEntries]);
+                    const enFilled = fillFromEnUs(merged, existingEn);
+                    zip.file(zhPath, langToString(merged));
+                    log(`[lang] ${zhPath}: [资源包] 新增 ${added}，跳过 ${skipped}，从 en_US 补 ${enFilled}`, 'info');
                 }
 
                 // languages.json
@@ -1075,12 +1055,9 @@ async function processFile(file) {
                         if (!Array.isArray(langs)) langs = ['en_US'];
                     } catch (e) { }
                 }
-                let langsChanged = false;
-                if (!langs.includes('en_US')) { langs.push('en_US'); langsChanged = true; }
-                if (!langs.includes('zh_CN')) { langs.push('zh_CN'); langsChanged = true; }
-                if (langsChanged) {
+                if (!langs.includes('zh_CN')) {
+                    langs.push('zh_CN');
                     zip.file(langJsonPath, JSON.stringify(langs, null, 2));
-                    log(`[languages.json] 更新: ${langs.join(', ')}`, 'info');
                 }
             }
         }
