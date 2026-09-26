@@ -913,13 +913,20 @@ async function processFile(file) {
 
         // 找包根
         const packRoots = [];
+        log(`[调试] allFiles 数量: ${allFiles.length}`);
+        log(`[调试] 含 manifest.json 的文件:`);
         for (const name of allFiles) {
             if (name.endsWith('manifest.json')) {
                 const dir = name.substring(0, name.lastIndexOf('/'));
-                packRoots.push(dir);
+                // 只保留非空目录
+                if (dir && dir !== '.') {
+                    packRoots.push(dir);
+                }
             }
         }
-        log(`找到 ${packRoots.length} 个包: [${packRoots.join(', ')}]`);
+        // 去重
+        const uniqueRoots = [...new Set(packRoots)];
+        log(`找到 ${uniqueRoots.length} 个包: [${uniqueRoots.join(', ')}]`);
 
         for (let i = 0; i < allFiles.length; i++) {
             const name = allFiles[i];
