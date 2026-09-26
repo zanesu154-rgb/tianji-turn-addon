@@ -781,7 +781,7 @@ function processJsFile(content, filepath, ctx) {
     const objKeyAlt = OBJECT_TEXT_KEYS.map(k => escapeRegex(k)).join('|');
     const objRe = new RegExp(
         `(?<![a-zA-Z0-9_])(${objKeyAlt})\\s*:\\s*(["'\`])((?:\\\\\\2|(?!\\2).)*)\\2`,
-        'gs'   // ← 加 s
+        'gs'
     );
 
     let newContent3 = '';
@@ -796,7 +796,6 @@ function processJsFile(content, filepath, ctx) {
         const quote = m3[2];
         const text = m3[3];
 
-        // 模板字符串插值 → 跳过
         if (quote === '`' && text.includes('${')) continue;
         if (isEmptyText(text)) continue;
         if (isAlreadyKey(text)) continue;
@@ -809,8 +808,8 @@ function processJsFile(content, filepath, ctx) {
         ctx.addKey(key, escaped, filepath);
         replaced = true;
 
-        // 保持原引号类型
-        const replacement = `${keyName}: ${quote}${key}${quote}`;
+        // ★ 改成 RawText
+        const replacement = `${keyName}: { rawtext: [{ translate: "${key}" }] }`;
         newContent3 += content.substring(lastIndex3, matchStart) + replacement;
         lastIndex3 = matchEnd;
     }
