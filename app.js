@@ -913,23 +913,13 @@ async function processFile(file) {
 
         // 找包根
         const packRoots = [];
-        const seenRoots = new Set();
         for (const name of allFiles) {
             if (name.endsWith('manifest.json')) {
                 const dir = name.substring(0, name.lastIndexOf('/'));
-                if (!dir || dir === '.') continue;
-                if (seenRoots.has(dir)) continue;
-                seenRoots.add(dir);
                 packRoots.push(dir);
             }
         }
-
-        // fallback：根目录的 manifest
-        if (packRoots.length === 0 && allFiles.includes('manifest.json')) {
-            packRoots.push('');
-        }
-
-        log(`找到 ${packRoots.length} 个包: ${packRoots.join(', ') || '(根目录)'}`);
+        log(`找到 ${packRoots.length} 个包: [${packRoots.join(', ')}]`);
 
         for (let i = 0; i < allFiles.length; i++) {
             const name = allFiles[i];
