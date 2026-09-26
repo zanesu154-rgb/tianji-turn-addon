@@ -911,14 +911,25 @@ async function processFile(file) {
         let processedCount = 0;
         let deobCount = 0;
 
+        // 找包根
         const packRoots = [];
+        const seenRoots = new Set();
         for (const name of allFiles) {
             if (name.endsWith('manifest.json')) {
                 const dir = name.substring(0, name.lastIndexOf('/'));
+                if (!dir || dir === '.') continue;
+                if (seenRoots.has(dir)) continue;
+                seenRoots.add(dir);
                 packRoots.push(dir);
             }
         }
-        log(`找到 ${packRoots.length} 个包`);
+
+        // fallback：根目录的 manifest
+        if (packRoots.length === 0 && allFiles.includes('manifest.json')) {
+            packRoots.push('');
+        }
+
+        log(`找到 ${packRoots.length} 个包: ${packRoots.join(', ') || '(根目录)'}`);
 
         for (let i = 0; i < allFiles.length; i++) {
             const name = allFiles[i];
