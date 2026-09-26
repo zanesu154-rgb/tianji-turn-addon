@@ -784,6 +784,51 @@ function processAnimationFile(json, filepath, ctx) {
 }
 
 // ================================================================
+//  处理器：animation_controllers
+// ================================================================
+
+function processAnimationControlFile(json, filepath, ctx) {
+    let replaced = false;
+    const fileBase = filepath.split('/').pop().replace('.json', '');
+
+    function scan(obj) {
+        if (Array.isArray(obj)) {
+            for (let i = 0; i < obj.length; i++) {
+                if (typeof obj[i] === 'string') {
+                    const text = obj[i];
+                    if (!/\b(title|tellraw)\b/.test(text)) continue;
+                    const [newCmd, changed] = translateCommand(text, fileBase, ctx, filepath, 'animctrl');
+                    if (changed) {
+                        obj[i] = newCmd;
+                        replaced = true;
+                    }
+                } else {
+                    scan(obj[i]);
+                }
+            }
+            return;
+        }
+        if (!obj || typeof obj !== 'object') return;
+
+        for (const [key, value] of Object.entries(obj)) {
+            if (typeof value === 'string') {
+                if (!/\b(title|tellraw)\b/.test(value)) continue;
+                const [newCmd, changed] = translateCommand(value, fileBase, ctx, filepath, 'animctrl');
+                if (changed) {
+                    obj[key] = newCmd;
+                    replaced = true;
+                }
+            } else {
+                scan(value);
+            }
+        }
+    }
+
+    scan(json);
+    return replaced;
+}
+
+// ================================================================
 //  处理器：mcfunction
 // ================================================================
 
@@ -1033,6 +1078,8 @@ async function processFile(file) {
                 replaced = processEntity(data, name, ctx);
             } else if (matchDir(rel, 'dialogue', 'dialogues')) {
                 replaced = processDialogue(data, name, ctx);
+            } else if (matchDir(rel, 'animation_controllers', 'animation_controller')) {
+                replaced = processAnimationControlFile(data, name, ctx);
             } else if (matchDir(rel, 'animations', 'animation')) {
                 replaced = processAnimationFile(data, name, ctx);
             } else if (matchDir(rel, 'ui')) {
