@@ -682,6 +682,24 @@ function translateCommandString(cmd, category, fileBase, ctx, filepath) {
     return [cmd, replaced];
 }
 
+// 反混淆
+function decodeJsUnicode(content) {
+    const special = {
+        '\n': '\\n', '\r': '\\r', '\t': '\\t',
+        '\\': '\\\\', '"': '\\"', "'": "\\'",
+    };
+
+    const replacer = (match, hex) => {
+        const ch = String.fromCharCode(parseInt(hex, 16));
+        return special[ch] || ch;
+    };
+
+    content = content.replace(/\\u\{([0-9a-fA-F]+)\}/g, replacer);
+    content = content.replace(/\\u([0-9a-fA-F]{4})/g, replacer);
+    content = content.replace(/\\x([0-9a-fA-F]{2})/g, replacer);
+    return content;
+}
+
 function processJsFile(content, filepath, ctx) {
     const fileBase = filepath.split('/').pop()
         .replace(/\.(js|ts|mjs|cjs)$/i, '')
@@ -1029,6 +1047,11 @@ async function processFile(file) {
                 let content;
                 try { content = await zip.files[name].async('string'); }
                 catch (e) { log(`[跳过] ${name}`, 'warn'); continue; }
+
+                // 解码 Unicode
+                const decoded = decodeJsUnicode(content);
+                const unicodeChanged = decoded !== content;
+                content = decoded;
 
                 const { content: newContent, changed } = processJsFile(content, name, ctx);
                 if (changed) {
