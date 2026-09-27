@@ -63,8 +63,8 @@ function isEmptyText(text) {
 }
 
 function escapeLangValue(value) {
+    // 只处理真换行/回车/制表符，不碰字面反斜杠
     return value
-        .replace(/\\/g, '\\\\')
         .replace(/\n/g, '\\n')
         .replace(/\r/g, '\\r')
         .replace(/\t/g, '\\t');
@@ -639,7 +639,8 @@ function shouldSkipJsText(text) {
     if (isAlreadyKey(stripped)) return true;
     if (stripped.startsWith('./') || stripped.startsWith('/')) return true;
     if (/\.(js|json|png|ogg|wav)$/.test(stripped)) return true;
-    if (stripped.includes('@')) return true;
+    // 无空格 + 含 @ → 技术标识符
+    if (stripped.includes('@') && !stripped.includes(' ')) return true;
     if (/^[a-z0-9_:]+$/.test(stripped)) return true;
     return false;
 }
