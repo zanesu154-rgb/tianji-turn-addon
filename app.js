@@ -202,10 +202,9 @@ function replaceField(container, fieldName, baseKey, ctx, filepath, useRawtext =
 
     const value = container[fieldName];
 
+    // 已是 rawtext → 深入处理每个节点
     if (value && typeof value === 'object' && 'rawtext' in value) {
-        const raw = value.rawtext || [];
-        if (raw[0] && raw[0].translate) ctx.referencedKeys.add(raw[0].translate);
-        return false;
+        return _processRawtext(value.rawtext, baseKey, ctx, filepath);
     }
 
     let current, isStringForm;
@@ -238,6 +237,41 @@ function replaceField(container, fieldName, baseKey, ctx, filepath, useRawtext =
     else value.value = newValue;
 
     return true;
+}
+
+function _processRawtext(rawtext, baseKey, ctx, filepath) {
+    if (!Array.isArray(rawtext)) return false;
+
+    let replaced = false;
+    let counter = 0;
+
+    for (let i = 0; i < rawtext.length; i++) {
+        const node = rawtext[i];
+        if (!node || typeof node !== 'object') continue;
+
+        // 已有 translate → 记录引用
+        if ('translate' in node) {
+            ctx.referencedKeys.add(node.translate);
+            continue;
+        }
+
+        // 处理 text 节点
+        if (typeof node.text === 'string') {
+            const text = node.text;
+            if (isEmptyText(text) || isAlreadyKey(text)) continue;
+
+            const key = makeUniqueKey(`${baseKey}_${counter}`, ctx.usedKeys);
+            counter++;
+            ctx.addKey(key, escapeLangValue(text), filepath);
+
+            const newNode = { translate: key };
+            if (node.with) newNode.with = node.with;
+            rawtext[i] = newNode;
+            replaced = true;
+        }
+    }
+
+    return replaced;
 }
 
 // ================================================================
