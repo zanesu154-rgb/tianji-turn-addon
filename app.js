@@ -611,21 +611,38 @@ function processUI(json, filepath, ctx) {
         if (!obj || typeof obj !== 'object') return;
 
         for (const [key, value] of Object.entries(obj)) {
+            // ---- 情况1：text 字段 ----
             if (key === 'text' && typeof value === 'string') {
                 if (value.startsWith('$') || value.startsWith('#')) continue;
                 if (isEmptyText(value)) continue;
                 if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
-
-                // 跳过动态拼接 / 引用 / 表达式
-                if (value.includes('%')) continue;        // %gui.back 等
-                if (value.includes('+')) continue;        // 拼接
-                if (value.includes('(') || value.includes(')')) continue;  // 表达式
-                if (value.trim().startsWith('<') || value.trim().startsWith('>')) continue;  // 引用标记
+                // 跳过动态拼接
+                if (value.includes('%')) continue;
+                if (value.includes('+')) continue;
+                if (value.includes('(') || value.includes(')')) continue;
+                if (value.trim().startsWith('<') || value.trim().startsWith('>')) continue;
 
                 const baseKey = `ui.${uiBase}.text_${counter}`;
                 counter++;
                 if (replaceField(obj, 'text', baseKey, ctx, filepath, true)) replaced = true;
-            } else scan(value);
+            }
+            // ---- 情况2：$xxx 变量 ----
+            else if (key.startsWith('$') && typeof value === 'string') {
+                if (isEmptyText(value)) continue;
+                if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
+                if (value.includes('+')) continue;
+                if (value.includes('(') || value.includes(')')) continue;
+
+                // 变量名去掉 $ 做键名
+                const varName = key.substring(1).replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase();
+                const baseKey = `ui.${uiBase}.${varName}_${counter}`;
+                counter++;
+                if (replaceField(obj, key, baseKey, ctx, filepath, true)) replaced = true;
+            }
+            // ---- 递归 ----
+            else {
+                scan(value);
+            }
         }
     }
 
