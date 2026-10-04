@@ -54,8 +54,9 @@ function isAlreadyKey(text) {
     if (typeof text !== 'string') return false;
     if (text.includes(' ')) return false;
     if (/[\u4e00-\u9fff]/.test(text)) return false;
-    // 允许大写字母（如 pauseScreen.gameIsPaused）
-    return /^[a-zA-Z0-9_:]+(\.[a-zA-Z0-9_:]+)+$/.test(text);
+    // 放宽：允许大小写、非 ASCII（é 等）
+    // 要求：至少有一个点，点两侧都不是空
+    return /^[^.\s]+(\.[^.\s]+)+$/.test(text);
 }
 
 function isEmptyText(text) {
