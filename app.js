@@ -374,9 +374,34 @@ function processBlock(json, filepath, ctx) {
     if (!block) return false;
     const identifier = block.description?.identifier;
     if (!identifier) return false;
+
+    let replaced = false;
+    const baseKey = `tile.${identifier}.name`;
+
+    // ---- 顶层 components ----
     const components = block.components || {};
-    return replaceField(components, 'minecraft:display_name',
-        `tile.${identifier}.name`, ctx, filepath, false);
+    if (replaceField(components, 'minecraft:display_name', baseKey, ctx, filepath, false)) {
+        replaced = true;
+    }
+
+    // ---- permutations 里的 components ----
+    const permutations = block.permutations;
+    if (Array.isArray(permutations)) {
+        let counter = 0;
+        for (const perm of permutations) {
+            if (!perm || typeof perm !== 'object') continue;
+            const permComponents = perm.components;
+            if (!permComponents || typeof permComponents !== 'object') continue;
+
+            const permKey = `${baseKey}_perm_${counter}`;
+            counter++;
+            if (replaceField(permComponents, 'minecraft:display_name', permKey, ctx, filepath, false)) {
+                replaced = true;
+            }
+        }
+    }
+
+    return replaced;
 }
 
 // ================================================================
