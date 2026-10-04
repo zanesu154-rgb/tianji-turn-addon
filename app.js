@@ -54,7 +54,8 @@ function isAlreadyKey(text) {
     if (typeof text !== 'string') return false;
     if (text.includes(' ')) return false;
     if (/[\u4e00-\u9fff]/.test(text)) return false;
-    return /^[a-z0-9_:]+(\.[a-z0-9_:]+)+$/.test(text);
+    // 允许大写字母（如 pauseScreen.gameIsPaused）
+    return /^[a-zA-Z0-9_:]+(\.[a-zA-Z0-9_:]+)+$/.test(text);
 }
 
 function isEmptyText(text) {
@@ -613,6 +614,13 @@ function processUI(json, filepath, ctx) {
                 if (value.startsWith('$') || value.startsWith('#')) continue;
                 if (isEmptyText(value)) continue;
                 if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
+
+                // 跳过动态拼接 / 引用 / 表达式
+                if (value.includes('%')) continue;        // %gui.back 等
+                if (value.includes('+')) continue;        // 拼接
+                if (value.includes('(') || value.includes(')')) continue;  // 表达式
+                if (value.trim().startsWith('<') || value.trim().startsWith('>')) continue;  // 引用标记
+
                 const baseKey = `ui.${uiBase}.text_${counter}`;
                 counter++;
                 if (replaceField(obj, 'text', baseKey, ctx, filepath, true)) replaced = true;
