@@ -601,7 +601,7 @@ function processTrading(json, filepath, ctx) {
 //  处理器：UI
 // ================================================================
 const NON_TEXT_VAR_SUFFIXES = [
-    'command', 'commands', 'cmd',
+    'command', 'commands', 'cmd', 'command|default',
     'action', 'event', 'event_name',
     'function', 'fn',
     'binding', 'binding_type',
