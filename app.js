@@ -601,35 +601,157 @@ function processTrading(json, filepath, ctx) {
 //  处理器：UI
 // ================================================================
 
+// ================================================================
+//  处理器：UI
+// ================================================================
+
+// 明确不是文本的变量名关键词
+const UI_NON_TEXT_KEYWORDS = [
+    'font_type', 'font', 'font_name',
+    'image', 'icon', 'texture', 'sprite',
+    'path', 'src', 'source',
+    'id', 'key', 'type', 'category',
+    'state', 'status', 'mode',
+    'color', 'size', 'width', 'height',
+    'x', 'y', 'z', 'offset',
+    'default_state', 'default_value',
+    'focus_override', 'focus_wrapped', 'focus',
+    'layer', 'z_order',
+    'action', 'event', 'command',
+    'padding', 'margin', 'anchor', 'align',
+    'visible', 'enabled', 'checked',
+    'button_id', 'menu_id', 'screen_id',
+    'namespace', 'binding', 'binding_type',
+    'property_name', 'source_property_name',
+    'collection_name', 'collection_index',
+    'toggle_state', 'toggle_default',
+];
+
+// 明确是文本的变量名关键词
+const UI_TEXT_KEYWORDS = [
+    'text', 'label', 'title', 'name',
+    'desc', 'description', 'message',
+    'tooltip', 'hint', 'tip', 'caption',
+    'placeholder', 'subtitle', 'header',
+    'content', 'body', 'summary',
+    'option', 'option_name', 'option_label',
+];
+
+
+function isTextVariableName(key) {
+    const name = key.substring(1).toLowerCase();
+
+    // 黑名单优先（先排除明确的非文本）
+    for (const b of UI_NON_TEXT_KEYWORDS) {
+        if (name === b) return false;
+        if (name.endsWith('_' + b)) return false;
+        if (name.startsWith(b + '_')) return false;
+    }
+
+    // 白名单
+    for (const w of UI_TEXT_KEYWORDS) {
+        if (name === w) return true;
+        if (name.endsWith('_' + w)) return true;
+        if (name.startsWith(w + '_')) return true;
+    }
+
+    // 默认不处理（保守）
+    return false;
+}
+
+
+function looksLikeText(value) {
+    const stripped = value.trim();
+
+    // 太短
+    if (stripped.length < 3) return false;
+
+    // 特殊前缀
+    if (stripped.startsWith('$')) return false;
+    if (stripped.startsWith('#')) return false;
+    if (stripped.startsWith('<')) return false;
+    if (stripped.startsWith('>')) return false;
+
+    // 已是键
+    if (isAlreadyKey(stripped)) return false;
+
+    // 路径 / 文件
+    if (/^(textures|fonts|sounds|ui|texts|models|scripts)\//i.test(stripped)) return false;
+    if (/\.(png|jpg|jpeg|json|ogg|wav|ttf|otf|mcfunction)$/i.test(stripped)) return false;
+
+    // 纯小写标识符
+    if (/^[a-z0-9_:]+$/.test(stripped)) return false;
+
+    // 全大写+下划线（常量）
+    if (/^[A-Z_][A-Z0-9_]*$/.test(stripped)) return false;
+
+    // 长驼峰标识符（长度 > 10 且首字母大写）
+    if (/^[A-Z][a-zA-Z0-9]{9,}$/.test(stripped)) return false;
+
+    // 含变量引用
+    if (/\$[a-zA-Z_]/.test(stripped)) return false;
+
+    // 拼接 / 表达式
+    if (stripped.includes('+')) return false;
+    if (stripped.includes('(')) return false;
+    if (stripped.includes(')')) return false;
+    if (stripped.includes('%')) return false;
+
+    // 文本特征
+    if (stripped.includes(' ')) return true;
+    if (/[A-Z]/.test(stripped)) return true;
+    if (/[\u4e00-\u9fff]/.test(stripped)) return true;
+    if (/[.!?,:;'"]/.test(stripped)) return true;
+
+    return false;
+}
+
+
 function processUI(json, filepath, ctx) {
     let replaced = false;
     const uiBase = filepath.split('/').pop().replace('.json', '');
     let counter = 0;
 
     function scan(obj) {
-        if (Array.isArray(obj)) { for (const item of obj) scan(item); return; }
+        if (Array.isArray(obj)) {
+            for (const item of obj) scan(item);
+            return;
+        }
         if (!obj || typeof obj !== 'object') return;
 
         for (const [key, value] of Object.entries(obj)) {
-            // ---- text 字段 ----
+            // ---- 情况1：text 字段 ----
             if (key === 'text' && typeof value === 'string') {
                 if (!looksLikeText(value)) continue;
-                if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
+                if (isAlreadyKey(value)) {
+                    ctx.referencedKeys.add(value);
+                    continue;
+                }
 
                 const baseKey = `ui.${uiBase}.text_${counter}`;
                 counter++;
-                if (replaceField(obj, 'text', baseKey, ctx, filepath, true)) replaced = true;
+                if (replaceField(obj, 'text', baseKey, ctx, filepath, true)) {
+                    replaced = true;
+                }
             }
-            // ---- $xxx 变量 ----
+            // ---- 情况2：$xxx 变量 ----
             else if (key.startsWith('$') && typeof value === 'string') {
+                // 键名判断 + 值判断
+                if (!isTextVariableName(key)) continue;
                 if (!looksLikeText(value)) continue;
-                if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
+                if (isAlreadyKey(value)) {
+                    ctx.referencedKeys.add(value);
+                    continue;
+                }
 
                 const varName = key.substring(1).replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase();
                 const baseKey = `ui.${uiBase}.${varName}_${counter}`;
                 counter++;
-                if (replaceField(obj, key, baseKey, ctx, filepath, true)) replaced = true;
+                if (replaceField(obj, key, baseKey, ctx, filepath, true)) {
+                    replaced = true;
+                }
             }
+            // ---- 递归 ----
             else {
                 scan(value);
             }
@@ -638,30 +760,6 @@ function processUI(json, filepath, ctx) {
 
     scan(json);
     return replaced;
-}
-
-
-function looksLikeText(value) {
-    const stripped = value.trim();
-    if (stripped.length < 3) return false;
-    if (stripped.startsWith('$')) return false;
-    if (stripped.startsWith('#')) return false;
-    if (stripped.startsWith('<')) return false;
-    if (stripped.startsWith('>')) return false;
-    if (isAlreadyKey(stripped)) return false;
-    if (/^[a-z0-9_:]+$/.test(stripped)) return false;
-    if (stripped.includes('+')) return false;
-    if (stripped.includes('(')) return false;
-    if (stripped.includes(')')) return false;
-    if (stripped.includes('%')) return false;
-
-    // 含文本特征
-    if (stripped.includes(' ')) return true;
-    if (/[A-Z]/.test(stripped)) return true;
-    if (/[\u4e00-\u9fff]/.test(stripped)) return true;
-    if (/[.!?,:;'"]/.test(stripped)) return true;
-
-    return false;
 }
 
 // ================================================================
