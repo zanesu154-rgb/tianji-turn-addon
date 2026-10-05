@@ -736,6 +736,7 @@ function processUI(json, filepath, ctx) {
             }
             // ---- 情况2：$xxx 变量 ----
             else if (key.startsWith('$') && typeof value === 'string') {
+                log(`[UI调试] key="${key}", value="${value}", isText=${isTextVariableName(key)}, looksLike=${looksLikeText(value)}`);
                 // 键名判断 + 值判断
                 if (!isTextVariableName(key)) continue;
                 if (!looksLikeText(value)) continue;
