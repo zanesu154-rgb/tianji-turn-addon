@@ -601,7 +601,7 @@ function processTrading(json, filepath, ctx) {
 //  处理器：UI
 // ================================================================
 const NON_TEXT_VAR_SUFFIXES = [
-    'command', 'commands', 'cmd', 'command|default',
+    'command', 'commands', 'cmd',
     'action', 'event', 'event_name',
     'function', 'fn',
     'binding', 'binding_type',
@@ -615,7 +615,10 @@ const NON_TEXT_VAR_SUFFIXES = [
 ];
 
 function isNonTextVarName(key) {
-    const name = key.substring(1).toLowerCase();
+    let name = key.substring(1).toLowerCase();
+    const pipeIdx = name.indexOf('|');
+    if (pipeIdx !== -1) name = name.substring(0, pipeIdx);
+
     for (const s of NON_TEXT_VAR_SUFFIXES) {
         if (name === s) return true;
         if (name.endsWith('_' + s)) return true;
