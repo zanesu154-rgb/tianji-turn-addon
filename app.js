@@ -611,35 +611,25 @@ function processUI(json, filepath, ctx) {
         if (!obj || typeof obj !== 'object') return;
 
         for (const [key, value] of Object.entries(obj)) {
-            // ---- 情况1：text 字段 ----
+            // ---- text 字段 ----
             if (key === 'text' && typeof value === 'string') {
-                if (value.startsWith('$') || value.startsWith('#')) continue;
-                if (isEmptyText(value)) continue;
+                if (!looksLikeText(value)) continue;
                 if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
-                // 跳过动态拼接
-                if (value.includes('%')) continue;
-                if (value.includes('+')) continue;
-                if (value.includes('(') || value.includes(')')) continue;
-                if (value.trim().startsWith('<') || value.trim().startsWith('>')) continue;
 
                 const baseKey = `ui.${uiBase}.text_${counter}`;
                 counter++;
                 if (replaceField(obj, 'text', baseKey, ctx, filepath, true)) replaced = true;
             }
-            // ---- 情况2：$xxx 变量 ----
+            // ---- $xxx 变量 ----
             else if (key.startsWith('$') && typeof value === 'string') {
-                if (isEmptyText(value)) continue;
+                if (!looksLikeText(value)) continue;
                 if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
-                if (value.includes('+')) continue;
-                if (value.includes('(') || value.includes(')')) continue;
 
-                // 变量名去掉 $ 做键名
                 const varName = key.substring(1).replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase();
                 const baseKey = `ui.${uiBase}.${varName}_${counter}`;
                 counter++;
                 if (replaceField(obj, key, baseKey, ctx, filepath, true)) replaced = true;
             }
-            // ---- 递归 ----
             else {
                 scan(value);
             }
@@ -648,6 +638,30 @@ function processUI(json, filepath, ctx) {
 
     scan(json);
     return replaced;
+}
+
+
+function looksLikeText(value) {
+    const stripped = value.trim();
+    if (stripped.length < 3) return false;
+    if (stripped.startsWith('$')) return false;
+    if (stripped.startsWith('#')) return false;
+    if (stripped.startsWith('<')) return false;
+    if (stripped.startsWith('>')) return false;
+    if (isAlreadyKey(stripped)) return false;
+    if (/^[a-z0-9_:]+$/.test(stripped)) return false;
+    if (stripped.includes('+')) return false;
+    if (stripped.includes('(')) return false;
+    if (stripped.includes(')')) return false;
+    if (stripped.includes('%')) return false;
+
+    // 含文本特征
+    if (stripped.includes(' ')) return true;
+    if (/[A-Z]/.test(stripped)) return true;
+    if (/[\u4e00-\u9fff]/.test(stripped)) return true;
+    if (/[.!?,:;'"]/.test(stripped)) return true;
+
+    return false;
 }
 
 // ================================================================
