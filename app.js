@@ -600,102 +600,36 @@ function processTrading(json, filepath, ctx) {
 // ================================================================
 //  处理器：UI
 // ================================================================
-// 明确不是文本的变量名关键词
-const UI_NON_TEXT_KEYWORDS = [
-    'font_type', 'font', 'font_name',
-    'image', 'icon', 'texture', 'sprite',
-    'path', 'src', 'source',
-    'id', 'key', 'type', 'category',
-    'state', 'status', 'mode',
-    'color', 'size', 'width', 'height',
-    'x', 'y', 'z', 'offset',
-    'default_state', 'default_value',
-    'focus_override', 'focus_wrapped', 'focus',
-    'layer', 'z_order',
-    'action', 'event', 'command',
-    'padding', 'margin', 'anchor', 'align',
-    'visible', 'enabled', 'checked',
-    'button_id', 'menu_id', 'screen_id',
-    'namespace', 'binding', 'binding_type',
-    'property_name', 'source_property_name',
-    'collection_name', 'collection_index',
-    'toggle_state', 'toggle_default',
-];
-
-// 明确是文本的变量名关键词
-const UI_TEXT_KEYWORDS = [
-    'text', 'label', 'title', 'name',
-    'desc', 'description', 'message',
-    'tooltip', 'hint', 'tip', 'caption',
-    'placeholder', 'subtitle', 'header',
-    'content', 'body', 'summary',
-];
-
-
-function isTextVariableName(key) {
-    const name = key.substring(1).toLowerCase();
-
-    // 黑名单优先
-    for (const b of UI_NON_TEXT_KEYWORDS) {
-        if (name === b) return false;
-        if (name.endsWith('_' + b)) return false;
-        if (name.startsWith(b + '_')) return false;
-    }
-
-    // 白名单
-    for (const w of UI_TEXT_KEYWORDS) {
-        if (name === w) return true;
-        if (name.endsWith('_' + w)) return true;
-        if (name.startsWith(w + '_')) return true;
-    }
-
-    // 默认不处理
-    return false;
-}
 /**
- * 判断一个字符串是否需要翻译。
- * 返回 true = 要翻译，false = 跳过。
+ * 严格判断：这个值看起来像"技术标识符"吗？
+ * 如果是 → 跳过
  */
-function shouldTranslate(text) {
-    if (typeof text !== 'string') return false;
-    const s = text.trim();
+function looksLikeTechnicalValue(value) {
+    const s = value.trim();
 
-    // 1. 太短
-    if (s.length < 3) return false;
+    if (s.length < 3) return true;                           // 太短
+    if (s.startsWith('$')) return true;                      // 引用
+    if (s.startsWith('#')) return true;                      // 引用
+    if (s.startsWith('<')) return true;                      // 引用
+    if (s.startsWith('>')) return true;                      // 引用
+    if (isAlreadyKey(s)) return true;                        // 已是键
 
-    // 2. 特殊前缀
-    if (s.startsWith('$')) return false;   // 引用
-    if (s.startsWith('#')) return false;   // 引用
-    if (s.startsWith('<')) return false;   // 引用
-    if (s.startsWith('>')) return false;   // 引用
-    if (s.startsWith('§') && s.length < 4) return false; // 纯颜色码
+    // 路径 / 文件
+    if (/^(textures|fonts|sounds|ui|texts|models|scripts)\//i.test(s)) return true;
+    if (/\.(png|jpg|jpeg|json|ogg|wav|ttf|otf|mcfunction|lang)$/i.test(s)) return true;
 
-    // 3. 已是键
-    if (isAlreadyKey(s)) return false;
+    // 技术标识符
+    if (/^[a-z0-9_:./-]+$/.test(s)) return true;             // 纯小写+符号
+    if (/^[A-Z_][A-Z0-9_]*$/.test(s)) return true;           // 全大写常量
+    if (/^[A-Z][a-zA-Z0-9]{9,}$/.test(s)) return true;       // 长驼峰
+    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s) && !/[A-Z]/.test(s.slice(1))) return true;
 
-    // 4. 路径 / 文件
-    if (/^(textures|fonts|sounds|ui|texts|models|scripts)\//i.test(s)) return false;
-    if (/\.(png|jpg|jpeg|json|ogg|wav|ttf|otf|mcfunction|lang)$/i.test(s)) return false;
-
-    // 5. 技术标识符
-    if (/^[a-z0-9_:./-]+$/.test(s)) return false;              // 纯小写+符号
-    if (/^[A-Z_][A-Z0-9_]*$/.test(s)) return false;            // 全大写常量
-    if (/^[A-Z][a-zA-Z0-9]{9,}$/.test(s)) return false;        // 长驼峰
-    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s) && !/[A-Z]/.test(s.slice(1))) return false;  // 全小写无点
-
-    // 6. 引用 / 表达式
-    if (/\$[a-zA-Z_]/.test(s)) return false;   // 含 $变量
-    if (s.includes('+')) return false;         // 拼接
-    if (s.includes('(')) return false;         // 表达式
-    if (s.includes(')')) return false;
-    if (s.includes('%')) return false;         // % 引用
-
-    // 7. 有文本特征
-    if (s.includes(' ')) return true;
-    if (/[\u4e00-\u9fff]/.test(s)) return true;   // 中文
-    if (/[.!?,:;'"]/.test(s)) return true;        // 标点
-    if (/§./.test(s)) return true;                // 含颜色码
-    if (/^[A-Z]/.test(s)) return true;            // 首字母大写 + 无上述特征
+    // 引用 / 表达式
+    if (/\$[a-zA-Z_]/.test(s)) return true;
+    if (s.includes('+')) return true;
+    if (s.includes('(')) return true;
+    if (s.includes(')')) return true;
+    if (s.includes('%')) return true;
 
     return false;
 }
@@ -713,23 +647,24 @@ function processUI(json, filepath, ctx) {
         for (const [key, value] of Object.entries(obj)) {
             // ---- text 字段 ----
             if (key === 'text' && typeof value === 'string') {
-                if (!shouldTranslate(value)) continue;
+                if (looksLikeTechnicalValue(value)) continue;   // ★ 加这一行
+                if (isEmptyText(value)) continue;
                 if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
+
                 const baseKey = `ui.${uiBase}.text_${counter}`;
                 counter++;
                 if (replaceField(obj, 'text', baseKey, ctx, filepath, true)) replaced = true;
             }
             // ---- $xxx 变量 ----
             else if (key.startsWith('$') && typeof value === 'string') {
-                if (!isTextVariableName(key)) continue;
-                if (!shouldTranslate(value)) continue;
-                if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
+                if (looksLikeTechnicalValue(value)) continue;   // ★ 加这一行
+
                 const varName = key.substring(1).replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase();
                 const baseKey = `ui.${uiBase}.${varName}_${counter}`;
                 counter++;
                 if (replaceField(obj, key, baseKey, ctx, filepath, true)) replaced = true;
             }
-            // ---- 其他键：递归 ----
+            // ---- 递归 ----
             else {
                 scan(value);
             }
