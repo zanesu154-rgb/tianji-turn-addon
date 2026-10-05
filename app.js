@@ -600,7 +600,58 @@ function processTrading(json, filepath, ctx) {
 // ================================================================
 //  处理器：UI
 // ================================================================
+// 明确不是文本的变量名关键词
+const UI_NON_TEXT_KEYWORDS = [
+    'font_type', 'font', 'font_name',
+    'image', 'icon', 'texture', 'sprite',
+    'path', 'src', 'source',
+    'id', 'key', 'type', 'category',
+    'state', 'status', 'mode',
+    'color', 'size', 'width', 'height',
+    'x', 'y', 'z', 'offset',
+    'default_state', 'default_value',
+    'focus_override', 'focus_wrapped', 'focus',
+    'layer', 'z_order',
+    'action', 'event', 'command',
+    'padding', 'margin', 'anchor', 'align',
+    'visible', 'enabled', 'checked',
+    'button_id', 'menu_id', 'screen_id',
+    'namespace', 'binding', 'binding_type',
+    'property_name', 'source_property_name',
+    'collection_name', 'collection_index',
+    'toggle_state', 'toggle_default',
+];
 
+// 明确是文本的变量名关键词
+const UI_TEXT_KEYWORDS = [
+    'text', 'label', 'title', 'name',
+    'desc', 'description', 'message',
+    'tooltip', 'hint', 'tip', 'caption',
+    'placeholder', 'subtitle', 'header',
+    'content', 'body', 'summary',
+];
+
+
+function isTextVariableName(key) {
+    const name = key.substring(1).toLowerCase();
+
+    // 黑名单优先
+    for (const b of UI_NON_TEXT_KEYWORDS) {
+        if (name === b) return false;
+        if (name.endsWith('_' + b)) return false;
+        if (name.startsWith(b + '_')) return false;
+    }
+
+    // 白名单
+    for (const w of UI_TEXT_KEYWORDS) {
+        if (name === w) return true;
+        if (name.endsWith('_' + w)) return true;
+        if (name.startsWith(w + '_')) return true;
+    }
+
+    // 默认不处理
+    return false;
+}
 /**
  * 判断一个字符串是否需要翻译。
  * 返回 true = 要翻译，false = 跳过。
