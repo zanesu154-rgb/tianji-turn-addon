@@ -292,7 +292,8 @@ function translateCommand(cmd, prefix, ctx, filepath, keyPrefix = 'entity') {
     const m = titleRe.exec(cmd);
     if (m) {
         const text = m[2].trim();
-        if (!isAlreadyKey(text) && !text.startsWith('{') && !isEmptyText(text)) {
+        // ★ 加 shouldSkipJsText
+        if (!isAlreadyKey(text) && !text.startsWith('{') && !isEmptyText(text) && !shouldSkipJsText(text)) {
             const key = makeUniqueKey(`${keyPrefix}.${prefix}.message`, ctx.usedKeys);
             const escaped = escapeLangValue(text);
             ctx.addKey(key, escaped, filepath);
@@ -309,6 +310,7 @@ function translateCommand(cmd, prefix, ctx, filepath, keyPrefix = 'entity') {
     cmd = cmd.replace(/("text"\s*:\s*")([^"]+)(")/g, (match, p1, text, p3) => {
         if (isAlreadyKey(text)) { ctx.referencedKeys.add(text); return match; }
         if (isEmptyText(text)) return match;
+        if (shouldSkipJsText(text)) return match;   // ★ 加这里
         const key = makeUniqueKey(`${keyPrefix}.${prefix}.message`, ctx.usedKeys);
         const escaped = escapeLangValue(text);
         ctx.addKey(key, escaped, filepath);
@@ -806,7 +808,8 @@ function translateCommandString(cmd, category, fileBase, ctx, filepath) {
     const m = titleRe.exec(cmd);
     if (m) {
         const text = m[2].trim();
-        if (!isAlreadyKey(text) && !text.startsWith('{') && !isEmptyText(text)) {
+        // ★ 加 shouldSkipJsText
+        if (!isAlreadyKey(text) && !text.startsWith('{') && !isEmptyText(text) && !shouldSkipJsText(text)) {
             const key = makeUniqueKey(`script.${category}.${fileBase}`, ctx.usedKeys);
             const escaped = escapeLangValue(text);
             ctx.addKey(key, escaped, filepath);
@@ -823,6 +826,7 @@ function translateCommandString(cmd, category, fileBase, ctx, filepath) {
     cmd = cmd.replace(/("text"\s*:\s*")([^"]+)(")/g, (match, p1, text, p3) => {
         if (isAlreadyKey(text)) { ctx.referencedKeys.add(text); return match; }
         if (isEmptyText(text)) return match;
+        if (shouldSkipJsText(text)) return match;   // ★ 加这里
         const key = makeUniqueKey(`script.${category}.${fileBase}`, ctx.usedKeys);
         const escaped = escapeLangValue(text);
         ctx.addKey(key, escaped, filepath);
