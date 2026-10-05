@@ -600,6 +600,28 @@ function processTrading(json, filepath, ctx) {
 // ================================================================
 //  处理器：UI
 // ================================================================
+const NON_TEXT_VAR_SUFFIXES = [
+    'command', 'commands', 'cmd',
+    'action', 'event', 'event_name',
+    'function', 'fn',
+    'binding', 'binding_type',
+    'property_name', 'source_property_name',
+    'collection_name', 'collection_index',
+    'state', 'default_state',
+    'font_type', 'font',
+    'image', 'icon', 'texture', 'sprite',
+    'path', 'src', 'source',
+    'id', 'key', 'type',
+];
+
+function isNonTextVarName(key) {
+    const name = key.substring(1).toLowerCase();
+    for (const s of NON_TEXT_VAR_SUFFIXES) {
+        if (name === s) return true;
+        if (name.endsWith('_' + s)) return true;
+    }
+    return false;
+}
 /**
  * 严格判断：这个值看起来像"技术标识符"吗？
  * 如果是 → 跳过
@@ -622,7 +644,7 @@ function looksLikeTechnicalValue(value) {
     if (/^[a-z0-9_:./-]+$/.test(s)) return true;             // 纯小写+符号
     if (/^[A-Z_][A-Z0-9_]*$/.test(s)) return true;           // 全大写常量
     if (/^[A-Z][a-zA-Z0-9]{9,}$/.test(s)) return true;       // 长驼峰
-    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s) && !/[A-Z]/.test(s.slice(1))) return true;
+    if (/^[a-z][a-zA-Z0-9_]*$/.test(s) && !/[A-Z]/.test(s)) return true;
     // ★ 新增：下划线分隔的标识符（至少 2 个下划线）
     if (/^[a-zA-Z][a-zA-Z0-9]*(_[a-zA-Z0-9]+){2,}$/.test(s)) return true;
 
@@ -649,6 +671,7 @@ function processUI(json, filepath, ctx) {
         for (const [key, value] of Object.entries(obj)) {
             // ---- text 字段 ----
             if (key === 'text' && typeof value === 'string') {
+                if (isNonTextVarName(key)) continue;   // ★ 加这行
                 if (looksLikeTechnicalValue(value)) continue;   // ★ 加这一行
                 if (isEmptyText(value)) continue;
                 if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
