@@ -671,8 +671,8 @@ function processUI(json, filepath, ctx) {
         for (const [key, value] of Object.entries(obj)) {
             // ---- text 字段 ----
             if (key === 'text' && typeof value === 'string') {
-                if (isNonTextVarName(key)) continue;   // ★ 加这行
-                if (looksLikeTechnicalValue(value)) continue;   // ★ 加这一行
+                // ★ 去掉 isNonTextVarName，因为 key 是 "text" 不是 $xxx
+                if (looksLikeTechnicalValue(value)) continue;
                 if (isEmptyText(value)) continue;
                 if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
 
@@ -682,7 +682,11 @@ function processUI(json, filepath, ctx) {
             }
             // ---- $xxx 变量 ----
             else if (key.startsWith('$') && typeof value === 'string') {
-                if (looksLikeTechnicalValue(value)) continue;   // ★ 加这一行
+                // ★ 这里加 isNonTextVarName
+                if (isNonTextVarName(key)) continue;
+                if (looksLikeTechnicalValue(value)) continue;
+                if (isEmptyText(value)) continue;
+                if (isAlreadyKey(value)) { ctx.referencedKeys.add(value); continue; }
 
                 const varName = key.substring(1).replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase();
                 const baseKey = `ui.${uiBase}.${varName}_${counter}`;
