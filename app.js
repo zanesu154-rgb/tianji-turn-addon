@@ -623,6 +623,8 @@ function looksLikeTechnicalValue(value) {
     if (/^[A-Z_][A-Z0-9_]*$/.test(s)) return true;           // 全大写常量
     if (/^[A-Z][a-zA-Z0-9]{9,}$/.test(s)) return true;       // 长驼峰
     if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s) && !/[A-Z]/.test(s.slice(1))) return true;
+    // ★ 新增：下划线分隔的标识符（至少 2 个下划线）
+    if (/^[a-zA-Z][a-zA-Z0-9]*(_[a-zA-Z0-9]+){2,}$/.test(s)) return true;
 
     // 引用 / 表达式
     if (/\$[a-zA-Z_]/.test(s)) return true;
