@@ -645,8 +645,15 @@ function looksLikeTechnicalValue(value) {
     if (/^[A-Z_][A-Z0-9_]*$/.test(s)) return true;           // 全大写常量
     if (/^[A-Z][a-zA-Z0-9]{9,}$/.test(s)) return true;       // 长驼峰
     if (/^[a-z][a-zA-Z0-9_]*$/.test(s) && !/[A-Z]/.test(s)) return true;
-    // ★ 新增：下划线分隔的标识符（至少 2 个下划线）
-    if (/^[a-zA-Z][a-zA-Z0-9]*(_[a-zA-Z0-9]+){2,}$/.test(s)) return true;
+    // ★ 新增1：小写开头的驼峰（如 waterBreathing）
+    if (/^[a-z]+[A-Z][a-zA-Z0-9]*$/.test(s)) return true;
+
+    // ★ 新增2：至少 2 个大写的混合标识符（如 NFhk0xYk、a6OYSoKy）
+    const upperCount = (s.match(/[A-Z]/g) || []).length;
+    if (/^[a-zA-Z0-9]+$/.test(s) && upperCount >= 2 && /[a-z]/.test(s)) return true;
+
+    // ★ 新增3：含下划线 + 长度 ≥ 8 + 无空格（如 hide_scoreboardSidebar）
+    if (/_/.test(s) && s.length >= 8 && !/\s/.test(s)) return true;
 
     // 引用 / 表达式
     if (/\$[a-zA-Z_]/.test(s)) return true;
@@ -654,6 +661,8 @@ function looksLikeTechnicalValue(value) {
     if (s.includes('(')) return true;
     if (s.includes(')')) return true;
     if (s.includes('%')) return true;
+
+
 
     return false;
 }
