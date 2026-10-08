@@ -1249,6 +1249,8 @@ async function processFile(file) {
                 replaced = processManifest(data, name, ctx);
             } else if (matchDir(rel, 'trading', 'trades', 'trade_tables')) {
                 replaced = processTrading(data, name, ctx);
+            } else if (matchDir(rel, 'loot_tables', 'loot_table')) {
+                replaced = processLootTableFile(data, name, ctx);
             } else if (matchDir(rel, 'items', 'item', 'item_definitions')) {
                 replaced = processItem(data, name, ctx);
             } else if (matchDir(rel, 'blocks', 'block', 'block_definitions')) {
