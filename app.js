@@ -1036,6 +1036,80 @@ function processMcFunction(content, filepath, ctx) {
 }
 
 // ================================================================
+//  处理器：loot_tables
+// ================================================================
+
+function processLootTableFile(json, filepath, ctx) {
+    let replaced = false;
+    const fileBase = filepath.split('/').pop().replace('.json', '');
+
+    function scan(obj) {
+        if (Array.isArray(obj)) {
+            for (const item of obj) scan(item);
+            return;
+        }
+        if (!obj || typeof obj !== 'object') return;
+
+        const func = obj.function;
+        if (func === 'set_name') {
+            if (replaceField(obj, 'name', `loot.${fileBase}.set_name`,
+                ctx, filepath, false)) replaced = true;
+        } else if (func === 'set_lore') {
+            if (processLoreLoot(obj, fileBase, ctx, filepath)) replaced = true;
+        }
+
+        for (const [key, value] of Object.entries(obj)) {
+            if (key !== 'name' && key !== 'lore') scan(value);
+        }
+    }
+
+    scan(json);
+    return replaced;
+}
+
+
+function processLoreLoot(obj, fileBase, ctx, filepath) {
+    const lore = obj.lore;
+    if (!Array.isArray(lore)) return false;
+
+    let replaced = false;
+    let counter = 0;
+
+    for (let i = 0; i < lore.length; i++) {
+        const item = lore[i];
+
+        if (typeof item === 'string') {
+            if (isEmptyText(item) || isAlreadyKey(item)) continue;
+            const key = makeUniqueKey(`loot.${fileBase}.lore_${counter}`, ctx.usedKeys);
+            counter++;
+            ctx.addKey(key, escapeLangValue(item), filepath);
+            lore[i] = key;
+            replaced = true;
+        } else if (item && typeof item === 'object' && 'rawtext' in item) {
+            const raw = item.rawtext || [];
+            for (let j = 0; j < raw.length; j++) {
+                const node = raw[j];
+                if (!node || typeof node !== 'object') continue;
+                if ('translate' in node) { ctx.referencedKeys.add(node.translate); continue; }
+                if (typeof node.text === 'string') {
+                    const text = node.text;
+                    if (isEmptyText(text) || isAlreadyKey(text)) continue;
+                    const key = makeUniqueKey(`loot.${fileBase}.lore_${counter}`, ctx.usedKeys);
+                    counter++;
+                    ctx.addKey(key, escapeLangValue(text), filepath);
+                    const newNode = { translate: key };
+                    if (node.with) newNode.with = node.with;
+                    raw[j] = newNode;
+                    replaced = true;
+                }
+            }
+        }
+    }
+
+    return replaced;
+}
+
+// ================================================================
 //  路径判断
 // ================================================================
 
