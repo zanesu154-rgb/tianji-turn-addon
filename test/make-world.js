@@ -1,4 +1,4 @@
-// 生成一个最小的测试存档（不含任何个人信息）：本地玩家背包里有成书和命名物品，末影箱的潜影盒里也有一本书
+// 生成一个最小的测试存档（不含任何个人信息）：本地玩家背包里有成书、书与笔和命名物品，末影箱的潜影盒里也有一本书
 // 用法：node test/make-world.js 输出目录
 const fs = require('fs'), path = require('path');
 const { NS } = require('./load');
@@ -14,7 +14,8 @@ const named = (slot, id, name) => [B('Count', 1), S('Name', id), B('Slot', slot)
 const shulker = (slot, inner) => [B('Count', 1), S('Name', 'minecraft:shulker_box'), B('Slot', slot), C('tag', [L('Items', T.COMPOUND, inner)])];
 const player = [
   S('identifier', 'minecraft:player'),
-  L('Inventory', T.COMPOUND, [book(0, '冒险日志', '第一天：我来到了这片大陆。'), named(1, 'minecraft:iron_sword', '勇者之剑')]),
+  L('Inventory', T.COMPOUND, [book(0, '冒险日志', '第一天：我来到了这片大陆。'), named(1, 'minecraft:iron_sword', '勇者之剑'),
+    [B('Count', 1), S('Name', 'minecraft:writable_book'), B('Slot', 2), C('tag', [L('pages', T.COMPOUND, [[S('photoname', ''), S('text', '草稿：还没写完。')]])])]]),
   L('EnderChestInventory', T.COMPOUND, [shulker(0, [book(0, '秘密笔记', '宝藏在出生点下面。')])]),
   L('Armor', T.COMPOUND, [named(0, 'minecraft:iron_helmet', '守卫头盔')]),
   L('Pos', T.FLOAT, [0.5, 64, 0.5]),

@@ -506,6 +506,25 @@ body.mode-world .addon-only {
     border-color: var(--error);
 }
 
+.nbt-count {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.nbt-count.over {
+    color: var(--warning);
+}
+
+.nbt-notice {
+    color: var(--warning);
+    font-size: 12px;
+    margin: 4px 0 0;
+}
+
+.nbt-notice:empty {
+    display: none;
+}
+
 .nbt-msg {
     color: var(--error);
     font-size: 12px;
