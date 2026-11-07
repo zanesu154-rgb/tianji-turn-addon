@@ -35,18 +35,6 @@
         input.value = value;
         let committed = value;
         const msg = el('span', { class: 'nbt-msg' });
-        // 有长度限制的字段（成书页、书名）显示字数
-        const limit = isStr && session.limitOf ? session.limitOf(ref) : null;
-        const counter = limit ? el('span', { class: 'nbt-count' }) : null;
-        const updateCount = () => {
-            if (!counter) return;
-            const n = input.value.length, lines = input.value.split('\n').length;
-            const over = n > limit.max || Boolean(limit.lines && lines > limit.lines);
-            counter.textContent = `${n} / ${limit.max} 字${limit.lines ? `，${lines} / ${limit.lines} 行` : ''}${over ? (limit.auto ? '（超出部分会自动分页）' : '（超出游戏限制）') : ''}`;
-            counter.classList.toggle('over', over);
-        };
-        updateCount();
-        if (counter) input.addEventListener('input', updateCount);
         const commit = () => {
             if (input.value === committed) return;
             try {
@@ -64,18 +52,8 @@
         input.addEventListener('change', commit);
         input.addEventListener('blur', commit);
         if (!isStr) input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } });
-        if (isStr) {
-            // 按内容自动撑开（包括长文本自动折行），最多约 10 行，之后滚动
-            const fit = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight + 2, 220) + 'px'; };
-            input.addEventListener('input', fit);
-            requestAnimationFrame(fit);
-            if (typeof IntersectionObserver !== 'undefined') {
-                // 在折叠 / 隐藏的面板里创建时高度为 0，显示出来后再算一次
-                const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { fit(); io.disconnect(); } });
-                io.observe(input);
-            }
-        }
-        return el('div', { class: 'nbt-value' }, input, counter, msg);
+        if (isStr) input.addEventListener('input', () => { input.rows = Math.min(8, Math.max(1, input.value.split('\n').length)); });
+        return el('div', { class: 'nbt-value' }, input, msg);
     }
 
     function mount(container, session, { onChange, downloadCsv } = {}) {
@@ -83,20 +61,7 @@
         container.hidden = false;
         const editsBadge = el('span', { class: 'nbt-badge' });
         const updateBadge = () => { editsBadge.textContent = session.edits ? `已手动修改 ${session.edits} 处` : '尚未手动修改'; };
-        const noticeEl = el('p', { class: 'nbt-notice' });
-        const changed = () => {
-            updateBadge();
-            noticeEl.textContent = session.notice || '';
-            onChange && onChange();
-            if (session.structureChanged) {
-                // 自动分页插入了新页：重新渲染列表，引用已更新
-                session.structureChanged = false;
-                untr.length = 0;
-                untr.push(...session.ctx.untranslatable.filter(u => u.ref));
-                renderManual();
-                if (q.value.trim()) doSearch();
-            }
-        };
+        const changed = () => { updateBadge(); onChange && onChange(); };
         updateBadge();
 
         const untr = session.ctx.untranslatable.filter(u => u.ref);
@@ -115,7 +80,6 @@
 
         container.append(
             el('div', { class: 'nbt-head' }, el('span', { class: 'nbt-title', text: 'NBT 编辑器' }), editsBadge),
-            noticeEl,
             el('p', { class: 'nbt-hint', text: '这些文本游戏只按纯文本显示，无法用翻译键。可以直接在这里改成目标语言；所有修改会在“下载转换后文件”时写回存档。' }),
             tabBar,
         );
