@@ -347,6 +347,38 @@ console.log(JSON.stringify(calls));`;
     const verityReplies = newCalls.filter(c => c[0] === 'sendMessage').slice(-2).map(c => render(c[1], zh));
     check('Verity：西语提问经正则归一化后仍触发正确回答（已翻译）', verityReplies[0] === 'There are a few players online right now.' && verityReplies[1].startsWith('The Protestant Reformation'), verityReplies.join(' / '));
     fs.rmSync(tmp, { recursive: true, force: true });
+
+    // -----------------------------------------------------------
+    console.log('\n[6] 世界存档（test/world-fixture，含个人 Xbox ID，不提交到仓库；不存在时跳过）');
+    if (fs.existsSync(path.join(__dirname, 'world-fixture', 'db', 'CURRENT'))) {
+        const wm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
+        const wr = await NS.runWorldPipeline(wm, { baseName: 'test' }, () => {});
+        const dbf = new Map([...wm.files].filter(([p]) => p.startsWith('db/')).map(([p, v]) => [p.slice(3), new Uint8Array(v)]));
+        const db = await NS.LevelDB.openDb(dbf);
+        const tags = db.entries().flatMap(e => {
+            const k = e.key;
+            const nb = ((k.length === 9 || k.length === 13) && k[k.length - 1] === 49) || String.fromCharCode(...k.subarray(0, 11)) === 'actorprefix';
+            return nb ? NS.NBT.readAll(e.value).map(t => t.v) : [];
+        });
+        const G = NS.NBT.getStr, C = NS.NBT.child;
+        const wl = NS.parseLang(wm.files.get('resource_packs/world_texts/texts/zh_CN.lang'));
+        const rr = (s) => render(JSON.parse(s), wl);
+        const sign = tags.find(c => G(c, 'id') === 'Sign');
+        check('告示牌正反面 → rawtext 翻译键', rr(G(C(sign, 'FrontText').v, 'Text')) === '这是一条测试文本' && rr(G(C(sign, 'BackText').v, 'Text')) === '这也是一条测试文本');
+        const hang = tags.find(c => G(c, 'id') === 'HangingSign');
+        check('悬挂告示牌（含小写单词 hello）', rr(G(C(hang, 'FrontText').v, 'Text')) === '你好' && rr(G(C(hang, 'BackText').v, 'Text')) === 'hello');
+        const cmds = tags.filter(c => G(c, 'id') === 'CommandBlock').map(c => G(c, 'Command'));
+        check('命令方块 title / titleraw → 翻译键', cmds.filter(c => c.startsWith('/titleraw') && c.includes('"translate"')).length === 2);
+        check('命令方块 say / tell 保持原样并记入报告', cmds.includes('/say 这是一条测试文本') && cmds.includes('/tell @a 这是一条测试文本') && wr.ctx.untranslatable.filter(u => /say|tell/.test(u.where)).length === 2);
+        const npc = tags.find(c => G(c, 'identifier') === 'minecraft:npc');
+        const acts = JSON.parse(G(npc, 'Actions'));
+        check('NPC 名字、正文、按钮 → 翻译键', rr(G(npc, 'RawtextName')) === '你好,claude' && rr(G(npc, 'InterativeText')) === '这是一条测试文本' && rr(acts[0].button_name) === '这是一条测试文本');
+        check('NPC 按钮命令保持不变', acts[0].data[0].cmd_line === '/give @a command_block');
+        check('箱子名、物品名、成书、盔甲架名记入报告', ['也许能修改这个名字', '也许你能改变这个物品的名字', '你能改书名吗？', '当然，这也是一条测试文本', '能改nametag吗？'].every(t => wr.ctx.untranslatable.some(u => u.text === t)));
+        check('存档登记了新资源包', JSON.parse(wm.files.get('world_resource_packs.json'))[0].pack_id === JSON.parse(wm.files.get('resource_packs/world_texts/manifest.json')).header.uuid);
+        check('数据库其它键不受影响', db.info.keys === 24);
+    }
+
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
