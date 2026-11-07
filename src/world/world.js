@@ -25,7 +25,10 @@
     const isActorKey = (k) => k.length >= 11 && String.fromCharCode(...k.subarray(0, 11)) === 'actorprefix';
     const STRUCT_PREFIX = 'structuretemplate';
     const isStructKey = (k) => k.length > STRUCT_PREFIX.length && String.fromCharCode(...k.subarray(0, STRUCT_PREFIX.length)) === STRUCT_PREFIX;
-    const wantKey = (k) => isChunkTag(k, 49) || isChunkTag(k, 50) || isActorKey(k) || isStructKey(k);
+    // 玩家数据：本地玩家 ~local_player，多人存档里的其他玩家 player_server_… / player_…
+    const keyText = (k, n) => String.fromCharCode(...k.subarray(0, Math.min(n, k.length)));
+    const isPlayerKey = (k) => keyText(k, 13) === '~local_player' || keyText(k, 7) === 'player_';
+    const wantKey = (k) => isChunkTag(k, 49) || isChunkTag(k, 50) || isActorKey(k) || isStructKey(k) || isPlayerKey(k);
 
     // ---------------- NBT 路径 ----------------
     /** 按路径取节点：返回 { t, v, set(v) } */
@@ -205,13 +208,14 @@
             if (getStr(c, 'Command')) cmd(P('Command'), `${kp}.command.${idPart}`);   // 命令方块矿车
             const cn = getStr(c, 'CustomName');
             if (cn && ident !== 'minecraft:npc') report(P('CustomName'), '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
-            for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory']) items(P(f));
+            for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory', 'EnderChestInventory', 'PlayerUIItems']) items(P(f));
         }
         return changed;
     }
 
     /** 方块实体 / 实体的显示名称 */
     function unitLabel(rec, c, kind) {
+        if (rec && rec.kind === 'player') return `玩家：${rec.name}`;
         const prefix = rec && rec.kind === 'structure' ? `[${rec.name}] ` : '';
         if (!Array.isArray(c)) return prefix + kind;
         if (kind === 'block') {
@@ -233,7 +237,7 @@
      */
     function unitsOf(rec) {
         if (rec.kind === 'level') return [];
-        if (rec.kind !== 'structure') return rec.tags.map((tg, ri) => tg.t === T.COMPOUND ? { base: [ri], kind: rec.kind } : null).filter(Boolean);
+        if (rec.kind !== 'structure') return rec.tags.map((tg, ri) => tg.t === T.COMPOUND ? { base: [ri], kind: rec.kind === 'player' ? 'actor' : rec.kind } : null).filter(Boolean);
         const units = [];
         rec.tags.forEach((tg, ri) => {
             if (tg.t !== T.COMPOUND) return;
@@ -268,6 +272,7 @@
     function rootLabel(rec, ri) {
         if (rec.kind === 'level') return 'level.dat（世界设置）';
         if (rec.kind === 'structure') return `结构 ${rec.name}`;
+        if (rec.kind === 'player') return `玩家：${rec.name}`;
         return unitLabel(rec, rec.tags[ri] && rec.tags[ri].v, rec.kind);
     }
 
@@ -388,9 +393,10 @@
             let tags;
             try { tags = NBT.readAll(e.value); } catch (err) { log(`[跳过] 无法解析的记录：${err.message}`, 'warn'); continue; }
             if (!tags.length) continue;
-            const kind = isStructKey(e.key) ? 'structure' : isChunkTag(e.key, 49) ? 'block' : 'actor';
+            const kind = isStructKey(e.key) ? 'structure' : isPlayerKey(e.key) ? 'player' : isChunkTag(e.key, 49) ? 'block' : 'actor';
             const rec = { id: records.length, kind, key: e.key, tags, dirty: false };
             if (kind === 'structure') rec.name = String.fromCharCode(...e.key.subarray(STRUCT_PREFIX.length)).replace(/^_/, '');
+            if (kind === 'player') rec.name = String.fromCharCode(...e.key) === '~local_player' ? '本地玩家' : String.fromCharCode(...e.key);
             rec.label = rootLabel(rec, 0);
             records.push(rec);
         }

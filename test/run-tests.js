@@ -403,6 +403,25 @@ console.log(JSON.stringify(calls));`;
     }
 
     // -----------------------------------------------------------
+    console.log('\n[6b] 玩家数据（脚本生成的测试存档，不含个人信息）');
+    {
+        const wdir = fs.mkdtempSync(path.join(os.tmpdir(), 'world-'));
+        execFileSync('node', [path.join(__dirname, 'make-world.js'), wdir]);
+        const pm = new MemFS(readDir(wdir));
+        const ss = await NS.openWorld(pm, {}, () => {});
+        const texts = ss.ctx.untranslatable.map(u => u.text);
+        check('玩家背包、盔甲栏、末影箱（含潜影盒内）的物品名和成书都列出', ['冒险日志', '第一天：我来到了这片大陆。', '勇者之剑', '守卫头盔', '秘密笔记', '宝藏在出生点下面。'].every(t => texts.includes(t)));
+        ss.setValue(ss.ctx.untranslatable.find(u => u.text === '第一天：我来到了这片大陆。').ref, 'Day 1: I arrived in this land.');
+        ss.setValue(ss.ctx.untranslatable.find(u => u.text === '宝藏在出生点下面。').ref, 'The treasure is under spawn.');
+        await ss.build(pm, () => {});
+        const db = await NS.LevelDB.openDb(new Map([...pm.files].filter(([p]) => p.startsWith('db/')).map(([p, v]) => [p.slice(3), new Uint8Array(v)])));
+        const pl = NS.NBT.toPlain(10, NS.NBT.readAll(db.get(new TextEncoder().encode('~local_player')))[0].v);
+        check('玩家身上的成书修改后写回存档', pl.Inventory[0].tag.pages[0].text === 'Day 1: I arrived in this land.' && pl.EnderChestInventory[0].tag.Items[0].tag.pages[0].text === 'The treasure is under spawn.');
+        check('从零生成的存档也能正常读写（告示牌转换）', [...ss.ctx.entries.values()].some(e => e.value === '欢迎'));
+        fs.rmSync(wdir, { recursive: true, force: true });
+    }
+
+    // -----------------------------------------------------------
     console.log('\n[7] 结构文件 .mcstructure');
     {
         const sb = fs.readFileSync(path.join(__dirname, 'fixture', 'BP', 'structures', 'village.mcstructure'));

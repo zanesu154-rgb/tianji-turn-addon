@@ -86,7 +86,8 @@ const LANG = { en_US: { welcome: "Welcome" }, zh_CN: { welcome: "欢迎" } };
 | 告示牌、悬挂告示牌（正反面） | 文本改为 `{"rawtext":[{"translate":…}]}` |
 | 命令方块、命令方块矿车 | `title` / `titleraw` / `tellraw` 改为翻译键 |
 | NPC | 名字、正文、按钮名改为翻译键；按钮命令中的 title/tellraw 同样处理 |
-| `say` / `tell`、容器名、物品名与描述、成书、实体名字标签 | 游戏只按纯文本显示，列入“无法本地化”报告 |
+| `say` / `tell`、容器名、物品名与描述、成书、实体名字标签 | 游戏只按纯文本显示，列入“需人工翻译”，可在 NBT 编辑器中修改 |
+| 玩家背包、盔甲栏、副手、末影箱（含潜影盒内）的物品名与成书 | 同上（本地玩家 `~local_player` 与多人存档的 `player_…`） |
 
 写回方式：不改动任何 `.ldb`，只在当前日志（`db/*.log`）末尾追加一条写入记录（与游戏自己的写入方式相同），写完后重新打开数据库逐条校验。翻译放在存档内新建的 `resource_packs/world_texts/`，并登记到 `world_resource_packs.json`，打开存档自动加载。
 
