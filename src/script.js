@@ -211,7 +211,7 @@
         es_ES: { words: 'el la los las es son y de que en un una para con por del al cuando está hay muy pero como estoy cuántos', chars: 'ñ¿¡áíóú' },
         fr_FR: { words: 'le la les est sont et de des que en un une pour avec dans du au vous pas je il elle ce suis combien qui ne mon ma où nous', chars: 'çœèêàùâîôë' },
         de_DE: { words: 'der die das ist sind und zu von mit für ein eine nicht den dem ich du wenn auch auf', chars: 'äöüß' },
-        pt_BR: { words: 'o a os as é são e de que em um uma para com não do da quando você mas', chars: 'ãõ' },
+        pt_BR: { words: 'o a os as é são e de que em um uma para com não do da quando você mas isso seu sua pelo pela nos nas ao muito também está', chars: 'ãõ' },
         it_IT: { words: 'il lo la gli le è sono e di che in un una per con non del della quando anche', chars: 'ìò' },
         id_ID: { words: 'yang dan di ke dari ini itu dengan untuk tidak adalah ada kamu saya akan', chars: '' },
         nl_NL: { words: 'de het een is zijn en van dat met voor niet op je als ook', chars: 'ĳ' },
@@ -253,6 +253,77 @@
         return null;
     }
 
+    /**
+     * 把简单的句式正则还原成句子：/^(.+) is my only one\.$/ → { parts: [{g:1}, {lit:" is my only one."}] }
+     * 只接受：普通文字、转义的标点、不嵌套的捕获组；其它语法（可选、分支、字符类…）返回 null
+     */
+    function regexToSentence(pattern) {
+        let p = pattern;
+        if (p.startsWith('^')) p = p.slice(1);
+        if (p.endsWith('$') && !p.endsWith('\\$')) p = p.slice(0, -1);
+        const parts = [];
+        let lit = '', group = 0;
+        for (let i = 0; i < p.length; i++) {
+            const c = p[i];
+            if (c === '\\') {
+                const nx = p[i + 1];
+                if (nx === 'n') lit += '\n';
+                else if (/[.?*+()[\]{}|^$\\/\-]/.test(nx)) lit += nx;
+                else return null;           // \d \s \b … 出现在组外
+                i++;
+                continue;
+            }
+            if (c === '(') {
+                if (p[i + 1] === '?') return null;
+                let depth = 1, j = i + 1;
+                for (; j < p.length && depth; j++) {
+                    if (p[j] === '\\') { j++; continue; }
+                    if (p[j] === '(') return null;
+                    if (p[j] === ')') depth--;
+                }
+                if (depth) return null;
+                if (p[j] === '?' || p[j] === '*' || p[j] === '+') return null;   // 可选组
+                if (lit) { parts.push({ lit }); lit = ''; }
+                parts.push({ g: ++group });
+                i = j - 1;
+                continue;
+            }
+            if (/[.?*+[\]{}|^$]/.test(c)) return null;
+            lit += c;
+        }
+        if (lit) parts.push({ lit });
+        if (!parts.some(x => x.lit && /\p{L}{2,}/u.test(x.lit))) return null;
+        return { parts, groups: group, text: parts.filter(x => x.lit).map(x => x.lit).join(' ') };
+    }
+
+    /** 模板 `${a} de ${b} corazones.` 配合参数 (_, a, b) 或 (m) → m[1] 还原成 { parts: [{g:1}, {lit:" de "}, {g:2}, …] } */
+    function templateToSentence(node, params) {
+        const paramIdx = new Map();
+        params.forEach((pa, i) => { if (pa.type === 'Identifier') paramIdx.set(pa.name, i); });
+        const matchVar = params.length === 1 && params[0].type === 'Identifier' ? params[0].name : null;
+        const groupOf = (expr) => {
+            // 允许 name(d)、translateOutput(c) 这类单参数包装
+            let e = expr;
+            while (e.type === 'CallExpression' && e.arguments.length === 1) e = e.arguments[0];
+            if (e.type === 'Identifier' && paramIdx.has(e.name) && paramIdx.get(e.name) > 0) return paramIdx.get(e.name);
+            if (matchVar && e.type === 'MemberExpression' && e.computed && e.object.type === 'Identifier' &&
+                e.object.name === matchVar && e.property.type === 'Literal' && Number.isInteger(e.property.value) && e.property.value > 0) return e.property.value;
+            return null;
+        };
+        if (isStr(node)) return { parts: [{ lit: node.value }], text: node.value };
+        const parts = [];
+        for (let i = 0; i < node.quasis.length; i++) {
+            const q = node.quasis[i].value.cooked;
+            if (q) parts.push({ lit: q });
+            if (i < node.expressions.length) {
+                const g = groupOf(node.expressions[i]);
+                if (!g) return null;
+                parts.push({ g });
+            }
+        }
+        return { parts, text: parts.filter(x => x.lit).map(x => x.lit).join(' ') };
+    }
+
     function propKey(p) {
         if (!p || p.type !== 'Property' || p.computed) return null;
         return p.key.type === 'Identifier' ? p.key.name : (typeof p.key.value === 'string' ? p.key.value : null);
@@ -266,9 +337,10 @@
     function collectTranslationGroups(ast, fieldMode) {
         const groups = [];
         const notes = [];
+        const sentenceRules = [];
         const used = new Set();
         const userMap = (fieldMode && fieldMode.map) || new Map();
-        if (fieldMode && fieldMode.mode === 'off') return { groups, notes };
+        if (fieldMode && fieldMode.mode === 'off') return { groups, notes, sentenceRules };
 
         const emit = (objNode, langOf) => {
             const byPath = new Map();
@@ -311,53 +383,165 @@
             emit(n, langOfKey);
         });
 
-        // (b) 自动识别对象数组里“语言不同的平行字段”，如 [{ s: "英文", v: "越南文" }, ...]
+        // (b) 自动识别“语言不同的平行字段”
+        //     对象数组 [{ s: "英文", v: "西语" }, ...]
+        //     成对数组 [["英文", "西语"], ...]（常见于 new Map([...])）
+        //     名称字典 { "end portal": "портал энда", ... }
+        const INPUT_NAME = /input|alias|synonym|keyword|pattern|trigger|fold|normali[sz]e|intent/i;
+        const ownerName = (node) => {
+            let c = node;
+            for (let i = 0; i < 4 && c; i++) {
+                c = c.parent;
+                if (!c) break;
+                if (c.type === 'VariableDeclarator' && c.id && c.id.type === 'Identifier') return c.id.name;
+                if (c.type === 'AssignmentExpression') return c.left.type === 'Identifier' ? c.left.name : (propName(c.left) || '');
+                if (c.type === 'Property') return propKey(c) || '';
+            }
+            return '';
+        };
+        const analyze = (rows, kindLabel, label, allowLongNames) => {
+            const cols = new Map();   // 字段 → [文本]
+            for (const r of rows) for (const [k, nd] of r) {
+                if (looksLikeText(nd.value, 'loose')) {
+                    if (!cols.has(k)) cols.set(k, []);
+                    cols.get(k).push(nd.value);
+                }
+            }
+            const colLang = new Map();
+            for (const [k, texts] of cols) {
+                // 只有一行时要求句子足够长，避免两个短词碰巧像不同语言
+                if (texts.length < 2 && texts[0].split(/\s+/).length < 5) continue;
+                // 逐句判断后投票（个别句子里的人名、外来词不会带偏整列）
+                const cnt = new Map();
+                texts.forEach(t => { const g = guessLang(t); if (g) cnt.set(g, (cnt.get(g) || 0) + 1); });
+                const decided = [...cnt.values()].reduce((x, y) => x + y, 0);
+                const best = [...cnt.entries()].sort((x, y) => y[1] - x[1])[0];
+                let lang = null;
+                if (best && decided >= 3 && best[1] / decided >= 0.7 && best[1] / texts.length >= 0.3) lang = best[0];
+                else if (decided < 3) {
+                    const joint = guessLang(texts.join(' '), 3);
+                    if (joint && [...cnt.keys()].every(l => l === joint)) lang = joint;
+                }
+                colLang.set(k, lang);
+            }
+            // 只有一个字段判断不出语言：
+            //  - 文件名有提示（dialogue_es.js）→ 用提示
+            //  - 另一列已确定是非英语，而这一列全是 ASCII 短句（"Ouch!"、"I'm here."）→ 视为英文原文
+            const unknown = [...colLang].filter(([, l]) => !l).map(([k]) => k);
+            const known = [...colLang.values()].filter(Boolean);
+            const hint = fieldMode && fieldMode.fileHint;
+            if (unknown.length === 1 && known.length === 1) {
+                const texts = cols.get(unknown[0]);
+                if (hint && !known.includes(hint)) colLang.set(unknown[0], hint);
+                else if (known[0] !== 'en_US' && texts.every(t => /^[\x20-\x7e—–’…]*$/.test(t))) colLang.set(unknown[0], 'en_US');
+            }
+            for (const [k, l] of [...colLang]) if (!l) colLang.delete(k);
+            // 同一种语言出现在多个字段（如 name 和 desc 都是中文）→ 不是平行翻译
+            const langCount = new Map();
+            for (const l of colLang.values()) langCount.set(l, (langCount.get(l) || 0) + 1);
+            for (const [k, l] of [...colLang]) if (langCount.get(l) > 1) colLang.delete(k);
+            if (colLang.size < 2) return false;
+            const desc = [...colLang].map(([k, l]) => `${label(k)}→${l}`).join(', ');
+            if (allowLongNames || [...colLang.keys()].every(k => k.length <= 3)) {
+                let total = 0;
+                for (const r of rows) {
+                    const g = new Map();
+                    for (const [k, l] of colLang) if (r.has(k)) g.set(l, r.get(k));
+                    const vals = [...g.values()].map(nd => nd.value);
+                    if (g.size >= 2 && new Set(vals).size > 1 && vals.some(v => looksLikeText(v, 'loose'))) { groups.push(g); total++; }
+                }
+                notes.push(`自动识别脚本内置多语言${kindLabel} ${desc}，合并 ${total} 条（如识别有误，可在选项中关闭或手动指定）`);
+                return true;
+            }
+            notes.push(`字段 ${desc} 可能是脚本内置的多语言版本，未自动合并；如确认，请在选项“脚本自带翻译字段”中填写 ${[...colLang].map(([k, l]) => `${k}=${l}`).join(', ')}`);
+            return false;
+        };
+
         if (!fieldMode || fieldMode.mode === 'auto') {
             walk(ast, (n) => {
-                if (n.type !== 'ArrayExpression') return;
-                const objs = n.elements.filter(e => e && e.type === 'ObjectExpression' && !used.has(e));
-                if (!objs.length) return;
-                const cols = new Map();   // 字段 → [文本]
-                for (const o of objs) for (const p of o.properties) {
-                    const k = propKey(p);
-                    if (k != null && isStr(p.value) && looksLikeText(p.value.value, 'loose')) {
-                        if (!cols.has(k)) cols.set(k, []);
-                        cols.get(k).push(p.value.value);
+                if (n.type === 'ArrayExpression') {
+                    if (INPUT_NAME.test(ownerName(n))) return;   // 玩家输入归一化表（外语 → 英文），不是译文
+                    const rows = [];
+                    let pairRows = 0;
+                    for (const e of n.elements) {
+                        if (!e || used.has(e)) continue;
+                        if (e.type === 'ObjectExpression') {
+                            const r = new Map();
+                            for (const p of e.properties) { const k = propKey(p); if (k != null && isStr(p.value)) r.set(k, p.value); }
+                            rows.push(r);
+                        } else if (e.type === 'ArrayExpression' && e.elements.length >= 2 && e.elements.length <= 4 && e.elements.every(isStr)) {
+                            rows.push(new Map(e.elements.map((x, i) => [String(i), x])));
+                            pairRows++;
+                        }
                     }
+                    if (!rows.length) return;
+                    if (analyze(rows, pairRows ? '（成对数组）' : '字段', k => pairRows ? `第${+k + 1}项` : k, false)) {
+                        n.elements.forEach(e => e && used.add(e));
+                    }
+                    return;
                 }
-                const colLang = new Map();
-                for (const [k, texts] of cols) {
-                    // 只有一行时要求句子足够长，避免两个短词碰巧像不同语言
-                    if (texts.length < 2 && texts[0].split(/\s+/).length < 5) continue;
-                    // 整列合在一起判断（单句常用词太少时也能认出来），再确认没有多数句子明确属于别的语言
-                    const joint = guessLang(texts.join(' '), 3);
-                    const cnt = new Map();
-                    texts.forEach(t => { const g = guessLang(t); if (g) cnt.set(g, (cnt.get(g) || 0) + 1); });
-                    const contra = [...cnt].filter(([l]) => l !== joint).reduce((a, [, c]) => a + c, 0);
-                    colLang.set(k, joint && contra <= texts.length * 0.3 ? joint : null);
-                }
-                // 只有一个字段判断不出语言时，用文件名提示（如 dialogue_es.js）
-                const unknown = [...colLang].filter(([, l]) => !l).map(([k]) => k);
-                const hint = fieldMode && fieldMode.fileHint;
-                if (unknown.length === 1 && hint && ![...colLang.values()].includes(hint)) colLang.set(unknown[0], hint);
-                for (const [k, l] of [...colLang]) if (!l) colLang.delete(k);
-                // 同一种语言出现在多个字段（如 name 和 desc 都是中文）→ 不是平行翻译
-                const langCount = new Map();
-                for (const l of colLang.values()) langCount.set(l, (langCount.get(l) || 0) + 1);
-                for (const [k, l] of [...colLang]) if (langCount.get(l) > 1) colLang.delete(k);
-                if (colLang.size < 2) return;
-                const desc = [...colLang].map(([k, l]) => `${k}→${l}`).join(', ');
-                // 短字段名（s / v / en …）才自动合并；name / desc 这类可能只是语言不同的两段内容，只提示
-                if ([...colLang.keys()].every(k => k.length <= 3)) {
-                    let total = 0;
-                    for (const o of objs) total += emit(o, (k) => colLang.get(k));
-                    notes.push(`自动识别脚本内置多语言字段 ${desc}，合并 ${total} 条（如识别有误，可在选项中关闭或手动指定）`);
-                } else {
-                    notes.push(`字段 ${desc} 可能是脚本内置的多语言版本，未自动合并；如确认，请在选项“脚本自带翻译字段”中填写 ${[...colLang].map(([k, l]) => `${k}=${l}`).join(', ')}`);
+                // 名称字典 { "end portal": "портал энда" } —— 键是原文、值是译文
+                if (n.type === 'ObjectExpression' && !used.has(n) && n.properties.length >= 3) {
+                    if (INPUT_NAME.test(ownerName(n))) return;   // 玩家输入归一化，不是译文
+                    if (!n.properties.every(p => p.type === 'Property' && !p.computed && isStr(p.value) && propKey(p) != null)) return;
+                    const rows = n.properties.map(p => new Map([['0', { value: propKey(p), pseudo: true }], ['1', p.value]]));
+                    if (analyze(rows, '（名称字典）', k => (k === '0' ? '键' : '值'), true)) used.add(n);
                 }
             });
         }
-        return { groups, notes };
+
+        // (b2) 逐条 .set("英文", "译文")：CURATED_OUTPUT.set(...); 按对象名分组
+        if (!fieldMode || fieldMode.mode === 'auto') {
+            const byObj = new Map();
+            walk(ast, (n) => {
+                if (n.type !== 'CallExpression' || n.arguments.length !== 2 || !n.arguments.every(isStr)) return;
+                if (n.callee.type !== 'MemberExpression' || propName(n.callee) !== 'set' || n.callee.object.type !== 'Identifier') return;
+                const obj = n.callee.object.name;
+                if (INPUT_NAME.test(obj)) return;
+                if (!byObj.has(obj)) byObj.set(obj, []);
+                byObj.get(obj).push(new Map([['0', n.arguments[0]], ['1', n.arguments[1]]]));
+            });
+            for (const [obj, rows] of byObj) {
+                if (rows.length >= 2) analyze(rows, `（${obj}.set）`, k => (k === '0' ? '参数1' : '参数2'), true);
+            }
+        }
+
+        // (c) 句式规则 [/^Good morning, (.+)\.$/, (m) => `Chào buổi sáng, ${m[1]}.`]
+        //     正则还原成英文句式，模板还原成译文句式，按捕获组对齐参数
+        if (!fieldMode || fieldMode.mode !== 'off') {
+            walk(ast, (n) => {
+                if (n.type !== 'ArrayExpression') return;
+                if (INPUT_NAME.test(ownerName(n))) return;
+                const rules = [];
+                for (const e of n.elements) {
+                    if (!e || e.type !== 'ArrayExpression' || e.elements.length !== 2) continue;
+                    const [re, fn] = e.elements;
+                    if (!re || re.type !== 'Literal' || !re.regex) continue;
+                    if (!fn || !/FunctionExpression$/.test(fn.type)) continue;
+                    const src = regexToSentence(re.regex.pattern);
+                    if (!src) continue;
+                    let body = fn.body;
+                    if (body.type === 'BlockStatement') {
+                        const ret = body.body.length === 1 && body.body[0].type === 'ReturnStatement' ? body.body[0].argument : null;
+                        body = ret;
+                    }
+                    if (!body || (body.type !== 'TemplateLiteral' && !isStr(body))) continue;
+                    const tr = templateToSentence(body, fn.params);
+                    if (!tr) continue;
+                    rules.push({ src, tr, node: body });
+                }
+                if (rules.length < 2) return;
+                const cnt = new Map();
+                rules.forEach(r => { const g = guessLang(r.tr.text); if (g && g !== 'en_US') cnt.set(g, (cnt.get(g) || 0) + 1); });
+                let lang = [...cnt.entries()].sort((x, y) => y[1] - x[1])[0];
+                lang = lang && lang[1] >= Math.max(2, rules.length * 0.4) ? lang[0] : (fieldMode && fieldMode.fileHint) || null;
+                if (!lang || lang === 'en_US') return;
+                for (const r of rules) sentenceRules.push({ ...r, lang });
+                notes.push(`自动识别句式规则（正则 → 模板）${rules.length} 条：英文 → ${lang}`);
+            });
+        }
+        return { groups, notes, sentenceRules };
+
     }
 
     // ---------------------------------------------------------------
@@ -474,9 +658,12 @@
       if (mm[3]) r.push({ text: mm[3] });
       return r;
     }
-    for (const [pk, re] of p) {
+    for (const [pk, re, , ord] of p) {
       const x = re.exec(s);
-      if (x) return [{ translate: pk, with: { rawtext: x.slice(1).map(T) } }];
+      if (!x) continue;
+      let caps = x.slice(1);
+      if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
+      return [{ translate: pk, with: { rawtext: caps.map(T) } }];
     }
     return null;
   };
@@ -520,9 +707,9 @@
   };
   const reg = (exact, pats) => {
     for (const [s, k] of exact) if (!m.has(s)) m.set(s, k);
-    for (const [k, lits] of pats) {
+    for (const [k, lits, ord] of pats) {
       const len = lits.join("").length;
-      p.push([k, new RegExp("^" + lits.map(esc).join("([\\\\s\\\\S]*?)") + "$"), len]);
+      p.push([k, new RegExp("^" + lits.map(esc).join("([\\\\s\\\\S]*?)") + "$"), len, ord]);
     }
     p.sort((a, b) => b[2] - a[2]);
     cache.clear();
@@ -828,10 +1015,49 @@
         }
         const tables = collectTranslationGroups(ast, { mode: lf.mode === 'manual' && !fileMap.size ? 'auto' : lf.mode, map: fileMap, fileHint: langHintFromFile(file) });
         let tableEntries = 0;
+        // 句式规则：英文句式与译文句式共用一个键，运行时两种原文都能匹配
+        const toValue = (parts) => parts.map(x => x.lit != null ? x.lit.replace(/%/g, '%%') : `%${x.g}$s`).join('');
+        const toLits = (parts) => {
+            const lits = [''], order = [];
+            for (const x of parts) { if (x.lit != null) lits[lits.length - 1] += x.lit; else { order.push(x.g); lits.push(''); } }
+            return { lits, order };
+        };
+        const PH = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
         for (const g of tables.groups) {
             const nodes = [...g.values()].filter(nd => !handled.has(nd));
             if (nodes.length < 2) continue;
-            const [firstLang, firstNode] = [...g.entries()][0];
+            // 字符串里带 ${name} 占位符（脚本运行时才填入）→ 按句式登记，按占位符名字对齐参数
+            const srcEntry = g.has('en_US') ? ['en_US', g.get('en_US')] : [...g.entries()][0];
+            const names = [...srcEntry[1].value.matchAll(PH)].map(m => m[1]);
+            if (names.length) {
+                const uniq = [...new Set(names)];
+                const toParts = (text) => {
+                    const parts = [];
+                    let last = 0;
+                    for (const m of text.matchAll(PH)) {
+                        if (m.index > last) parts.push({ lit: text.slice(last, m.index) });
+                        const gi = uniq.indexOf(m[1]) + 1;
+                        if (!gi) return null;
+                        parts.push({ g: gi });
+                        last = m.index + m[0].length;
+                    }
+                    if (last < text.length) parts.push({ lit: text.slice(last) });
+                    return parts;
+                };
+                const all = [...g].map(([l, nd]) => [l, nd, toParts(nd.value)]);
+                if (all.some(([, , ps]) => !ps)) continue;
+                const key = ctx.alloc(keyBase('fmt'), toValue(all.find(([l]) => l === srcEntry[0])[2]), meta('fmt'));
+                for (const [l, nd, ps] of all) {
+                    ctx.addTranslation(key, l, toValue(ps));
+                    const t = toLits(ps);
+                    patterns.push([key, t.lits, t.order]);
+                    handled.add(nd);
+                }
+                tableEntries++;
+                continue;
+            }
+            // 以英文为原文（没有英文时用第一列）
+            const [firstLang, firstNode] = g.has('en_US') ? ['en_US', g.get('en_US')] : [...g.entries()][0];
             const key = ctx.alloc(keyBase('str'), firstNode.value, meta('str'));
             for (const [lang, nd] of g) {
                 ctx.addTranslation(key, lang, nd.value);
@@ -841,15 +1067,37 @@
             void firstLang;
             tableEntries++;
         }
+        for (const r of tables.sentenceRules || []) {
+            const key = ctx.alloc(keyBase('fmt'), toValue(r.src.parts), meta('fmt'));
+            ctx.addTranslation(key, 'en_US', toValue(r.src.parts));
+            ctx.addTranslation(key, r.lang, toValue(r.tr.parts));
+            const a = toLits(r.src.parts), b = toLits(r.tr.parts);
+            patterns.push([key, a.lits, a.order]);
+            if (b.order.length || b.lits[0]) patterns.push([key, b.lits, b.order]);
+            walk(r.node, (c) => handled.add(c));
+            tableEntries++;
+        }
         tables.notes.forEach(nt => ctx.warn(`${file}: ${nt}`));
 
         // ---- 玩家输入匹配表：只导出供补充其他语言的说法 ----
         for (const r of collectInputTables(ast, file)) ctx.inputTables.push(r);
 
         // ---- 第三遍：登记其余“像玩家文本”的字符串到运行时映射 ----
+        // 属于玩家输入归一化表（INPUT_TERMS、WHOLE_INPUT、aliases…）的字符串不登记
+        const INPUT_OWNER = /input|alias|synonym|keyword|pattern|trigger|fold|normali[sz]e|intent/i;
+        const inputOwned = (node) => {
+            let c = node.parent;
+            for (let i = 0; i < 8 && c; i++, c = c.parent) {
+                if (c.type === 'VariableDeclarator' && c.id && c.id.type === 'Identifier') return INPUT_OWNER.test(c.id.name);
+                if (c.type === 'AssignmentExpression' && c.left.type === 'Identifier') return INPUT_OWNER.test(c.left.name);
+                if (/Function|Statement|Program/.test(c.type)) return false;
+            }
+            return false;
+        };
         const isTechPosition = (node) => {
             const p = node.parent;
             if (!p) return false;
+            if (inputOwned(node)) return true;
             switch (p.type) {
                 case 'ImportDeclaration': case 'ExportAllDeclaration': case 'ExportNamedDeclaration':
                 case 'ImportExpression': case 'TaggedTemplateExpression':
