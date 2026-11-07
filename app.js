@@ -175,6 +175,17 @@ function renderSummary(res) {
 //  主流程
 // ================================================================
 
+// 页面各脚本文件版本不一致（通常是浏览器缓存）时，提示强制刷新
+const REQUIRED = ['runPipeline', 'processScript', 'collectTranslationGroups', 'collectUiVarUsage', 'translateCommand', 'regexPhrases'];
+function checkVersion() {
+    const missing = REQUIRED.filter(n => typeof NS[n] !== 'function');
+    if (missing.length) {
+        log(`❌ 页面文件版本不一致（缺少 ${missing.join(', ')}），可能是浏览器缓存了旧文件。请按 Ctrl+F5（手机上清除网站缓存）强制刷新后重试。`, 'error');
+        return false;
+    }
+    return true;
+}
+
 async function processFile(file) {
     const ext = (file.name.match(/\.(mcaddon|mcpack|zip)$/i) || [, 'mcaddon'])[1].toLowerCase();
     state.originalName = file.name.replace(/\.(mcaddon|mcpack|zip)$/i, '');
@@ -186,7 +197,8 @@ async function processFile(file) {
     downloadLogBtn.disabled = downloadResultBtn.disabled = downloadWorkbookBtn.disabled = true;
     setProgress(0, '加载中...');
 
-    log(`开始处理: ${file.name}（${(file.size / 1024).toFixed(1)} KB）`);
+    log(`开始处理: ${file.name}（${(file.size / 1024).toFixed(1)} KB）  工具版本 ${($('app-version') || {}).textContent || ''}`);
+    if (!checkVersion()) { setProgress(0, '请刷新页面'); downloadLogBtn.disabled = false; return; }
 
     try {
         const zip = await JSZip.loadAsync(file);

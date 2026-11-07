@@ -200,6 +200,13 @@ function renderCommand(cmd, lang) {
         check('  └ verity.js 中的正则和关键词保持原样', out('BP/scripts/verity.js').includes('/\\b(?:cuántos jugadores|cuantos jugadores|hay alguien más|hay alguien mas|estoy solo)\\b/gi, "how many players"') && out('BP/scripts/verity.js').includes('keywords: ["reformation", "luther", "protestant", "church"]'));
     }
     {
+        const c4 = new NS.ExtractContext({});
+        NS.processScript(`export const D = { es: [{ s: "Light is visible to the human eye.", v: "La luz es visible para el ojo humano." }, { s: "Water flows downhill when you place it.", v: "El agua fluye cuesta abajo cuando la colocas." }],
+          vi: [{ s: "Light is visible to the human eye.", v: "Ánh sáng là thứ mắt người nhìn thấy được." }, { s: "Water flows downhill when you place it.", v: "Nước chảy xuống dốc khi bạn đặt nó." }] };`, 'scripts/n.js', c4, {});
+        const t = c4.translations.get([...c4.entries.keys()][0]);
+        check('外层按语言分组、里面仍是 s/v：英文不会被当成西语/越南语译文', c4.entries.size === 2 && t && t.get('en_US') === 'Light is visible to the human eye.' && t.get('es_ES').startsWith('La luz') && t.get('vi_VN').startsWith('Ánh sáng'));
+    }
+    {
         const lf = { mode: 'manual', map: new Map(), fileMaps: [['x_lang.js', new Map([['s', 'en_US'], ['v', 'fr_FR']])]] };
         const c3 = new NS.ExtractContext({});
         NS.processScript('export const D = [{ s: "Hello there friend", v: "Salut l\'ami" }];', 'scripts/x_lang.js', c3, { langFields: lf });
