@@ -377,6 +377,28 @@ console.log(JSON.stringify(calls));`;
         check('箱子名、物品名、成书、盔甲架名记入报告', ['也许能修改这个名字', '也许你能改变这个物品的名字', '你能改书名吗？', '当然，这也是一条测试文本', '能改nametag吗？'].every(t => wr.ctx.untranslatable.some(u => u.text === t)));
         check('存档登记了新资源包', JSON.parse(wm.files.get('world_resource_packs.json'))[0].pack_id === JSON.parse(wm.files.get('resource_packs/world_texts/manifest.json')).header.uuid);
         check('数据库其它键不受影响', db.info.keys === 24);
+
+        // NBT 编辑器：人工修改 + 导入翻译表 + 改世界名 + 类型校验
+        const em = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
+        const ss = await NS.openWorld(em, {}, () => {});
+        const refOf = (where) => ss.ctx.untranslatable.find(u => u.where === where).ref;
+        ss.setValue(refOf('方块名称'), 'Mystery Chest');
+        const rows = NS.worldParseCsv(ss.workbook()['untranslatable.csv'].slice(1));
+        const h = rows[0];
+        for (const r of rows.slice(1)) if (r[h.indexOf('where')] === '实体名字标签') r[h.indexOf('translation')] = 'Can I rename it?';
+        const imp = ss.importCsv(rows.map(r => r.map(x => /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x).join(',')).join('\n'));
+        ss.setValue(ss.search('LevelName')[0].ref, 'My World (EN)');
+        let typeErr = '';
+        try { ss.setValue(ss.search('TickDelay')[0].ref, 'abc'); } catch (e) { typeErr = e.message; }
+        await ss.build(em, () => {}); await ss.build(em, () => {});
+        const db3 = await NS.LevelDB.openDb(new Map([...em.files].filter(([p]) => p.startsWith('db/')).map(([p, v]) => [p.slice(3), new Uint8Array(v)])));
+        const plain = db3.entries().flatMap(e => { const k = e.key; return (((k.length === 9 || k.length === 13) && k[k.length - 1] === 49) || String.fromCharCode(...k.subarray(0, 11)) === 'actorprefix') ? NS.NBT.readAll(e.value).map(t => NS.NBT.toPlain(t.t, t.v)) : []; });
+        check('编辑器：人工修改箱子名写回存档', plain.find(p => p.id === 'Chest').CustomName === 'Mystery Chest');
+        check('编辑器：导入翻译表批量写回', imp.applied === 1 && plain.find(p => p.identifier === 'minecraft:armor_stand').CustomName === 'Can I rename it?');
+        const ld = new Uint8Array(em.files.get('level.dat'));
+        check('编辑器：改世界名（level.dat + levelname.txt）', NS.NBT.getStr(NS.NBT.readAll(ld.subarray(8))[0].v, 'LevelName') === 'My World (EN)' && em.files.get('levelname.txt') === 'My World (EN)' && new DataView(ld.buffer, ld.byteOffset).getInt32(4, true) === ld.length - 8);
+        check('编辑器：数字字段类型校验', typeErr === '需要整数');
+        check('编辑器：多次生成不会重复登记资源包', JSON.parse(em.files.get('world_resource_packs.json')).length === 1);
     }
 
     console.log(`\n结果：${passed} 通过，${failed} 失败`);

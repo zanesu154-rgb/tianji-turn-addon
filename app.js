@@ -177,16 +177,17 @@ function renderSummary(res) {
     const list = (items, fmt) => `<ul>${items.slice(0, 200).map(x => `<li>${fmt(x)}</li>`).join('')}${items.length > 200 ? `<li>…共 ${items.length} 条</li>` : ''}</ul>`;
     let html = `<div class="summary-stats">
         <div class="stat"><b>${s.newKeys}</b><span>提取的文本</span></div>
-        <div class="stat"><b>${s.processedFiles}</b><span>${s.world ? '修改的存档记录' : '修改的文件'}</span></div>
-        <div class="stat"><b>${s.untranslatable}</b><span>无法本地化</span></div>
+        <div class="stat"><b>${s.processedFiles}</b><span>${s.world ? '自动修改的记录' : '修改的文件'}</span></div>
+        <div class="stat"><b>${s.untranslatable}</b><span>${s.world ? '需人工处理' : '无法本地化'}</span></div>
         <div class="stat"><b>${escapeHtml(s.sourceLang)}</b><span>原文语言</span></div>
     </div>`;
     if (s.world) {
-        if (s.createdRP) html += `<p class="summary-note">已在存档内新建资源包 <code>${escapeHtml(s.createdRP)}</code> 并登记到 world_resource_packs.json，打开存档会自动加载。请先在副本上测试，确认告示牌、命令方块、NPC 显示正常。</p>`;
+        if (s.createdRP) html += `<p class="summary-note">下载时会在存档内新建资源包 <code>${escapeHtml(s.createdRP)}</code> 并登记到 world_resource_packs.json，打开存档自动加载。</p>`;
+        if (s.untranslatable) html += `<p class="summary-note">有 ${s.untranslatable} 处文本游戏不支持翻译键，可在下方 NBT 编辑器中直接修改。</p>`;
     } else if (s.createdRP) html += `<p class="summary-note">附加包没有资源包，已新建 <code>${escapeHtml(s.createdRP)}/</code> 存放翻译，并让行为包依赖它。</p>`;
     if (s.placeholders) html += `<p class="summary-note">${s.placeholders} 个物品/方块/实体原本没有名称，已按 ID 生成英文占位名，请在 lang 中确认。</p>`;
     if (s.inputGroups) html += `<p class="summary-note">脚本里有 ${s.inputGroups} 处匹配玩家聊天输入的关键词/正则。游戏不会翻译玩家输入，已列在翻译表的 <code>input_aliases.csv</code> 中，可按语言补充说法后交给作者加进正则。</p>`;
-    if (untr.length) {
+    if (untr.length && !s.world) {
         html += `<details><summary>无法本地化的文本（${untr.length}）—— 游戏不支持翻译键，需要手动处理</summary>${list(untr, u =>
             `<code>${escapeHtml(u.text)}</code> — ${escapeHtml(u.reason)}<br><small>${escapeHtml(u.file)} · ${escapeHtml(u.where)}</small>`)}</details>`;
     }
@@ -199,6 +200,30 @@ function renderSummary(res) {
     }
     summaryEl.innerHTML = html;
     summaryEl.hidden = false;
+}
+
+function worldSummary(session) {
+    const lang = session.opt.sourceLang === 'auto' ? NS.detectSourceLang([...session.ctx.entries.values()].map(e => e.value)) : session.opt.sourceLang;
+    return {
+        world: true, newKeys: session.ctx.entries.size, processedFiles: session.records.filter(r => r.dirty).length,
+        untranslatable: session.ctx.untranslatable.length, sourceLang: lang, warnings: session.ctx.warnings, missingRefs: [],
+        createdRP: session.ctx.entries.size ? 'resource_packs/world_texts/' : null, packs: [], inputGroups: 0,
+    };
+}
+
+/** 存档：按当前（含手动修改的）状态生成文件 */
+async function buildWorldOutputs() {
+    if (state.resultBlob && state.workbookBlob) return;
+    setProgress(90, '写入存档...');
+    const res = await state.session.build(state.fs, (m, t) => log(m, t || 'info'));
+    const outZip = await state.fs.toZip();
+    state.resultBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const wb = new JSZip();
+    for (const [name, content] of Object.entries(res.workbook)) wb.file(name, content);
+    wb.file('process.log', state.logContent);
+    state.workbookBlob = await wb.generateAsync({ type: 'blob' });
+    log(`✅ 已生成 ${state.resultName}（手动修改 ${state.session.edits} 处）`);
+    setProgress(100, '完成！');
 }
 
 // ================================================================
@@ -248,9 +273,27 @@ async function processFile(file) {
         const isWorld = fs.list().some(p => /(^|\/)level\.dat$/.test(p)) && fs.list().some(p => /(^|\/)db\/CURRENT$/.test(p));
         if (isWorld && mode !== 'world') { setMode('world'); log('检测到世界存档，已切换到“世界存档”模式'); }
         if (!isWorld && mode === 'world') { setMode('addon'); log('这不是世界存档，已切换到“附加包”模式'); }
-        const res = isWorld
-            ? await NS.runWorldPipeline(fs, options, (m, t) => log(m, t || 'info'))
-            : await NS.runPipeline(fs, options, (m, t) => log(m, t || 'info'));
+        state.session = null;
+        state.fs = fs;
+        state.ext = ext;
+        $('nbt-editor').hidden = true;
+        if (isWorld) {
+            // 存档：先打开并自动转换（只改内存），可在 NBT 编辑器里继续手动修改，下载时才写出
+            const session = await NS.openWorld(fs, options, (m, t) => log(m, t || 'info'));
+            state.session = session;
+            for (const u of session.ctx.untranslatable) log(`[需人工处理] ${u.file} ${u.where}: ${u.text}`, 'warn');
+            state.resultName = `${state.originalName}_i18n.${ext === 'mctemplate' ? 'mctemplate' : 'mcworld'}`;
+            renderSummary({ ctx: session.ctx, summary: worldSummary(session) });
+            NS.mountWorldEditor($('nbt-editor'), session, {
+                onChange: () => { state.resultBlob = null; state.workbookBlob = null; },
+                downloadCsv: (text) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_untranslatable.csv`),
+            });
+            setProgress(100, '完成！可在下方编辑后下载');
+            log(`✅ 分析完成：自动转换 ${session.ctx.entries.size} 条，需人工处理 ${session.ctx.untranslatable.length} 处`);
+            downloadLogBtn.disabled = downloadResultBtn.disabled = downloadWorkbookBtn.disabled = false;
+            return;
+        }
+        const res = await NS.runPipeline(fs, options, (m, t) => log(m, t || 'info'));
         const s = res.summary;
 
         for (const w of s.warnings) log(`⚠ ${w}`, 'warn');
@@ -261,8 +304,7 @@ async function processFile(file) {
         const outZip = await fs.toZip();
         state.resultBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
         const multiPack = s.packs.length > 1 || s.restructured;
-        const outExt = s.world ? (ext === 'mctemplate' ? 'mctemplate' : 'mcworld')
-            : ext === 'mcpack' && !multiPack ? 'mcpack' : 'mcaddon';
+        const outExt = ext === 'mcpack' && !multiPack ? 'mcpack' : 'mcaddon';
         state.resultName = `${state.originalName}_i18n.${outExt}`;
 
         // 翻译表：CSV（Excel 可直接打开）+ 源语言 lang + 报告
@@ -296,12 +338,18 @@ function downloadBlob(blob, filename) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-downloadResultBtn.addEventListener('click', () => {
-    if (state.resultBlob) downloadBlob(state.resultBlob, state.resultName);
+downloadResultBtn.addEventListener('click', async () => {
+    try {
+        if (state.session) await buildWorldOutputs();
+        if (state.resultBlob) downloadBlob(state.resultBlob, state.resultName);
+    } catch (e) { log(`❌ 生成失败: ${e.message}`, 'error'); }
 });
 
-downloadWorkbookBtn.addEventListener('click', () => {
-    if (state.workbookBlob) downloadBlob(state.workbookBlob, `${state.originalName}_translation.zip`);
+downloadWorkbookBtn.addEventListener('click', async () => {
+    try {
+        if (state.session) await buildWorldOutputs();
+        if (state.workbookBlob) downloadBlob(state.workbookBlob, `${state.originalName}_translation.zip`);
+    } catch (e) { log(`❌ 生成失败: ${e.message}`, 'error'); }
 });
 
 downloadLogBtn.addEventListener('click', () => {
