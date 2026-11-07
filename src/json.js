@@ -169,9 +169,9 @@
                 }
             }
 
-            const boss = comps['minecraft:boss'];
-            if (boss && typeof boss.name === 'string' && looksLikeText(boss.name) && !ctx.isKey(boss.name)) {
-                ctx.report(file, `${where} minecraft:boss.name`, boss.name, 'Boss 血条名称不保证支持翻译键，未修改');
+            // minecraft:boss.name：游戏内实测支持翻译键（血条显示 lang 中的值）
+            if (comps['minecraft:boss'] && typeof comps['minecraft:boss'] === 'object') {
+                if (replaceKeyField(comps['minecraft:boss'], 'name', `entity.${id}.boss_name`, ctx, { ...meta, scope: 'boss:' + id })) changed = true;
             }
         };
 
