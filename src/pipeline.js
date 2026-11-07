@@ -147,12 +147,18 @@
             const raw = String(opt.scriptLangFields || '').trim();
             if (!raw || raw.toLowerCase() === 'auto') return { mode: 'auto', map: new Map() };
             if (/^(off|none|关闭|否)$/i.test(raw)) return { mode: 'off', map: new Map() };
+            // 全局：s=en_US, v=vi_VN    按文件：dialogue_es.js:v=es_ES
             const map = new Map();
+            const fileMaps = new Map();
             for (const part of raw.split(/[,，;；\s]+/)) {
-                const m = /^([^=:]+)[=:]([a-z]{2,3}_[A-Za-z]{2,4})$/.exec(part.trim());
-                if (m) map.set(m[1].trim(), m[2]);
+                const m = /^(?:([^:=]+\.(?:js|mjs)):)?([^=:]+)=([a-z]{2,3}_[A-Za-z]{2,4})$/.exec(part.trim());
+                if (!m) continue;
+                if (m[1]) {
+                    if (!fileMaps.has(m[1])) fileMaps.set(m[1], new Map());
+                    fileMaps.get(m[1]).set(m[2].trim(), m[3]);
+                } else map.set(m[2].trim(), m[3]);
             }
-            return { mode: 'manual', map };
+            return { mode: 'manual', map, fileMaps: [...fileMaps] };
         })();
         const runtimeKey = '__ADDON_I18N_' + NS.hash6(JSON.stringify(bpManifest ? bpManifest.manifest.header.uuid : opt.baseName));
 
