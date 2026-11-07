@@ -216,6 +216,17 @@ function renderCommand(cmd, lang) {
         check('整列判断语言：常用词很少的英文句子也能识别（s→en_US, v→fr_FR）', c5.entries.size === 2 && t5 && t5.get('fr_FR') && t5.get('fr_FR').startsWith('Le son'));
     }
     {
+        // Verity 风格的 locale 文件
+        const esL = NS.parseLang(out('RP/texts/es_ES.lang'));
+        const kv = (t) => [...en].find(([, v]) => v === t)?.[0];
+        check('Verity：${name} 占位符 → 句式键（%1$s），西语对应', esL.get(kv('Good afternoon, %1$s.')) === 'Buenas tardes, %1$s.');
+        check('Verity：短句成对数组（"Ouch!" → "¡Ay!"）', esL.get(kv('Ouch!')) === '¡Ay!');
+        check('Verity：逐条 .set("英文", "西语")', esL.get(kv('Evening. I\'m listening.')) === 'Buenas noches. Te escucho.');
+        check('Verity：名称字典（键为英文）', esL.get(kv('ocean monument')) === 'monumento oceánico');
+        check('Verity：句式规则 正则 → 模板', esL.get(kv('%1$s out of %2$s hearts.')) === '%1$s de %2$s corazones.');
+        check('Verity：输入归一化表 INPUT_TERMS 不合并、不登记', ![...zh.values()].includes('aldea') && ![...zh.values()].includes('portal del end') && !esL.get(kv('village')));
+    }
+    {
         const lf = { mode: 'manual', map: new Map(), fileMaps: [['x_lang.js', new Map([['s', 'en_US'], ['v', 'fr_FR']])]] };
         const c3 = new NS.ExtractContext({});
         NS.processScript('export const D = [{ s: "Hello there friend", v: "Salut l\'ami" }];', 'scripts/x_lang.js', c3, { langFields: lf });
