@@ -1,0 +1,12 @@
+{
+  "namespace": "hud",
+  "my_label": { "type": "label", "text": "欢迎来到天机", "color": [1, 1, 1] },
+  "bind_label": { "type": "label", "text": "#hud_title_text_string" },
+  "key_label": { "type": "label", "text": "gui.ok" },
+  "short_label": { "type": "label", "text": "确定" },
+  "flag_panel": { "type": "panel", "$flag": "§t§j", "$flag_text": "天机表单", "visible": "(not ((#title_text - $flag_text) = #title_text))" },
+  "btn@common.button": { "$button_text": "开始游戏", "$pressed_button_name": "button.menu_play" },
+  "custom@hud.templ": { "$my_text": "自定义文本" },
+  "templ": { "type": "label", "text": "$my_text" },
+  "img": { "type": "image", "texture": "textures/ui/hello" }
+}

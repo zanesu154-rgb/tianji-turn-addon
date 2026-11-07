@@ -1,0 +1,3 @@
+{ "format_version": "1.10.0", "animation_controllers": { "controller.animation.tianji.fight": { "states": {
+  "default": { "transitions": [ { "fight": "q.is_angry" } ] },
+  "fight": { "on_entry": ["/title @s actionbar 进入战斗", "@s tianji:event", "v.x = 1;"], "transitions": [ { "default": "!q.is_angry" } ] } } } } }
