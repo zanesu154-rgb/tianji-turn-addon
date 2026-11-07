@@ -20,6 +20,9 @@ const player = [
   L('Armor', T.COMPOUND, [named(0, 'minecraft:iron_helmet', '守卫头盔')]),
   L('Pos', T.FLOAT, [0.5, 64, 0.5]),
 ];
+const lectern = [C('book', [B('Count', 1), I('Damage', 0), S('Name', 'minecraft:written_book'), B('WasPickedUp', 0),
+  C('tag', [S('author', 'Tester'), I('generation', 0), S('title', '讲台之书'), L('pages', T.COMPOUND, [[S('photoname', ''), S('text', '讲台上的第一页。')], [S('photoname', ''), S('text', '讲台上的第二页。')]])])]),
+  B('hasBook', 1), S('id', 'Lectern'), B('isMovable', 1), I('page', 0), I('totalPages', 2), I('x', 3), I('y', 64), I('z', 2)];
 const sign = [C('FrontText', [S('Text', '欢迎'), S('TextOwner', '')]), C('BackText', [S('Text', ''), S('TextOwner', '')]), S('id', 'Sign'), I('x', 1), I('y', 64), I('z', 2)];
 
 // ---- LevelDB：CURRENT + MANIFEST（一条 VersionEdit）+ 日志（一条 WriteBatch）----
@@ -37,7 +40,7 @@ const logRecord = (payload) => {
 const chunkKey = (x, z, tag) => { const b = Buffer.alloc(9); b.writeInt32LE(x, 0); b.writeInt32LE(z, 4); b[8] = tag; return b; };
 const puts = [
   { key: Buffer.from('~local_player'), value: writeAll([{ t: T.COMPOUND, n: '', v: player }]) },
-  { key: chunkKey(0, 0, 49), value: writeAll([{ t: T.COMPOUND, n: '', v: sign }]) },
+  { key: chunkKey(0, 0, 49), value: writeAll([{ t: T.COMPOUND, n: '', v: sign }, { t: T.COMPOUND, n: '', v: lectern }]) },
 ];
 const batch = [1, 0, 0, 0, 0, 0, 0, 0, puts.length, 0, 0, 0];   // 序列号 1
 for (const p of puts) { batch.push(1); varint(batch, p.key.length); batch.push(...p.key); varint(batch, p.value.length); batch.push(...p.value); }
