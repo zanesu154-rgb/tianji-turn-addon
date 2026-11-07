@@ -1,1 +1,0 @@
-{ "format_version": "1.10.0", "minecraft:client_entity": { "description": { "identifier": "tianji:merchant", "spawn_egg": { "base_color": "#000000", "overlay_color": "#ffffff" } } } }

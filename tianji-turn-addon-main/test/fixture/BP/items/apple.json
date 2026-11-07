@@ -1,1 +1,0 @@
-{ "format_version": "1.21.0", "minecraft:item": { "description": { "identifier": "tianji:apple" }, "components": { "minecraft:display_name": { "value": "item.apple.name" } } } }

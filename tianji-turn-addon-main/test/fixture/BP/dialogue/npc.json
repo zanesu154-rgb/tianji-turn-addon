@@ -1,7 +1,0 @@
-{ "format_version": "1.17", "minecraft:npc_dialogue": { "scenes": [ {
-  "scene_tag": "村长 对话",
-  "npc_name": "老村长",
-  "text": "你好，旅行者！\n欢迎来到村庄。",
-  "on_open_commands": ["/tellraw @initiator {\"rawtext\":[{\"text\":\"村长看着你\"}]}"],
-  "buttons": [ { "name": "告别", "commands": ["/title @initiator title 再见"] }, { "name": { "rawtext": [{ "text": "询问" }] }, "commands": [] } ]
-} ] } }

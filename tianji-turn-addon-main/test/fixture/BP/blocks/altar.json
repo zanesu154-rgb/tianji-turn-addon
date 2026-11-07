@@ -1,3 +1,0 @@
-{ "format_version": "1.21.0", "minecraft:block": { "description": { "identifier": "tianji:altar", "states": { "tianji:on": [false, true] } },
-  "components": { "minecraft:display_name": "祭坛", "minecraft:crafting_table": { "table_name": "合成祭坛", "crafting_tags": ["tianji"] } },
-  "permutations": [ { "condition": "q.block_state('tianji:on')", "components": { "minecraft:display_name": "激活的祭坛" } } ] } }
