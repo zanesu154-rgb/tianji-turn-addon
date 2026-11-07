@@ -292,7 +292,9 @@
             used.add(objNode);
             let n = 0;
             for (const m of byPath.values()) {
-                if (m.size >= 2 && [...m.values()].some(nd => looksLikeText(nd.value, 'loose'))) { groups.push(m); n++; }
+                const vals = [...m.values()].map(nd => nd.value);
+                // 各语言的值完全相同 → 不是译文（如每种语言下都有同一句英文原文）
+                if (m.size >= 2 && new Set(vals).size > 1 && vals.some(v => looksLikeText(v, 'loose'))) { groups.push(m); n++; }
             }
             return n;
         };
@@ -301,7 +303,11 @@
         const langOfKey = (k) => userMap.get(k) || localeOfKey(k);
         walk(ast, (n) => {
             if (n.type !== 'ObjectExpression' || used.has(n)) return;
-            if (n.properties.filter(p => { const k = propKey(p); return k != null && langOfKey(k); }).length < 2) return;
+            const langProps = n.properties.filter(p => { const k = propKey(p); return k != null && langOfKey(k); });
+            if (langProps.length < 2) return;
+            // { es: [{ s, v }], vi: [{ s, v }] } —— 每种语言下是“对象数组”，交给下面按数组识别平行字段
+            if (!userMap.size && langProps.some(p => p.value.type === 'ArrayExpression' &&
+                p.value.elements.some(e => e && e.type === 'ObjectExpression'))) return;
             emit(n, langOfKey);
         });
 
