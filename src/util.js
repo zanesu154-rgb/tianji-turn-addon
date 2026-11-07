@@ -163,6 +163,27 @@
      *  - 真换行 → \n（lang 值不能包含真换行）
      *  - ## 和 \t# 会被游戏当作注释，做规避
      */
+    /**
+     * 同一条里混用 %1$s 和 %s 时游戏不认带序号的（显示成 “%3”）。
+     * 把不带序号的 %s / %d 按顺序补成没用到的序号：
+     *   "使用 %3$s 需要 %s %s" → "使用 %3$s 需要 %1$s %2$s"
+     * 返回 null 表示不需要改。
+     */
+    function fixMixedPlaceholders(value) {
+        const s = String(value).replace(/%%/g, '\u0000');
+        const pos = [...s.matchAll(/%(\d+)\$[sd]/g)].map(m => +m[1]);
+        if (!pos.length || !/%[sd]/.test(s)) return null;
+        const used = new Set(pos);
+        let next = 1;
+        const out = s.replace(/%(\d+\$)?([sd])/g, (all, n, t) => {
+            if (n) return all;
+            while (used.has(next)) next++;
+            used.add(next);
+            return `%${next}$${t}`;
+        });
+        return out.replace(/\u0000/g, '%%');
+    }
+
     function toLangValue(text) {
         return String(text)
             .replace(/\r\n?/g, '\n')
@@ -234,7 +255,7 @@
         stripFormatting, hasCJK, hasLetters, isEmptyText, isLikelyKey,
         looksLikeCode, looksLikeText,
         hash6, sanitizeKeyPart, sanitizeKey, fileBaseOf, humanizeIdentifier,
-        stripBOM, parseLang, toLangValue,
+        stripBOM, parseLang, toLangValue, fixMixedPlaceholders,
         stripJsonCommentsAndCommas, parseJsonLenient, escapeRegex,
     });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

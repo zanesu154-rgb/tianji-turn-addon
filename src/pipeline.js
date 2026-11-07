@@ -11,7 +11,7 @@
     'use strict';
     const NS = root.AddonI18n;
     const {
-        parseJsonLenient, parseLang, toLangValue, hasCJK, humanizeIdentifier,
+        parseJsonLenient, parseLang, toLangValue, fixMixedPlaceholders, hasCJK, humanizeIdentifier,
         ExtractContext, translateCommand, fileBaseOf,
     } = NS;
 
@@ -380,14 +380,24 @@
                         if (v != null) filled.push(`${k}=${v}`);
                     }
                 }
-                if (!added.length && !filled.length) { if (e) written.push(lang); continue; }
-                let out = e ? e.raw.replace(/\s*$/, '\n') : '';
+                // 已有译文里 %1$s 和 %s 混用（游戏会显示成 “%3”）→ 自动改成全部带序号
+                let raw = e ? e.raw : '';
+                let fixedN = 0;
+                if (e) raw = raw.replace(/^([^#\s=][^=\r\n]*=)([^\r\n]*)$/gm, (line, k, v) => {
+                    const f = fixMixedPlaceholders(v);
+                    if (f == null || f === v) return line;
+                    fixedN++;
+                    ctx.warn(`${e.path}: ${k.slice(0, -1)} 混用了 %1$s 和 %s，已改为 ${f}`);
+                    return k + f;
+                });
+                if (!added.length && !filled.length && !fixedN) { if (e) written.push(lang); continue; }
+                let out = e ? raw.replace(/\s*$/, '\n') : '';
                 if (added.length) out += `\n${MARK} 自动提取（源语言 ${sourceLang}${lang === sourceLang ? '' : '，待翻译'}）\n${added.join('\n')}\n`;
                 if (filled.length) out += `\n${MARK} 从其他语言补全（待翻译）\n${filled.join('\n')}\n`;
                 const path = e ? e.path : `${texts}/${lang}.lang`;
                 pending.set(path, out);
                 written.push(lang);
-                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}`);
+                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN ? `，修正占位符 ${fixedN}` : ''}`);
             }
             return written;
         };

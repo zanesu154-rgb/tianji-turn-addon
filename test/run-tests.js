@@ -150,6 +150,15 @@ function renderCommand(cmd, lang) {
                 vals.every(v => !/\n /.test(v) && !/^ /.test(v)) && sent[0].rawtext.filter(x => x.translate).length === (split ? 2 : 1) && !sent[0].rawtext.some(x => x.text && /Deletes/.test(x.text)));
         }
     }
+    {
+        check('占位符混用：%3$s + %s %s → %3$s + %1$s %2$s', NS.fixMixedPlaceholders('使用 %3$s 需要 §9%s %s §f的知识') === '使用 %3$s 需要 §9%1$s %2$s §f的知识'
+            && NS.fixMixedPlaceholders('%s 和 %s') === null && NS.fixMixedPlaceholders('%1$s 100%% %s') === '%1$s 100%% %2$s');
+        const fm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        fm.files.set('RP/texts/zh_CN.lang', Buffer.from('## 注释 %s %1$s\nmix.test=使用 %2$s 需要 %s 的知识\nok.test=%s 和 %s\n'));
+        await NS.runPipeline(fm, { baseName: 'fixture' }, () => {});
+        const zl = NS.parseLang(fm.files.get('RP/texts/zh_CN.lang').toString());
+        check('  └ 转换时自动修正已有译文中的混用占位符', zl.get('mix.test') === '使用 %2$s 需要 %1$s 的知识' && zl.get('ok.test') === '%s 和 %s' && fm.files.get('RP/texts/zh_CN.lang').toString().startsWith('## 注释 %s %1$s'));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
