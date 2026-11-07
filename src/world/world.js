@@ -236,6 +236,8 @@
                 // 讲台上的书：book 是单个物品
                 const bk = child(c, 'book');
                 const pages = bk.t === T.COMPOUND && child(bk.v, 'tag') && child(child(bk.v, 'tag').v, 'pages');
+                const btitle = bk.t === T.COMPOUND && child(bk.v, 'tag') && getStr(child(bk.v, 'tag').v, 'title');
+                if (btitle) report(P('book', 'tag', 'title'), '讲台书标题', btitle, '成书标题暂不确定是否支持翻译键');
                 if (pages && pages.t === T.LIST && pages.v.et === T.COMPOUND) {
                     const written = getStr(bk.v, 'Name') !== 'minecraft:writable_book';
                     pages.v.items.forEach((pg, j) => {
