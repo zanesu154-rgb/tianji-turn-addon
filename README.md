@@ -29,6 +29,7 @@ test/             测试附加包 + 端到端测试（node test/run-tests.js）
 | 键冲突 | 不读已有 lang，新键可能和已有键同名而被跳过，显示成别的文字 | 先读所有已有键；值相同则复用，另一种文字（如 en_US 的 “Altar” 对应 “祭坛”）视为译文复用键 |
 | 战利品 `set_name` / `set_lore` | 改成键名 → 游戏直接显示键名 | 游戏不翻译自定义物品名，改为只列入“无法本地化”报告 |
 | `minecraft:nameable.name` | 当作显示文本处理（该组件没有此字段，`name_filter` 是匹配条件） | 不处理 |
+| `"%tile.xxx.name"`（前面带 %） | 当成普通文字新建键，反而破坏原有翻译 | 视为已有键，保持不变（基岩版中 `%键名` 表示按该键翻译） |
 | `minecraft:boss.name`（首领血条） | 改成与实体名相同的键，可能覆盖实体名 | 单独的键 `entity.<id>.boss_name`（游戏内实测支持翻译键）；已是键的保持不变 |
 | 实体 `interact` | 只支持旧的数组格式，忽略 `component_groups` | 支持 `{interactions:[…]}` 新格式和组件组；交易表 `economy_trade_table` 也处理 |
 | 命令 | 正则只认 `@a` 形式的目标；`tag @s add title` 也可能被误判；tellraw 中带转义引号的文本漏掉 | 真正解析命令：支持 `execute … run`、带嵌套方括号的选择器、引号玩家名；tellraw 用 JSON 解析，保留 `score`/`selector`/`with` |

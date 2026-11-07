@@ -130,6 +130,13 @@ function renderCommand(cmd, lang) {
     check('localize:false 继承自 @模板 → 在子控件上覆盖为 true', st.state.controls[1]['desc@starter.desc_tpl'].localize === true);
     check('单个字母 "X" 不提取', st.x_btn.text === 'X');
 
+    {
+        const cp = new NS.ExtractContext({});
+        const blk = { format_version: '1.21.0', 'minecraft:block': { description: { identifier: 'nico:spawner' }, components: { 'minecraft:display_name': '%tile.nico.spawner.name' } } };
+        const chg = NS.processBlock(blk, 'BP/blocks/s.json', cp, { defs: { blocks: [], items: [], entities: [] } });
+        check('"%键名" 视为已有键：不改、不新建键，引用记为去掉 % 的键', !chg && blk['minecraft:block'].components['minecraft:display_name'] === '%tile.nico.spawner.name' && cp.entries.size === 0 && cp.referenced.has('tile.nico.spawner.name'));
+        check('"%1$s 来了" / "100%" 不当作键', !cp.isKey('%1$s 来了') && !cp.isKey('100%'));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

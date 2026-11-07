@@ -68,6 +68,7 @@
         }
 
         ref(key, file) {
+            if (typeof key === 'string') key = key.replace(/^%(?=[^%\s])/, '');   // "%tile.x.name" 引用的是 tile.x.name
             if (typeof key === 'string' && !this.referenced.has(key)) this.referenced.set(key, file);
         }
 
@@ -86,6 +87,8 @@
         }
 
         isKey(s) {
+            // 基岩版里 "%键名" 表示“按此键翻译”（如 "%tile.mod.block.name"），同样视为已有键
+            if (typeof s === 'string' && /^\s*%[A-Za-z]/.test(s) && isLikelyKey(s.trim().slice(1), this.knownKeys)) return true;
             return isLikelyKey(s, this.knownKeys);
         }
 
