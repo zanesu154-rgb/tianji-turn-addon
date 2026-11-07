@@ -188,6 +188,130 @@
     }
 
     // ---------------------------------------------------------------
+    //  脚本自带的多语言表
+    //   { en: "Hello", zh: "你好" } / { en_US: {...}, zh_CN: {...} } / [{ s: "...", v: "..." }]
+    // ---------------------------------------------------------------
+
+    const LOCALE_ALIASES = {
+        en: 'en_US', en_us: 'en_US', enus: 'en_US', english: 'en_US', en_gb: 'en_GB',
+        zh: 'zh_CN', zh_cn: 'zh_CN', zhcn: 'zh_CN', cn: 'zh_CN', chs: 'zh_CN', chinese: 'zh_CN', zh_hans: 'zh_CN',
+        zh_tw: 'zh_TW', zhtw: 'zh_TW', tw: 'zh_TW', cht: 'zh_TW', zh_hant: 'zh_TW',
+        vi: 'vi_VN', vn: 'vi_VN', vi_vn: 'vi_VN', ja: 'ja_JP', jp: 'ja_JP', ja_jp: 'ja_JP',
+        ko: 'ko_KR', kr: 'ko_KR', ko_kr: 'ko_KR', ru: 'ru_RU', ru_ru: 'ru_RU',
+        es: 'es_ES', es_es: 'es_ES', es_mx: 'es_MX', de: 'de_DE', de_de: 'de_DE', fr: 'fr_FR', fr_fr: 'fr_FR', fr_ca: 'fr_CA',
+        pt: 'pt_BR', pt_br: 'pt_BR', pt_pt: 'pt_PT', it_it: 'it_IT', th: 'th_TH', th_th: 'th_TH',
+        tr: 'tr_TR', tr_tr: 'tr_TR', pl: 'pl_PL', pl_pl: 'pl_PL', uk_ua: 'uk_UA', nl: 'nl_NL', nl_nl: 'nl_NL', id_id: 'id_ID',
+    };
+    const localeOfKey = (k) => LOCALE_ALIASES[String(k).toLowerCase().replace(/-/g, '_')] ||
+        (/^[a-z]{2}_[A-Z]{2}$/.test(String(k)) ? String(k) : null);
+
+    /** 粗略判断文本语言；没把握返回 null */
+    function guessLang(text) {
+        const t = String(text).replace(/§./g, '');
+        if (/[぀-ヿ]/.test(t)) return 'ja_JP';
+        if (/[가-힯]/.test(t)) return 'ko_KR';
+        if (/[一-鿿]/.test(t)) return 'zh_CN';
+        if (/[Ѐ-ӿ]/.test(t)) return 'ru_RU';
+        if (/[฀-๿]/.test(t)) return 'th_TH';
+        if (/[ăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i.test(t)) return 'vi_VN';
+        if (/\b(the|is|are|and|you|your|to|of|with|for|this|it|in|on|not)\b/i.test(t) && !/[àâçéèêëîïôûùüÿñæœäöüß]/i.test(t)) return 'en_US';
+        return null;
+    }
+
+    function propKey(p) {
+        if (!p || p.type !== 'Property' || p.computed) return null;
+        return p.key.type === 'Identifier' ? p.key.name : (typeof p.key.value === 'string' ? p.key.value : null);
+    }
+
+    /**
+     * 找出脚本里的多语言表。
+     * @param fieldMode { mode: 'auto'|'off'|'manual', map: Map(字段名 → 语言) }
+     * @returns { groups: [Map(语言 → 字符串节点)], notes: [string] }
+     */
+    function collectTranslationGroups(ast, fieldMode) {
+        const groups = [];
+        const notes = [];
+        const used = new Set();
+        const userMap = (fieldMode && fieldMode.map) || new Map();
+        if (fieldMode && fieldMode.mode === 'off') return { groups, notes };
+
+        const emit = (objNode, langOf) => {
+            const byPath = new Map();
+            const collect = (node, lang, path) => {
+                if (!node) return;
+                if (isStr(node)) {
+                    if (!byPath.has(path)) byPath.set(path, new Map());
+                    byPath.get(path).set(lang, node);
+                } else if (node.type === 'ObjectExpression') {
+                    used.add(node);
+                    for (const p of node.properties) { const k = propKey(p); if (k != null) collect(p.value, lang, `${path}.${k}`); }
+                } else if (node.type === 'ArrayExpression') {
+                    node.elements.forEach((e, i) => collect(e, lang, `${path}[${i}]`));
+                }
+            };
+            for (const p of objNode.properties) {
+                const k = propKey(p);
+                const lang = k != null && langOf(k);
+                if (lang) collect(p.value, lang, '');
+            }
+            used.add(objNode);
+            let n = 0;
+            for (const m of byPath.values()) {
+                if (m.size >= 2 && [...m.values()].some(nd => looksLikeText(nd.value, 'loose'))) { groups.push(m); n++; }
+            }
+            return n;
+        };
+
+        // (a) 键名是语言代码 / 用户指定的字段
+        const langOfKey = (k) => userMap.get(k) || localeOfKey(k);
+        walk(ast, (n) => {
+            if (n.type !== 'ObjectExpression' || used.has(n)) return;
+            if (n.properties.filter(p => { const k = propKey(p); return k != null && langOfKey(k); }).length < 2) return;
+            emit(n, langOfKey);
+        });
+
+        // (b) 自动识别对象数组里“语言不同的平行字段”，如 [{ s: "英文", v: "越南文" }, ...]
+        if (!fieldMode || fieldMode.mode === 'auto') {
+            walk(ast, (n) => {
+                if (n.type !== 'ArrayExpression') return;
+                const objs = n.elements.filter(e => e && e.type === 'ObjectExpression' && !used.has(e));
+                if (objs.length < 2) return;
+                const cols = new Map();   // 字段 → [文本]
+                for (const o of objs) for (const p of o.properties) {
+                    const k = propKey(p);
+                    if (k != null && isStr(p.value) && looksLikeText(p.value.value, 'loose')) {
+                        if (!cols.has(k)) cols.set(k, []);
+                        cols.get(k).push(p.value.value);
+                    }
+                }
+                const colLang = new Map();
+                for (const [k, texts] of cols) {
+                    if (texts.length < 2) continue;
+                    const cnt = new Map();
+                    texts.forEach(t => { const g = guessLang(t); if (g) cnt.set(g, (cnt.get(g) || 0) + 1); });
+                    const best = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0];
+                    if (best && best[1] / texts.length >= 0.8) colLang.set(k, best[0]);
+                }
+                // 同一种语言出现在多个字段（如 name 和 desc 都是中文）→ 不是平行翻译
+                const langCount = new Map();
+                for (const l of colLang.values()) langCount.set(l, (langCount.get(l) || 0) + 1);
+                for (const [k, l] of [...colLang]) if (langCount.get(l) > 1) colLang.delete(k);
+                if (colLang.size < 2) return;
+                const desc = [...colLang].map(([k, l]) => `${k}→${l}`).join(', ');
+                // 短字段名（s / v / en …）才自动合并；name / desc 这类可能只是语言不同的两段内容，只提示
+                if ([...colLang.keys()].every(k => k.length <= 3)) {
+                    let total = 0;
+                    for (const o of objs) total += emit(o, (k) => colLang.get(k));
+                    notes.push(`自动识别脚本内置多语言字段 ${desc}，合并 ${total} 条（如识别有误，可在选项中关闭或手动指定）`);
+                } else {
+                    notes.push(`字段 ${desc} 可能是脚本内置的多语言版本，未自动合并；如确认，请在选项“脚本自带翻译字段”中填写 ${[...colLang].map(([k, l]) => `${k}=${l}`).join(', ')}`);
+                }
+            });
+        }
+        return { groups, notes };
+    }
+
+    // ---------------------------------------------------------------
     //  预扫描：用于跨文件判断
     // ---------------------------------------------------------------
 
@@ -575,6 +699,24 @@
             }
         });
 
+        // ---- 脚本自带的多语言表：同一句话的各语言版本共用一个键 ----
+        const tables = collectTranslationGroups(ast, opts.langFields);
+        let tableEntries = 0;
+        for (const g of tables.groups) {
+            const nodes = [...g.values()].filter(nd => !handled.has(nd));
+            if (nodes.length < 2) continue;
+            const [firstLang, firstNode] = [...g.entries()][0];
+            const key = ctx.alloc(keyBase('str'), firstNode.value, meta('str'));
+            for (const [lang, nd] of g) {
+                ctx.addTranslation(key, lang, nd.value);
+                exact.push([nd.value, key]);
+                handled.add(nd);
+            }
+            void firstLang;
+            tableEntries++;
+        }
+        tables.notes.forEach(nt => ctx.warn(`${file}: ${nt}`));
+
         // ---- 第三遍：登记其余“像玩家文本”的字符串到运行时映射 ----
         const isTechPosition = (node) => {
             const p = node.parent;
@@ -694,10 +836,12 @@
             body = body.slice(nl + 1);
         }
         const content = head + (prelude ? `// ---- i18n runtime (auto-generated) ----\n${prelude}// ---- end i18n runtime ----\n` : '') + body;
-        return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length } };
+        return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length, tables: tableEntries } };
     }
 
     NS.collectScriptInfo = collectScriptInfo;
+    NS.guessLang = guessLang;
+    NS.collectTranslationGroups = collectTranslationGroups;
     NS.processScript = processScript;
     NS.SCRIPT_SINKS = SINKS;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -201,6 +201,10 @@ body {
     color: var(--text);
 }
 
+.opt-wide {
+    grid-column: 1 / -1;
+}
+
 .opt-check {
     display: flex;
     align-items: center;

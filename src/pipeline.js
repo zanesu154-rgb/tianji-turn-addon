@@ -23,6 +23,7 @@
         injectRuntime: true,
         fillMissing: true,
         placeholderNames: true,
+        scriptLangFields: '',          // 空 = 自动识别；off = 关闭；s=en_US, v=vi_VN = 手动
         baseName: 'addon',
     };
 
@@ -142,6 +143,17 @@
         }
         const collidingMethods = new Set(Object.keys(NS.SCRIPT_SINKS).filter(n => userMethods.has(n)));
         const bpManifest = packs.find(p => p.type === 'BP');
+        const langFields = (() => {
+            const raw = String(opt.scriptLangFields || '').trim();
+            if (!raw || raw.toLowerCase() === 'auto') return { mode: 'auto', map: new Map() };
+            if (/^(off|none|关闭|否)$/i.test(raw)) return { mode: 'off', map: new Map() };
+            const map = new Map();
+            for (const part of raw.split(/[,，;；\s]+/)) {
+                const m = /^([^=:]+)[=:]([a-z]{2,3}_[A-Za-z]{2,4})$/.exec(part.trim());
+                if (m) map.set(m[1].trim(), m[2]);
+            }
+            return { mode: 'manual', map };
+        })();
         const runtimeKey = '__ADDON_I18N_' + NS.hash6(JSON.stringify(bpManifest ? bpManifest.manifest.header.uuid : opt.baseName));
 
         // ---------------- 4. 逐文件处理 ----------------
@@ -179,12 +191,12 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime,
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields,
                 });
                 if (r.changed) {
                     pending.set(p, r.content);
                     processed++;
-                    log(`[脚本] ${p}（静态改写 ${r.stats.overrides} 处，运行时登记 ${r.stats.exact + r.stats.patterns} 条）`);
+                    log(`[脚本] ${p}（静态改写 ${r.stats.overrides} 处，运行时登记 ${r.stats.exact + r.stats.patterns} 条${r.stats.tables ? `，合并自带多语言 ${r.stats.tables} 条` : ''}）`);
                 }
                 continue;
             }
@@ -321,7 +333,7 @@
         const writeLangs = (pk, entries, isRP) => {
             const langs = packLangs.get(pk.root) || new Map();
             const texts = pk.root ? `${pk.root}/texts` : 'texts';
-            const langSet = new Set([...langs.keys(), ...opt.targetLangs, sourceLang, 'en_US']);
+            const langSet = new Set([...langs.keys(), ...opt.targetLangs, sourceLang, 'en_US', ...(isRP ? tableLangs : [])]);
             // 补全用：本包已有的所有键
             const fillFrom = (key) => {
                 for (const l of [sourceLang, 'en_US', ...langs.keys()]) {
@@ -337,7 +349,12 @@
                 const e = langs.get(lang);
                 const map = e ? e.map : new Map();
                 const added = [];
-                for (const [k, v] of entries) if (!map.has(k)) added.push(`${k}=${toLangValue(v)}`);
+                for (const [k, v] of entries) {
+                    if (map.has(k)) continue;
+                    // 脚本自带的多语言表里有这种语言的译文 → 直接使用
+                    const tr = ctx.translations.get(k);
+                    added.push(`${k}=${toLangValue(tr && tr.has(lang) ? tr.get(lang) : v)}`);
+                }
                 const filled = [];
                 if (opt.fillMissing && isRP) {
                     for (const k of allExistingKeys) {
@@ -370,6 +387,9 @@
             if (changed) pending.set(p, JSON.stringify(list, null, 2));
         };
 
+        const tableLangs = new Set();
+        for (const m of ctx.translations.values()) for (const l of m.keys()) tableLangs.add(l);
+        if (tableLangs.size) log(`脚本自带的多语言表包含：${[...tableLangs].join(', ')}，已写入对应语言文件`);
         const newEntries = new Map([...ctx.entries].map(([k, e]) => [k, e.value]));
         for (const pk of packs) {
             const own = ctx.packEntries.get(pk.root) || new Map();
@@ -393,8 +413,12 @@
         for (const [p, c] of pending) fs.writeText(p, c);
 
         // ---------------- 10. 翻译工作包 ----------------
-        const rows = [['key', 'source_text', 'file', 'type']];
-        for (const [k, e] of ctx.entries) rows.push([k, e.value, e.file, e.kind]);
+        const trLangs = [...new Set([...ctx.translations.values()].flatMap(m => [...m.keys()]))];
+        const rows = [['key', 'source_text', 'file', 'type', ...trLangs.map(l => `existing_${l}`)]];
+        for (const [k, e] of ctx.entries) {
+            const tr = ctx.translations.get(k);
+            rows.push([k, e.value, e.file, e.kind, ...trLangs.map(l => (tr && tr.get(l)) || '')]);
+        }
         for (const [rootDir, m] of ctx.packEntries) for (const [k, v] of m) rows.push([k, v, rootDir + '/manifest.json', 'manifest']);
         const stringsCsv = '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
         const untrRows = [['file', 'where', 'text', 'reason'], ...ctx.untranslatable.map(u => [u.file, u.where, u.text, u.reason])];

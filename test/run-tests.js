@@ -163,6 +163,25 @@ function renderCommand(cmd, lang) {
     check('lang 中没有真换行导致的残行', !out('RP/texts/zh_CN.lang').split('\n').some(l => l && !l.startsWith('#') && !l.includes('=')));
 
     // -----------------------------------------------------------
+    console.log('\n[4b] 脚本自带的多语言表');
+    const vi = mem.files.has('RP/texts/vi_VN.lang') ? NS.parseLang(out('RP/texts/vi_VN.lang')) : new Map();
+    const keyOf = (lang, text) => [...lang].find(([, v]) => v === text)?.[0];
+    const kS = keyOf(en, 'Light is electromagnetic radiation visible to the human eye.');
+    check('s/v 平行字段：英文进 en_US，越南文进 vi_VN，共用同一个键', kS && vi.get(kS) === 'Ánh sáng là bức xạ điện từ mà mắt người nhìn thấy được.');
+    check('  └ 越南文没有作为独立的新键出现在 zh_CN / en_US', ![...zh.values()].includes('Ánh sáng là bức xạ điện từ mà mắt người nhìn thấy được.') && ![...en.values()].includes('Ánh sáng là bức xạ điện từ mà mắt người nhìn thấy được.'));
+    check('  └ languages.json 加入 vi_VN', JSON.parse(out('RP/texts/languages.json')).includes('vi_VN'));
+    const kW = keyOf(zh, '欢迎来到实验室');
+    check('按语言代码分组的字典：zh_CN / en_US 共用键', kW && en.get(kW) === 'Welcome to the lab');
+    const kD = keyOf(zh, '一把锋利的剑'), kN = keyOf(zh, 'The sword of the king');
+    check('name / desc 语言不同但不是翻译：不合并', kD && kN && kD !== kN && en.get(kD) === '一把锋利的剑');
+    check('  └ 给出提示而不是自动合并', res.ctx.warnings.some(w => w.includes('name→en_US') && w.includes('未自动合并')));
+    {
+        const lore = out('BP/scripts/lore.js');
+        const reg = JSON.parse(/\.reg\((\[.*?\]), \[/.exec(lore)[1]);
+        const m = new Map(reg);
+        check('运行时：英文原文和越南文都能查到同一个键', m.get('Water flows downhill when you place it.') === m.get('Nước chảy xuống dốc khi bạn đặt nó.'));
+    }
+
     console.log('\n[5] 脚本运行时对比（原脚本 vs 改写后，模拟 @minecraft/server）');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'i18n-'));
     const mockServer = `

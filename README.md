@@ -58,6 +58,20 @@ test/             测试附加包 + 端到端测试（node test/run-tests.js）
 
 测试中对比了原脚本与改写后脚本在模拟 `@minecraft/server` 下的全部输出，用生成的 lang 渲染后逐条一致。
 
+**脚本自带的多语言表**——很多附加包在脚本里自己维护了多语言，例如：
+
+```js
+const DIALOGUE_DATA = [{ "s": "Light is ...", "v": "Ánh sáng là ...", "d": false }, ...];
+const LANG = { en_US: { welcome: "Welcome" }, zh_CN: { welcome: "欢迎" } };
+```
+
+同一句话的各语言版本会合并为**同一个键**：英文写入 `en_US.lang`，越南文写入 `vi_VN.lang`（自动加入 `languages.json`），不会变成两条互不相干的键；运行时无论脚本选了哪种语言的原文，都会查到这个键，最终按玩家客户端语言显示。识别规则：
+
+- 键名是语言代码（`en`、`zh_CN`、`vi`、`ja`…）的对象，或按语言代码分组的字典：自动合并
+- 对象数组里语言不同的平行字段：字段名很短（如 `s` / `v`）时自动合并；字段名像 `name` / `desc` 时只提示不合并（可能只是语言不同的两段内容）
+- 选项“脚本自带翻译字段”可手动指定（`s=en_US, v=vi_VN`）或填 `off` 关闭
+
+
 **为避免误改**：如果脚本里自己定义了与上述 API 同名的方法（例如封装了一个 `Menu.title()`），无法确认类型的同名调用不会被改写，并在日志中提示；能确认是 `new ActionFormData()` 链式调用、`const f = new …FormData()` 变量或 `this.form = new …FormData()` 的调用仍会处理。
 
 ## 无法本地化的内容

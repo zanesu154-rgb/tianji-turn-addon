@@ -135,6 +135,7 @@ function readOptions() {
         splitNewlines: $('opt-split').checked,
         fillMissing: $('opt-fill').checked,
         placeholderNames: $('opt-placeholder').checked,
+        scriptLangFields: $('opt-langfields').value,
     };
 }
 
