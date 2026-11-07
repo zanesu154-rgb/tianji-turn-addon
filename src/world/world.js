@@ -157,13 +157,35 @@
             // say / tell 等报告补上位置
             for (let i = before; i < ctx.untranslatable.length; i++) ctx.untranslatable[i].ref = `${rec.id}|${JSON.stringify(path)}`;
         };
-        const items = (path) => {
+        // 成书正文 → 翻译键（游戏内实测有效）。存储的 JSON 受每页 256 字符限制，超长时退回为单个键
+        const bookPage = (path, text, keyBase, where) => {
+            if (!text) return;
+            if (parseRawJson(text)) { const ex = parseRawJson(text); if (ctx.processRawMessage(ex, keyBase, meta)) setS(path, JSON.stringify(ex)); return; }
+            // 先估算按行拆分后的 JSON 长度，超出就直接整页一个键（避免分配用不到的键）
+            const nLines = text.split('\n').length;
+            const est = 16 + nLines * (keyBase.length + 26) + (nLines - 1) * 14;
+            const parts = ctx.rawParts(text, keyBase, est > BOOK_PAGE_MAX - 10 ? { ...meta, noSplit: true } : meta);
+            if (!parts) return;
+            let raw = rawJson(parts);
+            if (est > BOOK_PAGE_MAX - 10 && nLines > 1) ctx.warn(`${label}: ${where} 行数较多，整页使用一个翻译键（换行写作 \\n）`);
+            if (raw.length > BOOK_PAGE_MAX) {
+                // 行数太多导致 JSON 过长：整页用一个键（换行在 lang 中写作 \n）
+                const one = ctx.rawParts(text, keyBase, { ...meta, noSplit: true });
+                raw = one ? rawJson(one) : raw;
+                if (raw.length > BOOK_PAGE_MAX) { report(path, where, text, '成书页面过长，无法改为翻译键'); return; }
+                ctx.warn(`${label}: ${where} 行数较多，整页使用一个翻译键（换行写作 \\n）`);
+            }
+            setS(path, raw);
+        };
+        const items = (path, keyBase) => {
             const list = nodeAt(rec, path);
             if (!list || list.t !== T.LIST || list.v.et !== T.COMPOUND) return;
             list.v.items.forEach((it, i) => {
                 const name = getStr(it, 'Name') || '';
                 const tag = child(it, 'tag');
                 if (!tag || tag.t !== T.COMPOUND) return;
+                const slot = child(it, 'Slot');
+                const kb = `${keyBase}.s${slot ? slot.v : i}`;
                 const display = child(tag.v, 'display');
                 if (display && display.t === T.COMPOUND) {
                     const dn = getStr(display.v, 'Name');
@@ -172,12 +194,20 @@
                     if (lore && lore.t === T.LIST && lore.v.et === T.STRING) lore.v.items.forEach((l, j) => l.s && report([...path, i, 'tag', 'display', 'Lore', j], `物品描述（${name}）`, l.s, '物品描述不支持翻译键'));
                 }
                 const title = getStr(tag.v, 'title');
-                if (title) report([...path, i, 'tag', 'title'], '成书标题', title, '成书内容不支持翻译键');
+                if (title) report([...path, i, 'tag', 'title'], '成书标题', title, '成书标题暂不确定是否支持翻译键');
                 const pages = child(tag.v, 'pages');
                 if (pages && pages.t === T.LIST && pages.v.et === T.COMPOUND) {
-                    pages.v.items.forEach((pg, j) => { const t = getStr(pg, 'text'); if (t) report([...path, i, 'tag', 'pages', j, 'text'], `成书第 ${j + 1} 页`, t, '成书内容不支持翻译键'); });
+                    const written = name === 'minecraft:written_book';
+                    pages.v.items.forEach((pg, j) => {
+                        const t = getStr(pg, 'text');
+                        if (!t) return;
+                        const pp = [...path, i, 'tag', 'pages', j, 'text'];
+                        // 书与笔（未签名）玩家还能编辑，改成翻译键会在编辑界面显示代码 → 只记录
+                        if (written) bookPage(pp, t, `${kb}.p${j + 1}`, `成书第 ${j + 1} 页`);
+                        else report(pp, `书与笔第 ${j + 1} 页`, t, '书与笔（未签名）玩家还可编辑，不改为翻译键');
+                    });
                 }
-                items([...path, i, 'tag', 'Items']);   // 潜影盒等嵌套容器
+                items([...path, i, 'tag', 'Items'], kb);   // 潜影盒等嵌套容器
             });
         };
 
@@ -200,13 +230,19 @@
             const cn = getStr(c, 'CustomName');
             if (cn && id === 'CommandBlock') report(P('CustomName'), '命令方块名称', cn, '命令方块名称（say 等命令输出时显示的发送者名）不支持翻译键');
             else if (cn) report(P('CustomName'), '方块名称', cn, '容器/方块的自定义名称不支持翻译键');
-            items(P('Items'));
+            items(P('Items'), `${kp}.book.${pos}`);
             if (child(c, 'book')) {
                 // 讲台上的书：book 是单个物品
                 const bk = child(c, 'book');
                 const pages = bk.t === T.COMPOUND && child(bk.v, 'tag') && child(child(bk.v, 'tag').v, 'pages');
                 if (pages && pages.t === T.LIST && pages.v.et === T.COMPOUND) {
-                    pages.v.items.forEach((pg, j) => { const t = getStr(pg, 'text'); if (t) report(P('book', 'tag', 'pages', j, 'text'), `讲台书第 ${j + 1} 页`, t, '成书内容不支持翻译键'); });
+                    const written = getStr(bk.v, 'Name') !== 'minecraft:writable_book';
+                    pages.v.items.forEach((pg, j) => {
+                        const t = getStr(pg, 'text');
+                        if (!t) return;
+                        if (written) bookPage(P('book', 'tag', 'pages', j, 'text'), t, `${kp}.book.${pos}.lectern.p${j + 1}`, `讲台书第 ${j + 1} 页`);
+                        else report(P('book', 'tag', 'pages', j, 'text'), `讲台书与笔第 ${j + 1} 页`, t, '书与笔（未签名）玩家还可编辑，不改为翻译键');
+                    });
                 }
             }
         } else if (kind === 'actor') {
@@ -249,7 +285,8 @@
             if (getStr(c, 'Command')) cmd(P('Command'), `${kp}.command.${idPart}`);   // 命令方块矿车
             const cn = getStr(c, 'CustomName');
             if (cn && ident !== 'minecraft:npc') report(P('CustomName'), ident === 'minecraft:command_block_minecart' ? '命令方块名称' : '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
-            for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory', 'EnderChestInventory', 'PlayerUIItems']) items(P(f));
+            const who = rec.kind === 'player' ? 'player' : idPart;
+            for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory', 'EnderChestInventory', 'PlayerUIItems']) items(P(f), `${kp}.book.${who}.${f.toLowerCase()}`);
         }
         return changed;
     }
