@@ -23,7 +23,9 @@
 
     const isChunkTag = (k, tag) => (k.length === 9 || k.length === 13) && k[k.length - 1] === tag;
     const isActorKey = (k) => k.length >= 11 && String.fromCharCode(...k.subarray(0, 11)) === 'actorprefix';
-    const wantKey = (k) => isChunkTag(k, 49) || isChunkTag(k, 50) || isActorKey(k);
+    const STRUCT_PREFIX = 'structuretemplate';
+    const isStructKey = (k) => k.length > STRUCT_PREFIX.length && String.fromCharCode(...k.subarray(0, STRUCT_PREFIX.length)) === STRUCT_PREFIX;
+    const wantKey = (k) => isChunkTag(k, 49) || isChunkTag(k, 50) || isActorKey(k) || isStructKey(k);
 
     // ---------------- NBT 路径 ----------------
     /** 按路径取节点：返回 { t, v, set(v) } */
@@ -90,15 +92,18 @@
     }
 
     /** 处理一条记录里的一个根复合标签 */
-    function convertCompound(ctx, rec, ri) {
-        const c = rec.tags[ri].v;
+    /** 处理位于 base 路径的一个方块实体（kind='block'）或实体（kind='actor'） */
+    function convertCompound(ctx, rec, base, kind) {
+        const c = nodeAt(rec, base).v;
         let changed = false;
-        const P = (...segs) => [ri, ...segs];
+        const P = (...segs) => [...base, ...segs];
         const setS = (path, s) => { nodeAt(rec, path).set(new NBT.NbtString(s, null)); changed = true; };
         const report = (path, where, text, reason) => {
             ctx.untranslatable.push({ file: label, where, text, reason, ref: `${rec.id}|${JSON.stringify(path)}` });
         };
-        const label = rootLabel(rec, ri);
+        const label = unitLabel(rec, c, kind);
+        // 键名前缀：存档用 world，结构用 structure.<名字>（不同结构的内部坐标都从 0 开始）
+        const kp = rec.kind === 'structure' ? `structure.${NS.sanitizeKeyPart(rec.name || 'unnamed')}` : 'world';
         const meta = { file: label, kind: 'world', scope: 'world', mode: 'display' };
         const cmd = (path, baseKey) => {
             const s = getStr(nodeAt(rec, path.slice(0, -1)).v, path[path.length - 1]);
@@ -133,7 +138,7 @@
             });
         };
 
-        if (rec.kind === 'block') {
+        if (kind === 'block') {
             const id = getStr(c, 'id') || '';
             const pos = posOf(c);
             if (id === 'Sign' || id === 'HangingSign') {
@@ -142,13 +147,13 @@
                     if (!st || st.t !== T.COMPOUND) continue;
                     const text = getStr(st.v, 'Text');
                     if (!text) continue;
-                    const raw = textToRaw(ctx, text, `world.sign.${pos}.${side === 'FrontText' ? 'front' : 'back'}`, meta);
+                    const raw = textToRaw(ctx, text, `${kp}.sign.${pos}.${side === 'FrontText' ? 'front' : 'back'}`, meta);
                     if (raw) setS(P(side, 'Text'), raw);
                 }
                 const old = getStr(c, 'Text');   // 1.20 之前的旧格式
-                if (old) { const raw = textToRaw(ctx, old, `world.sign.${pos}`, meta); if (raw) setS(P('Text'), raw); }
+                if (old) { const raw = textToRaw(ctx, old, `${kp}.sign.${pos}`, meta); if (raw) setS(P('Text'), raw); }
             }
-            if (id === 'CommandBlock') cmd(P('Command'), `world.command.${pos}`);
+            if (id === 'CommandBlock') cmd(P('Command'), `${kp}.command.${pos}`);
             const cn = getStr(c, 'CustomName');
             if (cn && id !== 'CommandBlock') report(P('CustomName'), '方块名称', cn, '容器/方块的自定义名称不支持翻译键');
             items(P('Items'));
@@ -160,12 +165,12 @@
                     pages.v.items.forEach((pg, j) => { const t = getStr(pg, 'text'); if (t) report(P('book', 'tag', 'pages', j, 'text'), `讲台书第 ${j + 1} 页`, t, '成书内容不支持翻译键'); });
                 }
             }
-        } else if (rec.kind === 'actor') {
+        } else if (kind === 'actor') {
             const ident = getStr(c, 'identifier') || '';
             const uid = child(c, 'UniqueID');
             const idPart = uid ? String(uid.v).replace('-', 'n') : 'x';
             if (ident === 'minecraft:npc') {
-                const base = `world.npc.${idPart}`;
+                const base = `${kp}.npc.${idPart}`;
                 const name = getStr(c, 'RawtextName');
                 if (name) { const raw = textToRaw(ctx, name, `${base}.name`, meta); if (raw) setS(P('RawtextName'), raw); }
                 const text = getStr(c, 'InterativeText');
@@ -197,7 +202,7 @@
                     if (ach) setS(P('Actions'), JSON.stringify(actions, null, 3).replace(/": /g, '" : ') + '\n');
                 }
             }
-            if (getStr(c, 'Command')) cmd(P('Command'), `world.command.${idPart}`);   // 命令方块矿车
+            if (getStr(c, 'Command')) cmd(P('Command'), `${kp}.command.${idPart}`);   // 命令方块矿车
             const cn = getStr(c, 'CustomName');
             if (cn && ident !== 'minecraft:npc') report(P('CustomName'), '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
             for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory']) items(P(f));
@@ -205,81 +210,86 @@
         return changed;
     }
 
-    /** 一条记录里第 ri 个根标签的名称（一个区块的方块实体存在同一条记录里） */
-    function rootLabel(rec, ri) {
-        const c = rec.tags[ri] && rec.tags[ri].v;
-        if (rec.kind === 'level') return 'level.dat（世界设置）';
-        if (!Array.isArray(c)) return rec.kind;
-        if (rec.kind === 'block') {
+    /** 方块实体 / 实体的显示名称 */
+    function unitLabel(rec, c, kind) {
+        const prefix = rec && rec.kind === 'structure' ? `[${rec.name}] ` : '';
+        if (!Array.isArray(c)) return prefix + kind;
+        if (kind === 'block') {
             const id = getStr(c, 'id') || '?';
             const x = child(c, 'x'), y = child(c, 'y'), z = child(c, 'z');
-            return `${id} @ ${x ? x.v : '?'}, ${y ? y.v : '?'}, ${z ? z.v : '?'}`;
+            return `${prefix}${id} @ ${x ? x.v : '?'}, ${y ? y.v : '?'}, ${z ? z.v : '?'}`;
         }
         const ident = (getStr(c, 'identifier') || '?').replace(/^minecraft:/, '');
         const name = getStr(c, 'CustomName');
         const pos = child(c, 'Pos');
-        const p = pos && pos.t === T.LIST ? pos.v.items.map(n => Math.round(n)).join(', ') : '';
-        return `${ident}${name ? ` “${name}”` : ''}${p ? ` @ ${p}` : ''}`;
+        const p = pos && pos.t === T.LIST ? pos.v.items.map(n => Math.floor(n)).join(', ') : '';
+        return `${prefix}${ident}${name ? ` “${name}”` : ''}${p ? ` @ ${p}` : ''}`;
     }
 
-    // ---------------- 打开存档 ----------------
-    async function openWorld(fs, userOptions = {}, log = () => {}) {
-        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: true, baseName: 'world', ...userOptions };
-        const all = fs.list();
-        const levelDat = all.filter(p => /(^|\/)level\.dat$/.test(p)).sort((a, b) => a.length - b.length)[0];
-        if (!levelDat) throw new Error('没有找到 level.dat，这不是世界存档');
-        const rootDir = levelDat.replace(/level\.dat$/, '');
-        const dbDir = rootDir + 'db/';
-        const dbFiles = new Map();
-        for (const p of all) if (p.startsWith(dbDir) && !p.slice(dbDir.length).includes('/')) dbFiles.set(p.slice(dbDir.length), await fs.readBytes(p));
-        if (!dbFiles.size) throw new Error('存档里没有 db 文件夹');
+    /**
+     * 一条记录里需要处理的单元：[{ base: 路径, kind }]
+     *  - 方块实体 / 实体记录：每个根标签一个（一个区块的方块实体存在同一条记录里）
+     *  - 结构（.mcstructure 或存档里保存的结构）：structure.entities[i]、palette.default.block_position_data.<n>.block_entity_data
+     */
+    function unitsOf(rec) {
+        if (rec.kind === 'level') return [];
+        if (rec.kind !== 'structure') return rec.tags.map((tg, ri) => tg.t === T.COMPOUND ? { base: [ri], kind: rec.kind } : null).filter(Boolean);
+        const units = [];
+        rec.tags.forEach((tg, ri) => {
+            if (tg.t !== T.COMPOUND) return;
+            const st = child(tg.v, 'structure');
+            if (!st || st.t !== T.COMPOUND) return;
+            const ents = child(st.v, 'entities');
+            if (ents && ents.t === T.LIST && ents.v.et === T.COMPOUND) ents.v.items.forEach((_, i) => units.push({ base: [ri, 'structure', 'entities', i], kind: 'actor' }));
+            const pal = child(st.v, 'palette');
+            const def = pal && pal.t === T.COMPOUND && child(pal.v, 'default');
+            const bpd = def && def.t === T.COMPOUND && child(def.v, 'block_position_data');
+            if (bpd && bpd.t === T.COMPOUND) {
+                for (const e of bpd.v) {
+                    const bed = e.t === T.COMPOUND && child(e.v, 'block_entity_data');
+                    if (bed && bed.t === T.COMPOUND) units.push({ base: [ri, 'structure', 'palette', 'default', 'block_position_data', e.n, 'block_entity_data'], kind: 'block' });
+                }
+            }
+        });
+        return units;
+    }
 
-        let levelName = opt.baseName;
-        if (all.includes(rootDir + 'levelname.txt')) levelName = (await fs.readText(rootDir + 'levelname.txt')).trim() || levelName;
-        log(`[存档] ${levelName}  db 文件 ${dbFiles.size} 个`);
-
-        const db = await LevelDB.openDb(dbFiles, wantKey);
-        log(`[数据库] 有效数据表 ${db.info.tables} 个，当前日志 ${db.info.currentLog || '无'}，最新序列号 ${db.info.lastSeq}`);
-
-        const records = [];
-        // level.dat：8 字节头（版本、长度）+ NBT
-        const ldBytes = await fs.readBytes(levelDat);
-        try {
-            const tags = NBT.readAll(ldBytes.subarray(8));
-            const rec = { id: 0, kind: 'level', key: null, tags, dirty: false, header: new DataView(ldBytes.buffer, ldBytes.byteOffset).getInt32(0, true) };
-            rec.label = rootLabel(rec, 0);
-            records.push(rec);
-        } catch (e) { log(`[跳过] level.dat 无法解析：${e.message}`, 'warn'); }
-
-        for (const e of db.entries()) {
-            let tags;
-            try { tags = NBT.readAll(e.value); } catch (err) { log(`[跳过] 无法解析的记录：${err.message}`, 'warn'); continue; }
-            if (!tags.length) continue;
-            const rec = { id: records.length, kind: isChunkTag(e.key, 49) ? 'block' : 'actor', key: e.key, tags, dirty: false };
-            rec.label = rootLabel(rec, 0);
-            records.push(rec);
+    /** 某个路径所属单元的名称（搜索结果、浏览用） */
+    function labelForPath(rec, path) {
+        if (rec.kind === 'level') return 'level.dat（世界设置）';
+        let best = null;
+        for (const u of rec.units || []) {
+            if (u.base.length <= path.length && u.base.every((s, i) => s === path[i]) && (!best || u.base.length > best.base.length)) best = u;
         }
+        if (best) return unitLabel(rec, nodeAt(rec, best.base).v, best.kind);
+        return rec.kind === 'structure' ? `结构 ${rec.name}` : rec.label;
+    }
 
-        const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines });
-        let nBE = 0, nActor = 0;
+    function rootLabel(rec, ri) {
+        if (rec.kind === 'level') return 'level.dat（世界设置）';
+        if (rec.kind === 'structure') return `结构 ${rec.name}`;
+        return unitLabel(rec, rec.tags[ri] && rec.tags[ri].v, rec.kind);
+    }
+
+    function convertRecords(ctx, records, log) {
+        let nBE = 0, nActor = 0, nStruct = 0;
         for (const rec of records) {
-            if (rec.kind === 'level') continue;
-            rec.tags.forEach((tg, ri) => {
-                if (tg.t !== T.COMPOUND) return;
-                rec.kind === 'block' ? nBE++ : nActor++;
-                if (convertCompound(ctx, rec, ri)) rec.dirty = true;
-            });
+            rec.units = unitsOf(rec);
+            if (rec.kind === 'structure') nStruct++;
+            for (const u of rec.units) {
+                u.kind === 'block' ? nBE++ : nActor++;
+                if (convertCompound(ctx, rec, u.base, u.kind)) rec.dirty = true;
+            }
         }
         const auto = records.filter(r => r.dirty).length;
-        log(`扫描方块实体 ${nBE} 个、实体 ${nActor} 个；自动转换 ${auto} 条记录，提取文本 ${ctx.entries.size} 条，需人工处理 ${ctx.untranslatable.length} 处`);
+        log(`扫描方块实体 ${nBE} 个、实体 ${nActor} 个${nStruct ? `（含结构 ${nStruct} 个）` : ''}；自动转换 ${auto} 条记录，提取文本 ${ctx.entries.size} 条，需人工处理 ${ctx.untranslatable.length} 处`);
+    }
 
-        // 原始 world_resource_packs.json（多次生成时都基于原文件，避免重复登记）
-        const wrpPath = rootDir + 'world_resource_packs.json';
-        let wrpOriginal = [];
-        if (all.includes(wrpPath)) { const d = NS.parseJsonLenient(await fs.readText(wrpPath)); if (Array.isArray(d)) wrpOriginal = d; }
+    /** 编辑会话（存档与结构文件共用）：定位、修改、搜索、导入翻译表、翻译表 */
+    function makeSession(records, ctx, opt, extra) {
         const byId = (id) => records[id];
-        const session = {
-            records, ctx, levelName, rootDir, levelDatPath: levelDat, opt, wrpOriginal,
+        return {
+            records, ctx, opt, ...extra,
             edits: 0,
             /** 解析引用 "记录号|[路径]" */
             resolve(ref) {
@@ -315,7 +325,7 @@
                         if (t !== T.STRING && !NUM_TYPES.has(t)) return;
                         const val = displayValue(t, v);
                         if (String(name).toLowerCase().includes(q) || val.toLowerCase().includes(q)) {
-                            out.push({ ref: `${rec.id}|${JSON.stringify(path)}`, rec, label: rootLabel(rec, path[0]), pathText: pathText(rec, path), type: t, value: val });
+                            out.push({ ref: `${rec.id}|${JSON.stringify(path)}`, rec, label: labelForPath(rec, path), pathText: pathText(rec, path), type: t, value: val });
                         }
                     };
                     rec.tags.forEach((tg, ri) => visit(tg.t, tg.v, [ri], tg.n));
@@ -341,12 +351,59 @@
                 }
                 return { applied, skipped };
             },
-            /** 写出：db 日志、level.dat、资源包、翻译表 */
-            async build(outFs, buildLog = log) {
-                return buildWorld(this, outFs, dbFiles, db, buildLog);
-            },
             workbook() { return makeWorkbook(this); },
         };
+    }
+
+    // ---------------- 打开存档 ----------------
+    async function openWorld(fs, userOptions = {}, log = () => {}) {
+        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: true, baseName: 'world', ...userOptions };
+        const all = fs.list();
+        const levelDat = all.filter(p => /(^|\/)level\.dat$/.test(p)).sort((a, b) => a.length - b.length)[0];
+        if (!levelDat) throw new Error('没有找到 level.dat，这不是世界存档');
+        const rootDir = levelDat.replace(/level\.dat$/, '');
+        const dbDir = rootDir + 'db/';
+        const dbFiles = new Map();
+        for (const p of all) if (p.startsWith(dbDir) && !p.slice(dbDir.length).includes('/')) dbFiles.set(p.slice(dbDir.length), await fs.readBytes(p));
+        if (!dbFiles.size) throw new Error('存档里没有 db 文件夹');
+
+        let levelName = opt.baseName;
+        if (all.includes(rootDir + 'levelname.txt')) levelName = (await fs.readText(rootDir + 'levelname.txt')).trim() || levelName;
+        log(`[存档] ${levelName}  db 文件 ${dbFiles.size} 个`);
+
+        const db = await LevelDB.openDb(dbFiles, wantKey);
+        log(`[数据库] 有效数据表 ${db.info.tables} 个，当前日志 ${db.info.currentLog || '无'}，最新序列号 ${db.info.lastSeq}`);
+
+        const records = [];
+        // level.dat：8 字节头（版本、长度）+ NBT
+        const ldBytes = await fs.readBytes(levelDat);
+        try {
+            const tags = NBT.readAll(ldBytes.subarray(8));
+            const rec = { id: 0, kind: 'level', key: null, tags, dirty: false, header: new DataView(ldBytes.buffer, ldBytes.byteOffset).getInt32(0, true) };
+            rec.label = rootLabel(rec, 0);
+            records.push(rec);
+        } catch (e) { log(`[跳过] level.dat 无法解析：${e.message}`, 'warn'); }
+
+        for (const e of db.entries()) {
+            let tags;
+            try { tags = NBT.readAll(e.value); } catch (err) { log(`[跳过] 无法解析的记录：${err.message}`, 'warn'); continue; }
+            if (!tags.length) continue;
+            const kind = isStructKey(e.key) ? 'structure' : isChunkTag(e.key, 49) ? 'block' : 'actor';
+            const rec = { id: records.length, kind, key: e.key, tags, dirty: false };
+            if (kind === 'structure') rec.name = String.fromCharCode(...e.key.subarray(STRUCT_PREFIX.length)).replace(/^_/, '');
+            rec.label = rootLabel(rec, 0);
+            records.push(rec);
+        }
+
+        const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines });
+        convertRecords(ctx, records, log);
+
+        // 原始 world_resource_packs.json（多次生成时都基于原文件，避免重复登记）
+        const wrpPath = rootDir + 'world_resource_packs.json';
+        let wrpOriginal = [];
+        if (all.includes(wrpPath)) { const d = NS.parseJsonLenient(await fs.readText(wrpPath)); if (Array.isArray(d)) wrpOriginal = d; }
+        const session = makeSession(records, ctx, opt, { levelName, rootDir, levelDatPath: levelDat, wrpOriginal });
+        session.build = async function (outFs, buildLog = log) { return buildWorld(this, outFs, dbFiles, db, buildLog); };
         return session;
     }
 
@@ -430,28 +487,13 @@
         const sourceLang = detectLang(session);
         let packDir = null;
         if (ctx.entries.size) {
-            const uuid = () => (root.crypto && root.crypto.randomUUID) ? root.crypto.randomUUID()
-                : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => { const r = Math.random() * 16 | 0; return (ch === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
-            const packUuid = uuid();
             const folder = /^[\x20-\x7e]+$/.test(levelName) ? `${NS.sanitizeKeyPart(levelName)}_texts` : 'world_texts';
             packDir = `${rootDir}resource_packs/${folder}/`;
-            const manifest = {
-                format_version: 2,
-                header: { name: 'pack.name', description: 'pack.description', uuid: packUuid, version: [1, 0, 0], min_engine_version: [1, 20, 0] },
-                modules: [{ type: 'resources', uuid: uuid(), version: [1, 0, 0] }],
-            };
-            fs.writeText(packDir + 'manifest.json', JSON.stringify(manifest, null, 2));
-            const langs = [...new Set([...opt.targetLangs, sourceLang, 'en_US'])];
-            const body = [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n');
-            for (const l of langs) {
-                const head = `pack.name=${levelName} - Texts\npack.description=Translations for ${levelName}\n\n## ==== addon-i18n 自动提取（源语言 ${sourceLang}${l === sourceLang ? '' : '，待翻译'}） ====\n`;
-                fs.writeText(`${packDir}texts/${l}.lang`, head + body + '\n');
-            }
-            fs.writeText(`${packDir}texts/languages.json`, JSON.stringify(langs, null, 2));
+            const pack = textsPackFiles(ctx, opt, levelName, sourceLang);
+            for (const [p, text] of pack.files) fs.writeText(packDir + p, text);
             const wrp = rootDir + 'world_resource_packs.json';
-            const list = [...session.wrpOriginal, { pack_id: packUuid, version: [1, 0, 0] }];
-            fs.writeText(wrp, JSON.stringify(list, null, 2));
-            log(`[资源包] 新建 ${packDir}，语言 ${langs.join(', ')}，已登记到 world_resource_packs.json`);
+            fs.writeText(wrp, JSON.stringify([...session.wrpOriginal, { pack_id: pack.uuid, version: [1, 0, 0] }], null, 2));
+            log(`[资源包] 新建 ${packDir}，语言 ${pack.langs.join(', ')}，已登记到 world_resource_packs.json`);
         }
 
         return {
@@ -464,6 +506,75 @@
         };
     }
 
+
+    // ---------------- 结构文件 .mcstructure ----------------
+    // 格式：小端 NBT（无文件头），structure.entities 为实体，
+    //       structure.palette.default.block_position_data.<序号>.block_entity_data 为方块实体
+
+    /** 生成存放翻译的资源包文件：返回 Map(相对路径 → 文本) 和 uuid */
+    function textsPackFiles(ctx, opt, title, sourceLang) {
+        const uuid = () => (root.crypto && root.crypto.randomUUID) ? root.crypto.randomUUID()
+            : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => { const r = Math.random() * 16 | 0; return (ch === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
+        const packUuid = uuid();
+        const files = new Map();
+        files.set('manifest.json', JSON.stringify({
+            format_version: 2,
+            header: { name: 'pack.name', description: 'pack.description', uuid: packUuid, version: [1, 0, 0], min_engine_version: [1, 20, 0] },
+            modules: [{ type: 'resources', uuid: uuid(), version: [1, 0, 0] }],
+        }, null, 2));
+        const langs = [...new Set([...opt.targetLangs, sourceLang, 'en_US'])];
+        const body = [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n');
+        for (const l of langs) {
+            files.set(`texts/${l}.lang`, `pack.name=${title} - Texts\npack.description=Translations for ${title}\n\n## ==== addon-i18n 自动提取（源语言 ${sourceLang}${l === sourceLang ? '' : '，待翻译'}） ====\n${body}\n`);
+        }
+        files.set('texts/languages.json', JSON.stringify(langs, null, 2));
+        return { files, uuid: packUuid, langs };
+    }
+
+    function structureRecord(name, bytes) {
+        const tags = NBT.readAll(bytes);
+        if (!tags.length || tags[0].t !== T.COMPOUND || !child(tags[0].v, 'structure')) throw new Error('不是有效的 .mcstructure 文件');
+        const rec = { id: 0, kind: 'structure', key: null, tags, dirty: false, name };
+        rec.label = rootLabel(rec, 0);
+        return rec;
+    }
+
+    /** 单独的结构文件：打开为可编辑会话 */
+    async function openStructure(fileName, bytes, userOptions = {}, log = () => {}) {
+        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: true, ...userOptions };
+        const name = fileName.replace(/^.*\//, '').replace(/\.mcstructure$/i, '');
+        const rec = structureRecord(name, bytes);
+        const size = child(rec.tags[0].v, 'size');
+        log(`[结构] ${name}  尺寸 ${size && size.t === T.LIST ? size.v.items.join('×') : '?'}`);
+        const records = [rec];
+        const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines });
+        convertRecords(ctx, records, log);
+        const session = makeSession(records, ctx, opt, { structureName: name, levelName: name });
+        /** 返回 { structure: Uint8Array, pack: Map(路径→文本) | null, workbook, summary } */
+        session.build = async function () {
+            const sourceLang = detectLang(this);
+            const pack = ctx.entries.size ? textsPackFiles(ctx, opt, name, sourceLang).files : null;
+            return {
+                structure: NBT.writeAll(rec.tags), pack,
+                workbook: makeWorkbook(this),
+                summary: { world: true, structure: true, newKeys: ctx.entries.size, untranslatable: ctx.untranslatable.length, sourceLang, manualEdits: this.edits },
+            };
+        };
+        return session;
+    }
+
+    /**
+     * 附加包里的结构文件：用附加包的上下文提取（翻译写进附加包的资源包）
+     * @returns { bytes, changed }
+     */
+    function convertStructureBytes(bytes, file, ctx) {
+        const rec = structureRecord(file.replace(/^.*\//, '').replace(/\.mcstructure$/i, ''), bytes);
+        rec.units = unitsOf(rec);
+        let changed = false;
+        for (const u of rec.units) if (convertCompound(ctx, rec, u.base, u.kind)) changed = true;
+        return { bytes: changed ? NBT.writeAll(rec.tags) : bytes, changed, units: rec.units.length };
+    }
+
     /** 一步完成（测试与非交互使用） */
     async function runWorldPipeline(fs, userOptions = {}, log = () => {}) {
         const session = await openWorld(fs, userOptions, log);
@@ -472,6 +583,8 @@
     }
 
     NS.openWorld = openWorld;
+    NS.openStructure = openStructure;
+    NS.convertStructureBytes = convertStructureBytes;
     NS.runWorldPipeline = runWorldPipeline;
     NS.worldNodeAt = nodeAt;
     NS.worldRootLabel = rootLabel;
