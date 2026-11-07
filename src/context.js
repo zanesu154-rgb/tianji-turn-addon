@@ -120,7 +120,7 @@
                 const key = this.alloc(baseKey, value, meta);
                 nodes.push({ translate: key, with: { rawtext: args } });
             } else {
-                const lines = this.splitNewlines && !meta.noSplit ? body.split(/\r?\n/) : [body];
+                const lines = this.splitNewlines ? body.split(/\r?\n/) : [body];
                 lines.forEach((line, i) => {
                     if (i > 0) nodes.push({ text: '\n' });
                     if (!line) return;
