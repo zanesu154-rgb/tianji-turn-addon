@@ -161,6 +161,7 @@ function readOptions() {
         processScripts: $('opt-scripts').checked,
         injectRuntime: $('opt-runtime').checked,
         splitNewlines: $('opt-split').checked,
+        sayMode: $('opt-say').value,
         fillMissing: $('opt-fill').checked,
         placeholderNames: $('opt-placeholder').checked,
         scriptLangFields: $('opt-langfields').value,

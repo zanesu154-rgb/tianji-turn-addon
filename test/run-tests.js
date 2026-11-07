@@ -100,7 +100,18 @@ function renderCommand(cmd, lang) {
     check('mcfunction tag … title 未动', fn.includes('tag @s add title\r\n'));
     check('mcfunction title times 未动', fn.includes('title @a times 10 20 10\r\n'));
     check('mcfunction 缩进与 CRLF 保留', fn.includes('\r\n  execute as @a[tag=vip,scores={x=1..}] at @s run titleraw @s subtitle '));
-    check('say 未改并记入报告', fn.includes('say 游戏开始了') && res.ctx.untranslatable.some(u => u.text === '游戏开始了'));
+    {
+        const j = [...fn.matchAll(/^tellraw @a (\{.*\})\r$/gm)].map(x => JSON.parse(x[1])).find(x => x.rawtext[0].text === '[');
+        check('say → tellraw（默认）：保留 [发送者] 前缀，正文为翻译键', !fn.includes('say 游戏开始了') && j && j.rawtext[1].selector === '@s' && zh.get(j.rawtext[3].translate) === '游戏开始了');
+        const ck = new NS.ExtractContext({}); ck.sayMode = 'keep';
+        check('say 不转换模式：原样保留并记入报告', NS.translateCommand('say 游戏开始了', ck, 'k', 'f').changed === false && ck.untranslatable.some(u => u.text === '游戏开始了'));
+        const ct = new NS.ExtractContext({}); ct.sayMode = 'titleraw';
+        const t1 = NS.translateCommand('say 欢迎 @p 来到村庄', ct, 'k', 'f').cmd;
+        check('say → titleraw：选择器变成 %1$s 参数', /^titleraw @a title /.test(t1) && [...ct.entries.values()][0].value === '欢迎 %1$s 来到村庄');
+        const ca = new NS.ExtractContext({}); ca.sayMode = 'actionbar';
+        check('tell @p → titleraw @p actionbar', /^titleraw @p actionbar /.test(NS.translateCommand('tell @p 小心背后', ca, 'k', 'f').cmd));
+        check('say 100% / say @a 不转换', !NS.translateCommand('say 100%', ct, 'k', 'f').changed && !NS.translateCommand('say @a', ct, 'k', 'f').changed);
+    }
     check('计分板显示名记入报告', res.ctx.untranslatable.some(u => u.text === '击杀数'));
     check('战利品表 set_name 未改（游戏不翻译自定义名称）', !changed.includes('BP/loot_tables/chest.json') && res.ctx.untranslatable.some(u => u.text === '传说宝箱'));
     const ent = JSON.parse(out('BP/entities/merchant.json'))['minecraft:entity'];
@@ -370,7 +381,8 @@ console.log(JSON.stringify(calls));`;
         check('悬挂告示牌（含小写单词 hello）', rr(G(C(hang, 'FrontText').v, 'Text')) === '你好' && rr(G(C(hang, 'BackText').v, 'Text')) === 'hello');
         const cmds = tags.filter(c => G(c, 'id') === 'CommandBlock').map(c => G(c, 'Command'));
         check('命令方块 title / titleraw → 翻译键', cmds.filter(c => c.startsWith('/titleraw') && c.includes('"translate"')).length === 2);
-        check('命令方块 say / tell 保持原样并记入报告', cmds.includes('/say 这是一条测试文本') && cmds.includes('/tell @a 这是一条测试文本') && wr.ctx.untranslatable.filter(u => /say|tell/.test(u.where)).length === 2);
+        const tr = cmds.filter(c => /^\/?tellraw @a /.test(c)).map(c => JSON.parse(c.slice(c.indexOf('{'))));
+        check('命令方块 say / tell → tellraw，发送者用方块名', tr.length === 2 && tr.every(j => rr(JSON.stringify({ rawtext: [j.rawtext[3]] })) === '这是一条测试文本') && tr.some(j => j.rawtext[1].text === 'say' || j.rawtext[1].text === '@') && !cmds.some(c => /^\/?(say|tell) /.test(c)));
         const npc = tags.find(c => G(c, 'identifier') === 'minecraft:npc');
         const acts = JSON.parse(G(npc, 'Actions'));
         check('NPC 名字、正文、按钮 → 翻译键', rr(G(npc, 'RawtextName')) === '你好,claude' && rr(G(npc, 'InterativeText')) === '这是一条测试文本' && rr(acts[0].button_name) === '这是一条测试文本');
@@ -446,7 +458,7 @@ console.log(JSON.stringify(calls));`;
         const sb = fs.readFileSync(path.join(__dirname, 'fixture', 'BP', 'structures', 'village.mcstructure'));
         const ss = await NS.openStructure('village.mcstructure', new Uint8Array(sb), {}, () => {});
         const keys = [...ss.ctx.entries.keys()];
-        check('结构：告示牌（多行）、命令方块、NPC 名字/正文/按钮 → 翻译键', ['sign.0_0_0.front', 'sign.0_0_0.front_1', 'sign.0_0_0.back', 'command.1_0_0', 'npc.n12345.name', 'npc.n12345.text', 'npc.n12345.button_0'].every(k => keys.includes('structure.village.' + k)));
+        check('结构：告示牌（多行）、命令方块、NPC 名字/正文/按钮 → 翻译键', ['sign.0_0_0.front', 'sign.0_0_0.back', 'command.1_0_0', 'npc.n12345.name', 'npc.n12345.text', 'npc.n12345.button_0'].every(k => keys.includes('structure.village.' + k)));
         check('结构：箱子名、物品名、物品描述列为需人工处理', ['村长的箱子', '村长的剑', '传家之宝'].every(t => ss.ctx.untranslatable.some(u => u.text === t && u.ref)));
         const hits = ss.search('CustomName', 1e6);
         const rows = [['ref', 'translation'], ...hits.map(h => [h.ref, h.value === '村长的箱子' ? "Elder's Chest" : h.value === 'NPC' ? 'Elder' : ''])];

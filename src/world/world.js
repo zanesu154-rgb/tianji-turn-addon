@@ -148,11 +148,11 @@
         // 键名前缀：存档用 world，结构用 structure.<名字>（不同结构的内部坐标都从 0 开始）
         const kp = rec.kind === 'structure' ? `structure.${NS.sanitizeKeyPart(rec.name || 'unnamed')}` : 'world';
         const meta = { file: label, kind: 'world', scope: 'world', mode: 'display' };
-        const cmd = (path, baseKey) => {
+        const cmd = (path, baseKey, sender) => {
             const s = getStr(nodeAt(rec, path.slice(0, -1)).v, path[path.length - 1]);
             if (!s) return;
             const before = ctx.untranslatable.length;
-            const r = NS.translateCommand(s, ctx, baseKey, label);
+            const r = NS.translateCommand(s, ctx, baseKey, label, { sender });
             if (r.changed) setS(path, r.cmd);
             // say / tell 等报告补上位置
             for (let i = before; i < ctx.untranslatable.length; i++) ctx.untranslatable[i].ref = `${rec.id}|${JSON.stringify(path)}`;
@@ -226,7 +226,8 @@
                 const old = getStr(c, 'Text');   // 1.20 之前的旧格式
                 if (old) { const raw = textToRaw(ctx, old, `${kp}.sign.${pos}`, meta); if (raw) setS(P('Text'), raw); }
             }
-            if (id === 'CommandBlock') cmd(P('Command'), `${kp}.command.${pos}`);
+            // 命令方块执行 say 时，发送者名是它自己的名字（没起名时为 @）
+            if (id === 'CommandBlock') cmd(P('Command'), `${kp}.command.${pos}`, { text: getStr(c, 'CustomName') || '@' });
             const cn = getStr(c, 'CustomName');
             if (cn && id === 'CommandBlock') report(P('CustomName'), '命令方块名称', cn, '命令方块名称（say 等命令输出时显示的发送者名）不支持翻译键');
             else if (cn) report(P('CustomName'), '方块名称', cn, '容器/方块的自定义名称不支持翻译键');
@@ -482,7 +483,7 @@
 
     // ---------------- 打开存档 ----------------
     async function openWorld(fs, userOptions = {}, log = () => {}) {
-        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: true, baseName: 'world', ...userOptions };
+        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: false, sayMode: 'tellraw', baseName: 'world', ...userOptions };
         const all = fs.list();
         const levelDat = all.filter(p => /(^|\/)level\.dat$/.test(p)).sort((a, b) => a.length - b.length)[0];
         if (!levelDat) throw new Error('没有找到 level.dat，这不是世界存档');
@@ -522,6 +523,7 @@
         }
 
         const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines });
+        ctx.sayMode = opt.sayMode;
         convertRecords(ctx, records, log);
 
         // 原始 world_resource_packs.json（多次生成时都基于原文件，避免重复登记）
@@ -667,13 +669,14 @@
 
     /** 单独的结构文件：打开为可编辑会话 */
     async function openStructure(fileName, bytes, userOptions = {}, log = () => {}) {
-        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: true, ...userOptions };
+        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: false, sayMode: 'tellraw', ...userOptions };
         const name = fileName.replace(/^.*\//, '').replace(/\.mcstructure$/i, '');
         const rec = structureRecord(name, bytes);
         const size = child(rec.tags[0].v, 'size');
         log(`[结构] ${name}  尺寸 ${size && size.t === T.LIST ? size.v.items.join('×') : '?'}`);
         const records = [rec];
         const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines });
+        ctx.sayMode = opt.sayMode;
         convertRecords(ctx, records, log);
         const session = makeSession(records, ctx, opt, { structureName: name, levelName: name });
         /** 返回 { structure: Uint8Array, pack: Map(路径→文本) | null, workbook, summary } */
