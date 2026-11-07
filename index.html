@@ -49,6 +49,10 @@
                     <span>生成语言文件（逗号分隔）</span>
                     <input id="opt-targets" type="text" value="en_US, zh_CN" spellcheck="false">
                 </label>
+                <label class="opt-field opt-wide">
+                    <span>脚本自带翻译字段（留空自动识别，off 关闭，或手动填写如 s=en_US, v=vi_VN）</span>
+                    <input id="opt-langfields" type="text" value="" placeholder="自动识别" spellcheck="false">
+                </label>
                 <label class="opt-check"><input id="opt-scripts" type="checkbox" checked> 处理脚本（scripts/*.js）</label>
                 <label class="opt-check"><input id="opt-runtime" type="checkbox" checked> 注入运行时翻译（变量、对象表等动态文本）</label>
                 <label class="opt-check"><input id="opt-split" type="checkbox" checked> 多行文本拆成多个键（最稳妥）</label>

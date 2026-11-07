@@ -22,6 +22,7 @@
             this.referenced = new Map();   // 引用到的已有键 → 文件
             this.untranslatable = [];      // { file, where, text, reason }
             this.warnings = [];
+            this.translations = new Map(); // 键 → Map(语言 → 已有译文)，来自脚本自带的多语言表
             this.packEntries = new Map();  // 包根目录 → Map(键→值)，用于 pack.name / pack.description
             this.stats = { files: 0 };
         }
@@ -57,6 +58,12 @@
             }
             if (scope) this.dedupe.set(scope + '\u0000' + text, key);
             return key;
+        }
+
+        addTranslation(key, lang, value) {
+            if (!this.translations.has(key)) this.translations.set(key, new Map());
+            const m = this.translations.get(key);
+            if (!m.has(lang)) m.set(lang, value);
         }
 
         ref(key, file) {
