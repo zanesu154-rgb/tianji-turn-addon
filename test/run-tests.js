@@ -112,6 +112,12 @@ function renderCommand(cmd, lang) {
     check('textField 的 defaultValue 未登记', ![...zh.values()].includes('Steve'));
     check('图片路径未登记', ![...zh.values()].some(v => v.includes('textures/')));
 
+    const st = JSON.parse(out('RP/ui/starter.json'));
+    check('localize:false 的标签：直接文本被翻译并改为 localize:true', zh.get(st.title_label.text) === '就决定是你了！' && st.title_label.localize === true);
+    check('localize:false 的标签：通过 $变量 传入的文本 → 显示它的标签改为 true', zh.get(st.frame.controls[0]['bulbasaur@starter.state'].$name) === '妙蛙种子' && st.state.controls[0].name_label.localize === true);
+    check('localize:false 继承自 @模板 → 在子控件上覆盖为 true', st.state.controls[1]['desc@starter.desc_tpl'].localize === true);
+    check('单个字母 "X" 不提取', st.x_btn.text === 'X');
+
     console.log('\n[4] 该提取的都提取了');
     const item = JSON.parse(out('BP/items/sword.json'))['minecraft:item'].components;
     check('物品名', zh.get(item['minecraft:display_name'].value) === '§6烈焰之剑');

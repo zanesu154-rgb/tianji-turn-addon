@@ -286,52 +286,95 @@
     }
 
     /**
-     * 预扫描所有 UI 文件：找出哪些 $变量 被当作 text 使用，哪些出现在表达式/绑定中
-     * （出现在表达式中的变量，翻译后会破坏比较逻辑，例如表单标题标记 "$flag"）
+     * 预扫描所有 UI 文件：
+     *  - 哪些 $变量 被当作 text 使用，哪些出现在表达式/绑定中
+     *    （出现在表达式中的变量，翻译后会破坏比较逻辑，例如表单标题标记 "$flag"）
+     *  - 每个变量最终被哪些标签显示（用于检查 "localize": false）
+     *  - 顶层控件索引（用于沿 @模板 继承查找 localize）
+     * uiFiles: [{ path, data }]
      */
     function collectUiVarUsage(uiFiles) {
         const textVars = new Set(BUILTIN_TEXT_VARS);
         const nonText = new Set();
-        const alias = [];   // [被赋值的变量, 引用的变量]
+        const alias = [];          // [被赋值的变量, 引用的变量]
+        const consumers = new Map(); // 变量名 → [{ obj, key, ns, path }]（"text": "$变量" 的标签）
+        const elements = new Map();  // "命名空间.控件名" → { obj, key, ns }
 
-        const visitString = (key, v) => {
-            const exact = /^\$([A-Za-z0-9_]+)$/.exec(v.trim());
-            if (exact) {
-                if (key === 'text') textVars.add(exact[1]);
-                else if (key.startsWith('$')) alias.push([varNameOf(key), exact[1]]);
-                else nonText.add(exact[1]);
-                return;
+        for (const { path, data } of uiFiles) {
+            if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
+            const ns = typeof data.namespace === 'string' ? data.namespace : '';
+            for (const [k, v] of Object.entries(data)) {
+                if (k !== 'namespace' && v && typeof v === 'object' && !Array.isArray(v)) {
+                    elements.set(`${ns}.${k.split('@')[0]}`, { obj: v, key: k, ns });
+                }
             }
-            const re = /\$([A-Za-z0-9_]+)/g;
-            let m;
-            while ((m = re.exec(v))) nonText.add(m[1]);
-        };
-
-        for (const data of uiFiles) {
-            (function walk(node, parentKey) {
-                if (Array.isArray(node)) { node.forEach(n => walk(n, parentKey)); return; }
+            (function walk(node, nodeKey) {
+                if (Array.isArray(node)) { node.forEach(n => walk(n, nodeKey)); return; }
                 if (!node || typeof node !== 'object') return;
                 for (const [k, v] of Object.entries(node)) {
-                    if (typeof v === 'string') visitString(k, v);
-                    else walk(v, k);
+                    if (typeof v === 'string') {
+                        const exact = /^\$([A-Za-z0-9_]+)$/.exec(v.trim());
+                        if (exact) {
+                            if (k === 'text') {
+                                textVars.add(exact[1]);
+                                if (!consumers.has(exact[1])) consumers.set(exact[1], []);
+                                consumers.get(exact[1]).push({ obj: node, key: nodeKey, ns, path });
+                            } else if (k.startsWith('$')) alias.push([varNameOf(k), exact[1]]);
+                            else nonText.add(exact[1]);
+                            continue;
+                        }
+                        const re = /\$([A-Za-z0-9_]+)/g;
+                        let m;
+                        while ((m = re.exec(v))) nonText.add(m[1]);
+                    } else if (Array.isArray(v)) {
+                        // controls: [{ "名字@模板": {...} }]
+                        v.forEach(item => {
+                            if (item && typeof item === 'object' && !Array.isArray(item)) {
+                                const keys = Object.keys(item);
+                                if (keys.length === 1 && item[keys[0]] && typeof item[keys[0]] === 'object') walk(item[keys[0]], keys[0]);
+                                else walk(item, nodeKey);
+                            }
+                        });
+                    } else {
+                        walk(v, k);
+                    }
                 }
             })(data, '');
         }
-        // 变量透传：$a 是文本，且 "$a": "$b" → $b 也是文本
+        // 变量透传："$a": "$b" → 赋给 $a 的值最终也由 $b 的标签显示
         let grew = true;
         while (grew) {
             grew = false;
             for (const [a, b] of alias) {
                 if (textVars.has(a) && !textVars.has(b)) { textVars.add(b); grew = true; }
+                const ca = consumers.get(a);
+                if (ca) {
+                    if (!consumers.has(b)) consumers.set(b, []);
+                    const cb = consumers.get(b);
+                    for (const c of ca) if (!cb.includes(c)) { cb.push(c); grew = true; }
+                }
             }
         }
-        return { textVars, nonText };
+        return { textVars, nonText, consumers, elements };
+    }
+
+    /** 沿 "名字@命名空间.模板" 继承链查找 localize；未设置返回 undefined */
+    function effectiveLocalize(obj, key, ns, elements, depth = 0) {
+        if (obj && typeof obj.localize === 'boolean') return obj.localize;
+        if (depth > 15 || !key || !key.includes('@') || !elements) return undefined;
+        const ref = key.split('@')[1];
+        const full = ref.includes('.') ? ref : `${ns}.${ref}`;
+        const tpl = elements.get(full);
+        if (!tpl) return undefined;
+        return effectiveLocalize(tpl.obj, tpl.key, tpl.ns, elements, depth + 1);
     }
 
     function processUI(data, file, ctx, info) {
         const fileName = file.split('/').pop().toLowerCase();
         if (fileName === '_ui_defs.json') return false;
-        const usage = info.uiVarUsage || { textVars: BUILTIN_TEXT_VARS, nonText: new Set() };
+        const usage = info.uiVarUsage || { textVars: BUILTIN_TEXT_VARS, nonText: new Set(), consumers: new Map(), elements: new Map() };
+        const dirty = info.uiDirty || (info.uiDirty = new Set());
+        const ns = typeof data.namespace === 'string' ? data.namespace : '';
         const fileBase = fileBaseOf(file);
         let changed = false;
 
@@ -341,33 +384,45 @@
             if (/^[#$@]/.test(t)) return false;              // 绑定 / 变量引用
             if (/\$[A-Za-z_]|#[A-Za-z_]/.test(t)) return false; // 含引用的表达式
             if (/^\(.*\)$/s.test(t)) return false;           // 表达式
+            if (/^\|.*\|$/.test(t)) return false;            // |TOKEN| 形式的标记
+            if (!NS.hasCJK(t) && (NS.stripFormatting(t).match(/\p{L}/gu) || []).length < 2) return false; // 单个字母如 "X"
             if (ctx.isKey(t)) { ctx.ref(t, file); return false; }
             return looksLikeText(t, 'loose');
         };
 
-        (function walk(node, ctrl) {
-            if (Array.isArray(node)) { node.forEach(n => walk(n, ctrl)); return; }
+        // 显示这段文字的标签如果是 "localize": false，键会被原样显示 → 改成 true
+        const ensureLocalized = (obj, key, objNs, path) => {
+            if (effectiveLocalize(obj, key, objNs, usage.elements) === false) {
+                obj.localize = true;
+                dirty.add(path);
+                info.localizeFlips = (info.localizeFlips || 0) + 1;
+            }
+        };
+
+        (function walk(node, ctrl, nodeKey) {
+            if (Array.isArray(node)) { node.forEach(n => walk(n, ctrl, nodeKey)); return; }
             if (!node || typeof node !== 'object') return;
             for (const [k, v] of Object.entries(node)) {
                 if (typeof v === 'string') {
                     if (k === 'text' && okText(v)) {
                         node[k] = ctx.alloc(`ui.${fileBase}.${ctrl}`, v, { file, kind: 'ui', scope: 'ui' });
+                        ensureLocalized(node, nodeKey, ns, file);
                         changed = true;
                     } else if (k.startsWith('$')) {
                         const name = varNameOf(k);
                         if (usage.textVars.has(name) && !usage.nonText.has(name) && okText(v)) {
                             node[k] = ctx.alloc(`ui.${fileBase}.${ctrl}.${name}`, v, { file, kind: 'ui', scope: 'ui' });
+                            for (const c of usage.consumers.get(name) || []) ensureLocalized(c.obj, c.key, c.ns, c.path);
                             changed = true;
                         }
                     }
                 } else {
                     // 控件名："my_label@common.label" → my_label
-                    const childCtrl = (v && typeof v === 'object' && !Array.isArray(v) && k !== 'variables' && !k.startsWith('$'))
-                        ? sanitizeKeyPart(k.split('@')[0]) : ctrl;
-                    walk(v, childCtrl);
+                    const isCtrl = v && typeof v === 'object' && !Array.isArray(v) && k !== 'variables' && !k.startsWith('$');
+                    walk(v, isCtrl ? sanitizeKeyPart(k.split('@')[0]) : ctrl, isCtrl ? k : nodeKey);
                 }
             }
-        })(data, 'root');
+        })(data, 'root', '');
         return changed;
     }
 
