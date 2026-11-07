@@ -155,6 +155,7 @@ function renderSummary(res) {
     </div>`;
     if (s.createdRP) html += `<p class="summary-note">附加包没有资源包，已新建 <code>${escapeHtml(s.createdRP)}/</code> 存放翻译，并让行为包依赖它。</p>`;
     if (s.placeholders) html += `<p class="summary-note">${s.placeholders} 个物品/方块/实体原本没有名称，已按 ID 生成英文占位名，请在 lang 中确认。</p>`;
+    if (s.inputGroups) html += `<p class="summary-note">脚本里有 ${s.inputGroups} 处匹配玩家聊天输入的关键词/正则。游戏不会翻译玩家输入，已列在翻译表的 <code>input_aliases.csv</code> 中，可按语言补充说法后交给作者加进正则。</p>`;
     if (untr.length) {
         html += `<details><summary>无法本地化的文本（${untr.length}）—— 游戏不支持翻译键，需要手动处理</summary>${list(untr, u =>
             `<code>${escapeHtml(u.text)}</code> — ${escapeHtml(u.reason)}<br><small>${escapeHtml(u.file)} · ${escapeHtml(u.where)}</small>`)}</details>`;

@@ -208,8 +208,8 @@
     // 常用虚词 + 特征字母，用于区分拉丁字母语言
     const LATIN_LANGS = {
         en_US: { words: 'the is are was and you your to of with for this it in on not what how there have be can will', chars: '' },
-        es_ES: { words: 'el la los las es son y de que en un una para con por del al cuando está hay muy pero como', chars: 'ñ¿¡' },
-        fr_FR: { words: 'le la les est sont et de des que en un une pour avec dans du au vous pas je il elle ce', chars: 'çœèêàùâîôë' },
+        es_ES: { words: 'el la los las es son y de que en un una para con por del al cuando está hay muy pero como estoy cuántos', chars: 'ñ¿¡áíóú' },
+        fr_FR: { words: 'le la les est sont et de des que en un une pour avec dans du au vous pas je il elle ce suis combien qui ne mon ma où nous', chars: 'çœèêàùâîôë' },
         de_DE: { words: 'der die das ist sind und zu von mit für ein eine nicht den dem ich du wenn auch auf', chars: 'äöüß' },
         pt_BR: { words: 'o a os as é são e de que em um uma para com não do da quando você mas', chars: 'ãõ' },
         it_IT: { words: 'il lo la gli le è sono e di che in un una per con non del della quando anche', chars: 'ìò' },
@@ -221,7 +221,7 @@
     for (const v of Object.values(LATIN_LANGS)) v.set = new Set(v.words.split(' '));
 
     /** 粗略判断文本语言；没把握返回 null */
-    function guessLang(text) {
+    function guessLang(text, minScore = 2) {
         const t = String(text).replace(/§./g, '');
         if (/[぀-ヿ]/.test(t)) return 'ja_JP';
         if (/[가-힯]/.test(t)) return 'ko_KR';
@@ -238,7 +238,7 @@
             return [lang, sc];
         }).sort((x, y) => y[1] - x[1]);
         const [best, second] = scores;
-        if (best[1] >= 2 && best[1] > second[1]) return best[0];
+        if (best[1] >= minScore && best[1] > second[1]) return best[0];
         return null;
     }
 
@@ -350,6 +350,78 @@
             });
         }
         return { groups, notes };
+    }
+
+    // ---------------------------------------------------------------
+    //  玩家输入匹配表（聊天关键词 / 正则）—— 只导出，不修改
+    // ---------------------------------------------------------------
+
+    /** 把 /\b(?:a|b c|d)\b/ 拆成 ["a", "b c", "d"]；拆不开返回 [原样] */
+    function regexPhrases(pattern) {
+        let p = pattern.replace(/^\^|\$$/g, '').replace(/^(\\b)+|(\\b)+$/g, '');
+        const unwrap = /^\((?:\?:)?([\s\S]*)\)$/.exec(p);
+        if (unwrap) {
+            // 确认首尾括号是一对
+            let depth = 0, ok = true;
+            for (let i = 0; i < p.length; i++) {
+                if (p[i] === '\\') { i++; continue; }
+                if (p[i] === '(') depth++;
+                else if (p[i] === ')') { depth--; if (depth === 0 && i < p.length - 1) { ok = false; break; } }
+            }
+            if (ok) p = unwrap[1];
+        }
+        const alts = [];
+        let cur = '', depth = 0;
+        for (let i = 0; i < p.length; i++) {
+            const c = p[i];
+            if (c === '\\') { cur += c + (p[i + 1] || ''); i++; continue; }
+            if (c === '(' || c === '[') depth++;
+            if (c === ')' || c === ']') depth--;
+            if (c === '|' && depth === 0) { alts.push(cur); cur = ''; continue; }
+            cur += c;
+        }
+        alts.push(cur);
+        return alts.map(a => a.replace(/\\b/g, '').replace(/\\s[+*]?/g, ' ').replace(/\\(.)/g, '$1').trim()).filter(Boolean);
+    }
+
+    function langsOf(texts) {
+        const set = new Set();
+        for (const t of texts) { const g = guessLang(t, 1); if (g) set.add(g); }
+        // 短语太短判断不出时，整体再判断一次
+        if (!set.size) { const g = guessLang(texts.join(' ')); if (g) set.add(g); }
+        return [...set];
+    }
+
+    function collectInputTables(ast, file) {
+        const rows = [];
+        walk(ast, (n) => {
+            // [/正则/, "内部标记"]
+            if (n.type === 'ArrayExpression' && n.elements.length === 2) {
+                const [a, b] = n.elements;
+                if (a && a.type === 'Literal' && a.regex && isStr(b)) {
+                    const phrases = regexPhrases(a.regex.pattern);
+                    rows.push({ file, kind: '归一化', target: b.value, answer: '', phrases, keywords: [],
+                        langs: langsOf([...phrases, b.value]), regex: `/${a.regex.pattern}/${a.regex.flags}` });
+                }
+            }
+            // { patterns: [/…/], keywords: [...], answers: [...] }
+            if (n.type === 'ObjectExpression') {
+                const get = (name) => n.properties.find(p => /^(patterns?|regex(es)?|triggers?)$/i.test(propKey(p) || '') && name === 'p' ||
+                    /^(keywords?|synonyms|aliases)$/i.test(propKey(p) || '') && name === 'k' ||
+                    /^(answers?|responses?|replies|reply|text|message)$/i.test(propKey(p) || '') && name === 'a');
+                const pp = get('p'), kp = get('k'), ap = get('a');
+                if (!pp && !kp) return;
+                const arr = (prop) => !prop ? [] : prop.value.type === 'ArrayExpression' ? prop.value.elements.filter(Boolean) : [prop.value];
+                const regs = arr(pp).filter(e => e.type === 'Literal' && e.regex);
+                const kws = arr(kp).filter(isStr).map(e => e.value);
+                if (!regs.length && !kws.length) return;
+                const answers = arr(ap).filter(isStr).map(e => e.value);
+                const phrases = regs.flatMap(r => regexPhrases(r.regex.pattern));
+                rows.push({ file, kind: '触发', target: '', answer: answers[0] || '', phrases, keywords: kws,
+                    langs: langsOf([...phrases, ...kws]), regex: regs.map(r => `/${r.regex.pattern}/${r.regex.flags}`).join(' ') });
+            }
+        });
+        return rows;
     }
 
     // ---------------------------------------------------------------
@@ -763,6 +835,9 @@
         }
         tables.notes.forEach(nt => ctx.warn(`${file}: ${nt}`));
 
+        // ---- 玩家输入匹配表：只导出供补充其他语言的说法 ----
+        for (const r of collectInputTables(ast, file)) ctx.inputTables.push(r);
+
         // ---- 第三遍：登记其余“像玩家文本”的字符串到运行时映射 ----
         const isTechPosition = (node) => {
             const p = node.parent;
@@ -890,6 +965,7 @@
 
     NS.collectScriptInfo = collectScriptInfo;
     NS.guessLang = guessLang;
+    NS.regexPhrases = regexPhrases;
     NS.langHintFromFile = langHintFromFile;
     NS.collectTranslationGroups = collectTranslationGroups;
     NS.processScript = processScript;

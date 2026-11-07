@@ -22,6 +22,7 @@
             this.referenced = new Map();   // 引用到的已有键 → 文件
             this.untranslatable = [];      // { file, where, text, reason }
             this.warnings = [];
+            this.inputTables = [];         // 玩家输入匹配（聊天关键词/正则），只导出
             this.translations = new Map(); // 键 → Map(语言 → 已有译文)，来自脚本自带的多语言表
             this.packEntries = new Map();  // 包根目录 → Map(键→值)，用于 pack.name / pack.description
             this.stats = { files: 0 };

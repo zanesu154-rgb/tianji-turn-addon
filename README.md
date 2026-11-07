@@ -72,7 +72,7 @@ const LANG = { en_US: { welcome: "Welcome" }, zh_CN: { welcome: "欢迎" } };
 - 不同文件用相同字段名（都是 `s` / `v`）但语言不同：按每个文件、每个数组分别判断语言（支持中日韩俄泰越及英、西、法、德、葡、意、印尼、荷、土、波兰语），判断不出时参考文件名（`dialogue_es.js`）
 - 选项“脚本自带翻译字段”可手动指定（`s=en_US, v=vi_VN`），按文件指定（`dialogue_es.js:v=es_ES`），或填 `off` 关闭
 
-**玩家输入匹配**（聊天关键词、正则）不会被修改：`patterns` / `keywords` / `triggers` 等字段、`[/正则/, "内部标记"]` 形式的归一化表、`.test()` / `.replace()` 的参数都视为程序逻辑而不是显示文本。玩家的输入不经过 lang，所以让新语言的玩家也能触发关键词，需要作者在正则里加上该语言的说法；回答文本则正常提取翻译。
+**玩家输入匹配**（聊天关键词、正则）不会被修改：`patterns` / `keywords` / `triggers` 等字段、`[/正则/, "内部标记"]` 形式的归一化表、`.test()` / `.replace()` 的参数都视为程序逻辑而不是显示文本。玩家的输入不经过 lang，所以让新语言的玩家也能触发关键词，需要作者在正则里加上该语言的说法；回答文本则正常提取翻译。工具会把这些匹配规则导出到翻译表的 `input_aliases.csv`：每行一个内部标记或回答，列出现有说法（从正则里拆出）、已支持和缺少的语言（自动判断），并为每种目标语言留出 `add_<语言>` 列，补完后交给作者加进正则即可。
 
 
 **为避免误改**：如果脚本里自己定义了与上述 API 同名的方法（例如封装了一个 `Menu.title()`），无法确认类型的同名调用不会被改写，并在日志中提示；能确认是 `new ActionFormData()` 链式调用、`const f = new …FormData()` 变量或 `this.form = new …FormData()` 的调用仍会处理。
@@ -90,7 +90,7 @@ const LANG = { en_US: { welcome: "Welcome" }, zh_CN: { welcome: "欢迎" } };
 ## 输出
 
 - **转换后文件**：`<原名>_i18n.mcaddon`（单个 .mcpack 输入且无需新建资源包时保持 .mcpack）
-- **翻译表**：`strings.csv`（Excel 可直接打开）、`untranslatable.csv`、`source_<语言>.lang`、处理日志
+- **翻译表**：`strings.csv`（Excel 可直接打开）、`untranslatable.csv`、`input_aliases.csv`（有聊天关键词匹配时）、`source_<语言>.lang`、处理日志
 
 ## 测试
 
