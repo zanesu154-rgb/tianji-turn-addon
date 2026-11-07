@@ -189,6 +189,17 @@ function renderCommand(cmd, lang) {
     check('输入归一化表 [/正则/, "how many players"] 不提取', ![...zh.values()].includes('how many players'));
     check('关键词判定的回答文本被提取', [...zh.values()].some(v => v.startsWith('The Protestant Reformation')));
     {
+        const csv = res.workbook['input_aliases.csv'] || '';
+        const rows = csv.replace(/^\ufeff/, '').split('\r\n').map(l => l.split(','));
+        const norm = rows.find(r => r[1] === 'how many players');
+        check('导出玩家输入匹配表 input_aliases.csv', !!csv && rows.length === 4);
+        check('  └ 归一化：拆出正则里的各个说法，识别出已有 es/fr/en', norm && csv.includes('cuántos jugadores | cuantos jugadores') && /es_ES/.test(norm[5]) && /fr_FR/.test(norm[5]) && /en_US/.test(norm[5]));
+        check('  └ 列出缺少的语言并留出补充列', norm && /zh_CN/.test(norm[6]) && rows[0].includes('add_zh_CN'));
+        const trig = rows.find(r => r[1].startsWith('The Protestant'));
+        check('  └ 触发条目关联到回答的翻译键', trig && trig[2] && zh.get(trig[2]) && zh.get(trig[2]).startsWith('The Protestant'));
+        check('  └ verity.js 中的正则和关键词保持原样', out('BP/scripts/verity.js').includes('/\\b(?:cuántos jugadores|cuantos jugadores|hay alguien más|hay alguien mas|estoy solo)\\b/gi, "how many players"') && out('BP/scripts/verity.js').includes('keywords: ["reformation", "luther", "protestant", "church"]'));
+    }
+    {
         const lf = { mode: 'manual', map: new Map(), fileMaps: [['x_lang.js', new Map([['s', 'en_US'], ['v', 'fr_FR']])]] };
         const c3 = new NS.ExtractContext({});
         NS.processScript('export const D = [{ s: "Hello there friend", v: "Salut l\'ami" }];', 'scripts/x_lang.js', c3, { langFields: lf });

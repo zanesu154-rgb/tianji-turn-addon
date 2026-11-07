@@ -429,6 +429,31 @@
         const stringsCsv = '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
         const untrRows = [['file', 'where', 'text', 'reason'], ...ctx.untranslatable.map(u => [u.file, u.where, u.text, u.reason])];
         const untranslatableCsv = '﻿' + untrRows.map(r => r.map(csvCell).join(',')).join('\r\n');
+        // 玩家输入匹配表：按内部标记 / 回答汇总，列出已支持的语言，留空列给要补充的语言
+        let inputCsv = null;
+        if (ctx.inputTables.length) {
+            const want = [...new Set([...opt.targetLangs, sourceLang, 'en_US', ...tableLangs])];
+            const merged = new Map();
+            for (const r of ctx.inputTables) {
+                const id = r.kind === '归一化' ? `归一化\u0000${r.target}` : `触发\u0000${r.answer || r.regex}`;
+                if (!merged.has(id)) merged.set(id, { ...r, phrases: [], keywords: [], langs: new Set(), regex: [], files: new Set() });
+                const m = merged.get(id);
+                m.phrases.push(...r.phrases); m.keywords.push(...r.keywords);
+                r.langs.forEach(l => m.langs.add(l)); if (r.regex) m.regex.push(r.regex); m.files.add(r.file);
+            }
+            const head = ['type', 'maps_to', 'answer_key', 'phrases_now', 'keywords_now', 'languages_now', 'missing_languages', 'regex', 'file',
+                ...want.map(l => `add_${l}`)];
+            const lines = [head];
+            for (const m of merged.values()) {
+                const answerKey = m.answer ? (ctx.dedupe.get('script\u0000' + m.answer) || '') : '';
+                const missing = want.filter(l => !m.langs.has(l));
+                lines.push([m.kind, m.target || m.answer.slice(0, 60), answerKey, [...new Set(m.phrases)].join(' | '),
+                    [...new Set(m.keywords)].join(' | '), [...m.langs].join(' '), missing.join(' '), m.regex.join(' '),
+                    [...m.files].join(' '), ...want.map(() => '')]);
+            }
+            inputCsv = '\ufeff' + lines.map(r => r.map(csvCell).join(',')).join('\r\n');
+            log(`玩家输入匹配（聊天关键词/正则）${merged.size} 组：游戏不会翻译玩家输入，已导出到翻译表 input_aliases.csv，可按语言补充说法`, 'warn');
+        }
         const sourceLangFile = [...ctx.entries].map(([k, e]) => `${k}=${toLangValue(e.value)}`).join('\n') + '\n';
 
         const summary = {
@@ -440,6 +465,7 @@
             untranslatable: ctx.untranslatable.length,
             warnings: ctx.warnings,
             missingRefs,
+            inputGroups: ctx.inputTables.length,
             sourceLang,
             createdRP: createdRP ? createdRP.root : null,
             restructured,
@@ -449,6 +475,7 @@
             workbook: {
                 'strings.csv': stringsCsv,
                 'untranslatable.csv': untranslatableCsv,
+                ...(inputCsv ? { 'input_aliases.csv': inputCsv } : {}),
                 [`source_${sourceLang}.lang`]: sourceLangFile,
             },
         };
