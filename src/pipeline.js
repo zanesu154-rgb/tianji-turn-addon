@@ -139,6 +139,7 @@
         info.uiVarUsage = NS.collectUiVarUsage(uiData);
         const userMethods = new Set();
         let usesServerUi = false;
+        const paramTexts = NS.collectParamTexts(scriptInfos);
         for (const si of scriptInfos.values()) {
             si.methods.forEach(m => userMethods.add(m));
             if (si.usesServerUi) usesServerUi = true;
@@ -199,7 +200,7 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime, langFields,
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p),
                 });
                 if (r.changed) {
                     pending.set(p, r.content);

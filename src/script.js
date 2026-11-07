@@ -735,6 +735,57 @@
      * @param {ExtractContext} ctx
      * @param {object} opts { info, formSinksEnabled, collidingMethods:Set, runtimeKey, injectRuntime }
      */
+    /**
+     * 跨文件预扫描：函数参数被拼进显示文本（模板字符串）时，
+     * 它的默认值和各处调用传入的字符串字面量也是玩家可见的文字，
+     * 如 cancelEvent(source, player, e, sourceName = 'item') 里的 'item' / 'block'。
+     * 返回 Map(定义所在文件 → [文字…])，在该文件里登记到运行时映射。
+     */
+    function collectParamTexts(infos) {
+        const defs = new Map();   // 函数名 → [{ file, index }]
+        const out = new Map();
+        const add = (file, s) => {
+            if (typeof s !== 'string' || !/^[A-Za-z][A-Za-z '-]{1,40}$/.test(s) || looksLikeCommand(s)) return;
+            if (!out.has(file)) out.set(file, new Set());
+            out.get(file).add(s);
+        };
+        const textTemplateUses = (body, name) => {
+            let hit = false;
+            walk(body, (n) => {
+                if (hit || n.type !== 'TemplateLiteral') return;
+                if (!n.expressions.some(e => e.type === 'Identifier' && e.name === name)) return;
+                const lit = n.quasis.map(q => q.value.cooked || '').join(' ');
+                if (looksLikeText(lit, 'loose') && !looksLikeCommand(n.quasis.map(q => q.value.cooked || '').join('0'))) hit = true;
+            });
+            return hit;
+        };
+        for (const [file, info] of infos) {
+            if (!info || !info.ok) continue;
+            walk(info.ast, (n) => {
+                let name = null, fn = null;
+                if (n.type === 'FunctionDeclaration' && n.id) { name = n.id.name; fn = n; }
+                else if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && /Function/.test(n.init.type)) { name = n.id.name; fn = n.init; }
+                if (!fn || !fn.params) return;
+                fn.params.forEach((pa, index) => {
+                    const id = pa.type === 'AssignmentPattern' ? pa.left : pa;
+                    if (id.type !== 'Identifier' || !textTemplateUses(fn.body, id.name)) return;
+                    if (pa.type === 'AssignmentPattern' && isStr(pa.right)) add(file, pa.right.value);
+                    if (!defs.has(name)) defs.set(name, []);
+                    defs.get(name).push({ file, index });
+                });
+            });
+        }
+        if (defs.size) for (const info of infos.values()) {
+            if (!info || !info.ok) continue;
+            walk(info.ast, (n) => {
+                if (n.type !== 'CallExpression') return;
+                const nm = n.callee.type === 'Identifier' ? n.callee.name : propName(n.callee);
+                for (const d of defs.get(nm) || []) if (isStr(n.arguments[d.index])) add(d.file, n.arguments[d.index].value);
+            });
+        }
+        return new Map([...out].map(([f, set]) => [f, [...set]]));
+    }
+
     function processScript(source, file, ctx, opts = {}) {
         const info = opts.info || collectScriptInfo(source);
         if (!info.ok) {
@@ -1197,6 +1248,12 @@
             }
         });
 
+        // 跨文件预扫描得到的参数文字（如默认值 'item'、调用处传入的 'block'）
+        for (const t of opts.paramTexts || []) {
+            if (ctx.isKey(t) || exact.some(([x]) => x === t)) continue;
+            exact.push([t, ctx.alloc(keyBase('word'), t, meta('word'))]);
+        }
+
         // ---- 生成输出 ----
         const hasRegistrations = exact.length > 0 || patterns.length > 0;
         if (overrides.size === 0 && !hasRegistrations) return { content: source, changed: false };
@@ -1235,5 +1292,6 @@
     NS.langHintFromFile = langHintFromFile;
     NS.collectTranslationGroups = collectTranslationGroups;
     NS.processScript = processScript;
+    NS.collectParamTexts = collectParamTexts;
     NS.SCRIPT_SINKS = SINKS;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
