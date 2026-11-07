@@ -100,7 +100,18 @@ function renderCommand(cmd, lang) {
     check('mcfunction tag … title 未动', fn.includes('tag @s add title\r\n'));
     check('mcfunction title times 未动', fn.includes('title @a times 10 20 10\r\n'));
     check('mcfunction 缩进与 CRLF 保留', fn.includes('\r\n  execute as @a[tag=vip,scores={x=1..}] at @s run titleraw @s subtitle '));
-    check('say 未改并记入报告', fn.includes('say 游戏开始了') && res.ctx.untranslatable.some(u => u.text === '游戏开始了'));
+    {
+        const j = [...fn.matchAll(/^tellraw @a (\{.*\})\r$/gm)].map(x => JSON.parse(x[1])).find(x => x.rawtext[0].text === '[');
+        check('say → tellraw（默认）：保留 [发送者] 前缀，正文为翻译键', !fn.includes('say 游戏开始了') && j && j.rawtext[1].selector === '@s' && zh.get(j.rawtext[3].translate) === '游戏开始了');
+        const ck = new NS.ExtractContext({}); ck.sayMode = 'keep';
+        check('say 不转换模式：原样保留并记入报告', NS.translateCommand('say 游戏开始了', ck, 'k', 'f').changed === false && ck.untranslatable.some(u => u.text === '游戏开始了'));
+        const ct = new NS.ExtractContext({}); ct.sayMode = 'titleraw';
+        const t1 = NS.translateCommand('say 欢迎 @p 来到村庄', ct, 'k', 'f').cmd;
+        check('say → titleraw：选择器变成 %1$s 参数', /^titleraw @a title /.test(t1) && [...ct.entries.values()][0].value === '欢迎 %1$s 来到村庄');
+        const ca = new NS.ExtractContext({}); ca.sayMode = 'actionbar';
+        check('tell @p → titleraw @p actionbar', /^titleraw @p actionbar /.test(NS.translateCommand('tell @p 小心背后', ca, 'k', 'f').cmd));
+        check('say 100% / say @a 不转换', !NS.translateCommand('say 100%', ct, 'k', 'f').changed && !NS.translateCommand('say @a', ct, 'k', 'f').changed);
+    }
     check('计分板显示名记入报告', res.ctx.untranslatable.some(u => u.text === '击杀数'));
     check('战利品表 set_name 未改（游戏不翻译自定义名称）', !changed.includes('BP/loot_tables/chest.json') && res.ctx.untranslatable.some(u => u.text === '传说宝箱'));
     const ent = JSON.parse(out('BP/entities/merchant.json'))['minecraft:entity'];
@@ -370,12 +381,17 @@ console.log(JSON.stringify(calls));`;
         check('悬挂告示牌（含小写单词 hello）', rr(G(C(hang, 'FrontText').v, 'Text')) === '你好' && rr(G(C(hang, 'BackText').v, 'Text')) === 'hello');
         const cmds = tags.filter(c => G(c, 'id') === 'CommandBlock').map(c => G(c, 'Command'));
         check('命令方块 title / titleraw → 翻译键', cmds.filter(c => c.startsWith('/titleraw') && c.includes('"translate"')).length === 2);
-        check('命令方块 say / tell 保持原样并记入报告', cmds.includes('/say 这是一条测试文本') && cmds.includes('/tell @a 这是一条测试文本') && wr.ctx.untranslatable.filter(u => /say|tell/.test(u.where)).length === 2);
+        const tr = cmds.filter(c => /^\/?tellraw @a /.test(c)).map(c => JSON.parse(c.slice(c.indexOf('{'))));
+        check('命令方块 say / tell → tellraw，发送者用方块名', tr.length === 2 && tr.every(j => rr(JSON.stringify({ rawtext: [j.rawtext[3]] })) === '这是一条测试文本') && tr.some(j => j.rawtext[1].text === 'say' || j.rawtext[1].text === '@') && !cmds.some(c => /^\/?(say|tell) /.test(c)));
         const npc = tags.find(c => G(c, 'identifier') === 'minecraft:npc');
         const acts = JSON.parse(G(npc, 'Actions'));
         check('NPC 名字、正文、按钮 → 翻译键', rr(G(npc, 'RawtextName')) === '你好,claude' && rr(G(npc, 'InterativeText')) === '这是一条测试文本' && rr(acts[0].button_name) === '这是一条测试文本');
         check('NPC 按钮命令保持不变', acts[0].data[0].cmd_line === '/give @a command_block');
-        check('箱子名、物品名、成书、盔甲架名记入报告', ['也许能修改这个名字', '也许你能改变这个物品的名字', '你能改书名吗？', '当然，这也是一条测试文本', '能改nametag吗？'].every(t => wr.ctx.untranslatable.some(u => u.text === t)));
+        check('命名的命令方块：名称列入需人工翻译', wr.ctx.untranslatable.filter(u => u.where === '命令方块名称').map(u => u.text).sort().join() === 'say,titleraw');
+        check('箱子名、物品名、书名、盔甲架名记入报告', ['也许能修改这个名字', '也许你能改变这个物品的名字', '你能改书名吗？', '能改nametag吗？'].every(t => wr.ctx.untranslatable.some(u => u.text === t)));
+        const chest = tags.find(c => G(c, 'id') === 'Chest');
+        const pg = NS.NBT.toPlain(10, chest).Items[1].tag.pages[0].text;
+        check('成书正文 → 翻译键（游戏内实测有效）', rr(pg) === '当然，这也是一条测试文本' && pg.length <= 256 && !wr.ctx.untranslatable.some(u => u.text === '当然，这也是一条测试文本'));
         check('存档登记了新资源包', JSON.parse(wm.files.get('world_resource_packs.json'))[0].pack_id === JSON.parse(wm.files.get('resource_packs/world_texts/manifest.json')).header.uuid);
         check('数据库其它键不受影响', db.info.keys === 24);
 
@@ -410,13 +426,28 @@ console.log(JSON.stringify(calls));`;
         const pm = new MemFS(readDir(wdir));
         const ss = await NS.openWorld(pm, {}, () => {});
         const texts = ss.ctx.untranslatable.map(u => u.text);
-        check('玩家背包、盔甲栏、末影箱（含潜影盒内）的物品名和成书都列出', ['冒险日志', '第一天：我来到了这片大陆。', '勇者之剑', '守卫头盔', '秘密笔记', '宝藏在出生点下面。'].every(t => texts.includes(t)));
-        ss.setValue(ss.ctx.untranslatable.find(u => u.text === '第一天：我来到了这片大陆。').ref, 'Day 1: I arrived in this land.');
-        ss.setValue(ss.ctx.untranslatable.find(u => u.text === '宝藏在出生点下面。').ref, 'The treasure is under spawn.');
+        check('玩家背包、盔甲栏、末影箱（含潜影盒内）的物品名、书名列出', ['冒险日志', '勇者之剑', '守卫头盔', '秘密笔记'].every(t => texts.includes(t)));
+        check('玩家身上的成书正文（含末影箱潜影盒内）自动转为翻译键', !texts.includes('第一天：我来到了这片大陆。') && !texts.includes('宝藏在出生点下面。') &&
+            ['第一天：我来到了这片大陆。', '宝藏在出生点下面。'].every(t => [...ss.ctx.entries.values()].some(e => e.value === t)));
+        check('书与笔（未签名）保持原样，列入需人工翻译', texts.includes('草稿：还没写完。'));
+        ss.setValue(ss.ctx.untranslatable.find(u => u.text === '冒险日志').ref, 'Journal');
         await ss.build(pm, () => {});
         const db = await NS.LevelDB.openDb(new Map([...pm.files].filter(([p]) => p.startsWith('db/')).map(([p, v]) => [p.slice(3), new Uint8Array(v)])));
         const pl = NS.NBT.toPlain(10, NS.NBT.readAll(db.get(new TextEncoder().encode('~local_player')))[0].v);
-        check('玩家身上的成书修改后写回存档', pl.Inventory[0].tag.pages[0].text === 'Day 1: I arrived in this land.' && pl.EnderChestInventory[0].tag.Items[0].tag.pages[0].text === 'The treasure is under spawn.');
+        const wl = NS.parseLang([...pm.files].find(([p]) => p.endsWith('zh_CN.lang'))[1]);
+        check('写回后：成书页为翻译键、书名为手动修改值、书与笔不变', render(JSON.parse(pl.EnderChestInventory[0].tag.Items[0].tag.pages[0].text), wl) === '宝藏在出生点下面。' &&
+            pl.Inventory[0].tag.title === 'Journal' && pl.Inventory[2].tag.pages[0].text === '草稿：还没写完。');
+
+        // 超长自动分页（书与笔、手动修改的页面；每页 ≤256 字符、≤14 行，整本 ≤50 页）
+        const ss2 = await NS.openWorld(new MemFS(readDir(wdir)), {}, () => {});
+        const long = 'I walked across the endless plains, past villages and rivers, looking for the old tower. '.repeat(6).trim();
+        const bref = ss2.ctx.untranslatable.find(u => u.text === '草稿：还没写完。').ref;
+        ss2.setValue(bref, long);
+        const pagesNode = NS.worldNodeAt(ss2.resolve(bref).rec, JSON.parse(bref.slice(bref.indexOf('|') + 1)).slice(0, -2)).v;
+        const texts2 = pagesNode.items.map(p => NS.NBT.getStr(p, 'text'));
+        check('超长自动分页：每页 ≤256 字符，拼回与原文一致', texts2.length === 3 && texts2.every(t => t.length <= 256) && texts2.join(' ').replace(/\s+/g, ' ') === long);
+        check('  └ 新页列入需人工翻译，位置引用正确', ss2.ctx.untranslatable.filter(u => /自动分页/.test(u.where)).every(u => ss2.getText(u.ref) === u.text) && ss2.ctx.untranslatable.filter(u => /自动分页/.test(u.where)).length === 2);
+        check('  └ 书名超过 16 字给出提醒', (ss2.setValue(ss2.ctx.untranslatable.find(u => u.text === '冒险日志').ref, "An Adventurer's Journal"), /16/.test(ss2.notice)));
         check('从零生成的存档也能正常读写（告示牌转换）', [...ss.ctx.entries.values()].some(e => e.value === '欢迎'));
         fs.rmSync(wdir, { recursive: true, force: true });
     }
@@ -427,7 +458,7 @@ console.log(JSON.stringify(calls));`;
         const sb = fs.readFileSync(path.join(__dirname, 'fixture', 'BP', 'structures', 'village.mcstructure'));
         const ss = await NS.openStructure('village.mcstructure', new Uint8Array(sb), {}, () => {});
         const keys = [...ss.ctx.entries.keys()];
-        check('结构：告示牌（多行）、命令方块、NPC 名字/正文/按钮 → 翻译键', ['sign.0_0_0.front', 'sign.0_0_0.front_1', 'sign.0_0_0.back', 'command.1_0_0', 'npc.n12345.name', 'npc.n12345.text', 'npc.n12345.button_0'].every(k => keys.includes('structure.village.' + k)));
+        check('结构：告示牌（多行）、命令方块、NPC 名字/正文/按钮 → 翻译键', ['sign.0_0_0.front', 'sign.0_0_0.back', 'command.1_0_0', 'npc.n12345.name', 'npc.n12345.text', 'npc.n12345.button_0'].every(k => keys.includes('structure.village.' + k)));
         check('结构：箱子名、物品名、物品描述列为需人工处理', ['村长的箱子', '村长的剑', '传家之宝'].every(t => ss.ctx.untranslatable.some(u => u.text === t && u.ref)));
         const hits = ss.search('CustomName', 1e6);
         const rows = [['ref', 'translation'], ...hits.map(h => [h.ref, h.value === '村长的箱子' ? "Elder's Chest" : h.value === 'NPC' ? 'Elder' : ''])];
