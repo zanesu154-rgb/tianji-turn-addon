@@ -375,6 +375,7 @@ console.log(JSON.stringify(calls));`;
         const acts = JSON.parse(G(npc, 'Actions'));
         check('NPC 名字、正文、按钮 → 翻译键', rr(G(npc, 'RawtextName')) === '你好,claude' && rr(G(npc, 'InterativeText')) === '这是一条测试文本' && rr(acts[0].button_name) === '这是一条测试文本');
         check('NPC 按钮命令保持不变', acts[0].data[0].cmd_line === '/give @a command_block');
+        check('命名的命令方块：名称列入需人工翻译', wr.ctx.untranslatable.filter(u => u.where === '命令方块名称').map(u => u.text).sort().join() === 'say,titleraw');
         check('箱子名、物品名、成书、盔甲架名记入报告', ['也许能修改这个名字', '也许你能改变这个物品的名字', '你能改书名吗？', '当然，这也是一条测试文本', '能改nametag吗？'].every(t => wr.ctx.untranslatable.some(u => u.text === t)));
         check('存档登记了新资源包', JSON.parse(wm.files.get('world_resource_packs.json'))[0].pack_id === JSON.parse(wm.files.get('resource_packs/world_texts/manifest.json')).header.uuid);
         check('数据库其它键不受影响', db.info.keys === 24);
@@ -417,6 +418,16 @@ console.log(JSON.stringify(calls));`;
         const db = await NS.LevelDB.openDb(new Map([...pm.files].filter(([p]) => p.startsWith('db/')).map(([p, v]) => [p.slice(3), new Uint8Array(v)])));
         const pl = NS.NBT.toPlain(10, NS.NBT.readAll(db.get(new TextEncoder().encode('~local_player')))[0].v);
         check('玩家身上的成书修改后写回存档', pl.Inventory[0].tag.pages[0].text === 'Day 1: I arrived in this land.' && pl.EnderChestInventory[0].tag.Items[0].tag.pages[0].text === 'The treasure is under spawn.');
+        // 成书超长自动分页（每页 ≤256 字符、≤14 行，整本 ≤50 页）
+        const ss2 = await NS.openWorld(new MemFS(readDir(wdir)), {}, () => {});
+        const long = 'I walked across the endless plains, past villages and rivers, looking for the old tower. '.repeat(6).trim();
+        const bref = ss2.ctx.untranslatable.find(u => u.text === '第一天：我来到了这片大陆。').ref;
+        ss2.setValue(bref, long);
+        const pagesNode = NS.worldNodeAt(ss2.resolve(bref).rec, JSON.parse(bref.slice(bref.indexOf('|') + 1)).slice(0, -2)).v;
+        const texts2 = pagesNode.items.map(p => NS.NBT.getStr(p, 'text'));
+        check('成书超长自动分页：每页 ≤256 字符，拼回与原文一致', texts2.length === 3 && texts2.every(t => t.length <= 256) && texts2.join(' ').replace(/\s+/g, ' ') === long);
+        check('  └ 新页列入需人工翻译，位置引用正确', ss2.ctx.untranslatable.filter(u => /自动分页/.test(u.where)).every(u => ss2.getText(u.ref) === u.text) && ss2.ctx.untranslatable.filter(u => /自动分页/.test(u.where)).length === 2);
+        check('  └ 书名超过 16 字给出提醒', (ss2.setValue(ss2.ctx.untranslatable.find(u => u.text === '冒险日志').ref, "An Adventurer's Journal"), /16/.test(ss2.notice)));
         check('从零生成的存档也能正常读写（告示牌转换）', [...ss.ctx.entries.values()].some(e => e.value === '欢迎'));
         fs.rmSync(wdir, { recursive: true, force: true });
     }
