@@ -50,11 +50,11 @@
         'log', 'warn', 'error', 'info', 'debug', 'trace', 'sendScriptEvent', 'getTypeId', 'setGameRule',
         'getBlockAbove', 'setPermutation', 'withState', 'getState', 'registerCommand', 'registerEnum',
         'Error', 'TypeError', 'RangeError', 'RegExp', 'ItemStack', 'BlockPermutation', 'MolangVariableMap',
-        'Symbol', 'parseInt', 'parseFloat', 'Number', 'Date', 'setItem', 'getItem', 'querySelector',
+        'test', 'exec', 'Symbol', 'parseInt', 'parseFloat', 'Number', 'Date', 'setItem', 'getItem', 'querySelector',
     ]);
 
     // 这些属性名对应的值是技术数据
-    const TECH_PROPS = /^(id|typeId|identifier|type|icon|iconPath|texture|image|path|sound|event|tag|tags|objective|permission|defaultValue|key|namespace|entity|item|block|dimension|mode|command|cmd|url|uuid|color|font)$/i;
+    const TECH_PROPS = /^(patterns?|keywords?|triggers?|aliases|synonyms|regex(es)?|regexp|match(es)?|intent|intents|id|typeId|identifier|type|icon|iconPath|texture|image|path|sound|event|tag|tags|objective|permission|defaultValue|key|namespace|entity|item|block|dimension|mode|command|cmd|url|uuid|color|font)$/i;
 
     // 这些位置的文本玩家能看到但游戏不支持翻译键 —— 记录到报告
     const UNTRANSLATABLE_ASSIGN = new Set(['nameTag']);
@@ -205,6 +205,21 @@
     const localeOfKey = (k) => LOCALE_ALIASES[String(k).toLowerCase().replace(/-/g, '_')] ||
         (/^[a-z]{2}_[A-Z]{2}$/.test(String(k)) ? String(k) : null);
 
+    // 常用虚词 + 特征字母，用于区分拉丁字母语言
+    const LATIN_LANGS = {
+        en_US: { words: 'the is are was and you your to of with for this it in on not what how there have be can will', chars: '' },
+        es_ES: { words: 'el la los las es son y de que en un una para con por del al cuando está hay muy pero como', chars: 'ñ¿¡' },
+        fr_FR: { words: 'le la les est sont et de des que en un une pour avec dans du au vous pas je il elle ce', chars: 'çœèêàùâîôë' },
+        de_DE: { words: 'der die das ist sind und zu von mit für ein eine nicht den dem ich du wenn auch auf', chars: 'äöüß' },
+        pt_BR: { words: 'o a os as é são e de que em um uma para com não do da quando você mas', chars: 'ãõ' },
+        it_IT: { words: 'il lo la gli le è sono e di che in un una per con non del della quando anche', chars: 'ìò' },
+        id_ID: { words: 'yang dan di ke dari ini itu dengan untuk tidak adalah ada kamu saya akan', chars: '' },
+        nl_NL: { words: 'de het een is zijn en van dat met voor niet op je als ook', chars: 'ĳ' },
+        tr_TR: { words: 've bir bu için ile değil çok ne da de gibi', chars: 'ğşıİ' },
+        pl_PL: { words: 'i w nie na się jest że do z to jak ale', chars: 'ąęłńśźż' },
+    };
+    for (const v of Object.values(LATIN_LANGS)) v.set = new Set(v.words.split(' '));
+
     /** 粗略判断文本语言；没把握返回 null */
     function guessLang(text) {
         const t = String(text).replace(/§./g, '');
@@ -214,7 +229,27 @@
         if (/[Ѐ-ӿ]/.test(t)) return 'ru_RU';
         if (/[฀-๿]/.test(t)) return 'th_TH';
         if (/[ăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i.test(t)) return 'vi_VN';
-        if (/\b(the|is|are|and|you|your|to|of|with|for|this|it|in|on|not)\b/i.test(t) && !/[àâçéèêëîïôûùüÿñæœäöüß]/i.test(t)) return 'en_US';
+        const words = t.toLowerCase().split(/[^\p{L}]+/u).filter(Boolean);
+        if (!words.length) return null;
+        const lower = t.toLowerCase();
+        const scores = Object.entries(LATIN_LANGS).map(([lang, d]) => {
+            let sc = words.filter(w => d.set.has(w)).length;
+            for (const c of d.chars) if (lower.includes(c)) sc += 2;
+            return [lang, sc];
+        }).sort((x, y) => y[1] - x[1]);
+        const [best, second] = scores;
+        if (best[1] >= 2 && best[1] > second[1]) return best[0];
+        return null;
+    }
+
+    /** 从文件名里找语言提示：dialogue_es.js / lang-vi.js / spanish.js */
+    function langHintFromFile(file) {
+        const base = String(file).split('/').pop().replace(/\.[^.]+$/, '');
+        const NAMES = { spanish: 'es_ES', espanol: 'es_ES', vietnamese: 'vi_VN', french: 'fr_FR', german: 'de_DE',
+            portuguese: 'pt_BR', italian: 'it_IT', russian: 'ru_RU', japanese: 'ja_JP', korean: 'ko_KR', chinese: 'zh_CN', english: 'en_US' };
+        const m = /(?:^|[_\-.])([a-z]{2}(?:[_\-][a-z]{2})?)$/i.exec(base);
+        if (m) { const l = localeOfKey(m[1]); if (l) return l; }
+        for (const tok of base.toLowerCase().split(/[_\-.]+/)) if (NAMES[tok]) return NAMES[tok];
         return null;
     }
 
@@ -290,8 +325,14 @@
                     const cnt = new Map();
                     texts.forEach(t => { const g = guessLang(t); if (g) cnt.set(g, (cnt.get(g) || 0) + 1); });
                     const best = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0];
-                    if (best && best[1] / texts.length >= 0.8) colLang.set(k, best[0]);
+                    if (best && best[1] >= 2 && best[1] / texts.length >= 0.6) colLang.set(k, best[0]);
+                    else colLang.set(k, null);
                 }
+                // 只有一个字段判断不出语言时，用文件名提示（如 dialogue_es.js）
+                const unknown = [...colLang].filter(([, l]) => !l).map(([k]) => k);
+                const hint = fieldMode && fieldMode.fileHint;
+                if (unknown.length === 1 && hint && ![...colLang.values()].includes(hint)) colLang.set(unknown[0], hint);
+                for (const [k, l] of [...colLang]) if (!l) colLang.delete(k);
                 // 同一种语言出现在多个字段（如 name 和 desc 都是中文）→ 不是平行翻译
                 const langCount = new Map();
                 for (const l of colLang.values()) langCount.set(l, (langCount.get(l) || 0) + 1);
@@ -700,7 +741,12 @@
         });
 
         // ---- 脚本自带的多语言表：同一句话的各语言版本共用一个键 ----
-        const tables = collectTranslationGroups(ast, opts.langFields);
+        const lf = opts.langFields || { mode: 'auto', map: new Map(), fileMaps: [] };
+        const fileMap = new Map(lf.map);
+        for (const [pat, m] of lf.fileMaps || []) {
+            if (file.endsWith('/' + pat) || file === pat || file.split('/').pop() === pat) for (const [k, v] of m) fileMap.set(k, v);
+        }
+        const tables = collectTranslationGroups(ast, { mode: lf.mode === 'manual' && !fileMap.size ? 'auto' : lf.mode, map: fileMap, fileHint: langHintFromFile(file) });
         let tableEntries = 0;
         for (const g of tables.groups) {
             const nodes = [...g.values()].filter(nd => !handled.has(nd));
@@ -738,6 +784,9 @@
                     return ['===', '==', '!==', '!=', 'in', 'instanceof'].includes(p.operator);
                 case 'ExpressionStatement':
                     return !!p.directive;
+                case 'ArrayExpression':
+                    // [/正则/, "替换成的内部标记"] —— 输入归一化表，不是显示文本
+                    return p.elements.some(e => e && e.type === 'Literal' && e.regex);
                 case 'CallExpression': case 'NewExpression': {
                     if (p.callee === node) return false;
                     const nm = p.type === 'NewExpression'
@@ -841,6 +890,7 @@
 
     NS.collectScriptInfo = collectScriptInfo;
     NS.guessLang = guessLang;
+    NS.langHintFromFile = langHintFromFile;
     NS.collectTranslationGroups = collectTranslationGroups;
     NS.processScript = processScript;
     NS.SCRIPT_SINKS = SINKS;

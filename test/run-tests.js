@@ -182,6 +182,20 @@ function renderCommand(cmd, lang) {
         check('运行时：英文原文和越南文都能查到同一个键', m.get('Water flows downhill when you place it.') === m.get('Nước chảy xuống dốc khi bạn đặt nó.'));
     }
 
+    const es = mem.files.has('RP/texts/es_ES.lang') ? NS.parseLang(out('RP/texts/es_ES.lang')) : new Map();
+    const kL = keyOf(en, 'Light is electromagnetic radiation visible to the human eye.');
+    check('不同文件都用 s/v 但语言不同：西语进 es_ES、越南语进 vi_VN，同一个键', es.get(kL) === 'La luz es radiación electromagnética visible para el ojo humano.' && vi.get(kL) === 'Ánh sáng là bức xạ điện từ mà mắt người nhìn thấy được.');
+    check('  └ 西语原文没有变成独立的新键', ![...zh.values()].some(v => v.startsWith('La luz es')));
+    check('输入归一化表 [/正则/, "how many players"] 不提取', ![...zh.values()].includes('how many players'));
+    check('关键词判定的回答文本被提取', [...zh.values()].some(v => v.startsWith('The Protestant Reformation')));
+    {
+        const lf = { mode: 'manual', map: new Map(), fileMaps: [['x_lang.js', new Map([['s', 'en_US'], ['v', 'fr_FR']])]] };
+        const c3 = new NS.ExtractContext({});
+        NS.processScript('export const D = [{ s: "Hello there friend", v: "Salut l\'ami" }];', 'scripts/x_lang.js', c3, { langFields: lf });
+        const k = [...c3.entries.keys()][0];
+        check('按文件手动指定：x_lang.js:v=fr_FR', c3.translations.get(k)?.get('fr_FR') === "Salut l'ami");
+    }
+
     console.log('\n[5] 脚本运行时对比（原脚本 vs 改写后，模拟 @minecraft/server）');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'i18n-'));
     const mockServer = `
@@ -189,7 +203,7 @@ export const calls = [];
 const H = {};
 export const world = {
   afterEvents: { playerSpawn: { subscribe: f => (H.spawn = f) } },
-  beforeEvents: { chatSend: { subscribe: f => (H.chat = f) } },
+  beforeEvents: { chatSend: { subscribe: f => { const prev = H.chat; H.chat = prev ? (e) => { prev(e); f(e); } : f; } } },
   sendMessage: m => calls.push(['world.sendMessage', m]),
   getAllPlayers: () => world.players,
   getDimension: () => ({ runCommand: c => calls.push(['dim.runCommand', c]) }),
@@ -224,6 +238,7 @@ export class MessageFormData extends Base { constructor() { super('Message'); } 
     const driver = `
 import { calls, world, __H, makePlayer } from '@minecraft/server';
 const main = await import('./scripts/main.js');
+await import('./scripts/verity.js');
 const p = makePlayer('Alex', 120);
 world.players = [p];
 __H.spawn({ player: p, initialSpawn: true });
@@ -236,6 +251,8 @@ await main.confirm(p);
 await main.menu(p);
 __H.tick();
 main.broadcast();
+__H.chat({ message: '¿Cuántos jugadores hay?', sender: p });
+__H.chat({ message: 'what was the reformation', sender: p });
 console.log(JSON.stringify(calls));`;
     const setup = (name, files) => {
         const d = path.join(tmp, name);
@@ -253,7 +270,7 @@ console.log(JSON.stringify(calls));`;
         fs.writeFileSync(path.join(d, 'driver.js'), driver);
         return JSON.parse(execFileSync('node', [path.join(d, 'driver.js')], { cwd: d }).toString());
     };
-    const scripts = (get) => Object.fromEntries(['main', 'data', 'menu'].map(n => [`scripts/${n}.js`, get(`BP/scripts/${n}.js`)]));
+    const scripts = (get) => Object.fromEntries(['main', 'data', 'menu', 'verity'].map(n => [`scripts/${n}.js`, get(`BP/scripts/${n}.js`)]));
     const origCalls = setup('orig', scripts(p => before.get(p).toString()));
     const newCalls = setup('new', scripts(out));
 
@@ -289,6 +306,8 @@ console.log(JSON.stringify(calls));`;
     const bc = newCalls.find(c => c[0] === 'dim.runCommand');
     check('数组里的命令在运行时转换为 titleraw', bc && renderCommand(bc[1], fake) === 'title @a title EN(服务器即将重启)', bc && bc[1]);
 
+    const verityReplies = newCalls.filter(c => c[0] === 'sendMessage').slice(-2).map(c => render(c[1], zh));
+    check('Verity：西语提问经正则归一化后仍触发正确回答（已翻译）', verityReplies[0] === 'There are a few players online right now.' && verityReplies[1].startsWith('The Protestant Reformation'), verityReplies.join(' / '));
     fs.rmSync(tmp, { recursive: true, force: true });
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
