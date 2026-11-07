@@ -159,6 +159,16 @@ function renderCommand(cmd, lang) {
         const zl = NS.parseLang(fm.files.get('RP/texts/zh_CN.lang').toString());
         check('  └ 转换时自动修正已有译文中的混用占位符', zl.get('mix.test') === '使用 %2$s 需要 %1$s 的知识' && zl.get('ok.test') === '%s 和 %s' && fm.files.get('RP/texts/zh_CN.lang').toString().startsWith('## 注释 %s %1$s'));
     }
+    {
+        // DLCraft：cancelEvent(..., sourceName = 'item') 把参数拼进提示文字，调用处传 'block'
+        const pm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        pm.files.set('BP/scripts/req_utils.js', Buffer.from("import { system } from '@minecraft/server';\nexport const cancelEvent = (source, player, e, sourceName = 'item') => {\n  system.run(() => player.onScreenDisplay.setActionBar(`§4Required §9Knowledge of ${source.skill} ${source.level} §fto use the ${sourceName}`));\n};\n"));
+        pm.files.set('BP/scripts/req_events.js', Buffer.from("import { cancelEvent } from './req_utils.js';\nexport function f(block, player, e) { cancelEvent(block, player, e, 'block'); cancelEvent(block, player, e, 'minecraft:stone'); }\n"));
+        const pr = await NS.runPipeline(pm, { baseName: 'fixture', splitNewlines: false }, () => {});
+        const vals = [...pr.ctx.entries.values()].filter(e => /req_utils/.test(e.file)).map(e => e.value);
+        const js = pm.files.get('BP/scripts/req_utils.js').toString();
+        check('函数参数拼进提示文字：默认值 item 和调用处传入的 block 也登记翻译', vals.includes('item') && vals.includes('block') && !vals.includes('minecraft:stone') && /\["item","script\.req_utils\.word/.test(js));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
