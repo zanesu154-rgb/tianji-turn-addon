@@ -49,6 +49,7 @@ function renderCommand(cmd, lang) {
     const logs = [];
     const res = await NS.runPipeline(mem, { baseName: 'fixture' }, m => logs.push(m));
     const out = (p) => mem.files.get(p).toString();
+    const out_ = out;
     const changed = [...mem.files.keys()].filter(p => before.get(p) !== mem.files.get(p));
 
     console.log('\n[1] 输出文件合法性');
@@ -399,6 +400,27 @@ console.log(JSON.stringify(calls));`;
         check('编辑器：改世界名（level.dat + levelname.txt）', NS.NBT.getStr(NS.NBT.readAll(ld.subarray(8))[0].v, 'LevelName') === 'My World (EN)' && em.files.get('levelname.txt') === 'My World (EN)' && new DataView(ld.buffer, ld.byteOffset).getInt32(4, true) === ld.length - 8);
         check('编辑器：数字字段类型校验', typeErr === '需要整数');
         check('编辑器：多次生成不会重复登记资源包', JSON.parse(em.files.get('world_resource_packs.json')).length === 1);
+    }
+
+    // -----------------------------------------------------------
+    console.log('\n[7] 结构文件 .mcstructure');
+    {
+        const sb = fs.readFileSync(path.join(__dirname, 'fixture', 'BP', 'structures', 'village.mcstructure'));
+        const ss = await NS.openStructure('village.mcstructure', new Uint8Array(sb), {}, () => {});
+        const keys = [...ss.ctx.entries.keys()];
+        check('结构：告示牌（多行）、命令方块、NPC 名字/正文/按钮 → 翻译键', ['sign.0_0_0.front', 'sign.0_0_0.front_1', 'sign.0_0_0.back', 'command.1_0_0', 'npc.n12345.name', 'npc.n12345.text', 'npc.n12345.button_0'].every(k => keys.includes('structure.village.' + k)));
+        check('结构：箱子名、物品名、物品描述列为需人工处理', ['村长的箱子', '村长的剑', '传家之宝'].every(t => ss.ctx.untranslatable.some(u => u.text === t && u.ref)));
+        const hits = ss.search('CustomName', 1e6);
+        const rows = [['ref', 'translation'], ...hits.map(h => [h.ref, h.value === '村长的箱子' ? "Elder's Chest" : h.value === 'NPC' ? 'Elder' : ''])];
+        const imp = ss.importCsv(rows.map(r => r.map(x => /[",\n']/.test(x) ? `"${x.replace(/"/g, '""')}"` : x).join(',')).join('\n'));
+        const out = await ss.build();
+        const back = NS.NBT.toPlain(10, NS.NBT.readAll(out.structure)[0].v);
+        const bpd = back.structure.palette.default.block_position_data;
+        check('结构：搜索结果导出 / 导入批量修改', imp.applied === 2 && bpd['4'].block_entity_data.CustomName === "Elder's Chest" && back.structure.entities[0].CustomName === 'Elder');
+        check('结构：其余数据保持不变', back.size.join() === '3,2,1' && back.structure.block_indices[0].join() === '0,4,1,4,2,4' && back.structure.palette.default.block_palette.length === 5);
+        check('结构：生成翻译资源包', out.pack && NS.parseLang(out.pack.get('texts/zh_CN.lang')).get('structure.village.npc.n12345.name') === '村长');
+        const zhA = NS.parseLang(out_('RP/texts/zh_CN.lang'));
+        check('附加包里的 structures/*.mcstructure 随附加包转换，翻译写进附加包资源包', zhA.get('structure.village.sign.0_0_0.back') === 'Welcome to the village');
     }
 
     console.log(`\n结果：${passed} 通过，${failed} 失败`);

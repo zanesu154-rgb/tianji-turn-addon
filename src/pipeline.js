@@ -207,6 +207,15 @@
                 continue;
             }
 
+            // ---- 结构文件 ----
+            if (pk.type === 'BP' && lower.startsWith('structures/') && lower.endsWith('.mcstructure') && NS.convertStructureBytes && fs.readBytes) {
+                try {
+                    const r = NS.convertStructureBytes(await fs.readBytes(p), p, ctx);
+                    if (r.changed) { fs.writeBytes(p, r.bytes); processed++; log(`[结构] ${p}`); }
+                } catch (e) { log(`[跳过] ${p}：${e.message}`, 'warn'); }
+                continue;
+            }
+
             if (!lower.endsWith('.json')) continue;
             const data = await readJson(p);
             if (data === undefined) { log(`[跳过] ${p}：JSON 解析失败`, 'warn'); continue; }

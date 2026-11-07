@@ -88,6 +88,8 @@
         const manual = el('div', { class: 'nbt-pane' });
         const fileIn = el('input', { type: 'file', accept: '.csv', hidden: true });
         const importMsg = el('span', { class: 'nbt-msg' });
+        const alertMsg = (t) => { searchMsg.textContent = t; };
+        const searchMsg = el('p', { class: 'nbt-hint' });
         fileIn.addEventListener('change', async () => {
             const f = fileIn.files[0];
             if (!f) return;
@@ -95,15 +97,40 @@
                 const r = session.importCsv(await f.text());
                 importMsg.textContent = `已导入 ${r.applied} 条，跳过 ${r.skipped} 条（translation 为空或位置不存在）`;
                 renderManual();
+                if (q.value.trim()) doSearch();
+                alertMsg(`已导入 ${r.applied} 条，跳过 ${r.skipped} 条`);
                 changed();
             } catch (e) { importMsg.textContent = `导入失败：${e.message}`; }
             fileIn.value = '';
         });
         const list = el('div', { class: 'nbt-list' });
+        // ---- 筛选 + 分页（内容很多时）----
+        const catOf = (u) => u.where.startsWith('/') ? '命令' : /成书|讲台书/.test(u.where) ? '成书' : u.where.replace(/（.*$/, '');
+        const cats = [...new Set(untr.map(catOf))];
+        const catSel = el('select', { class: 'nbt-filter' }, el('option', { value: '', text: `全部类别（${untr.length}）` }),
+            ...cats.map(c => el('option', { value: c, text: `${c}（${untr.filter(u => catOf(u) === c).length}）` })));
+        const kw = el('input', { class: 'nbt-filter', type: 'search', placeholder: '筛选原文 / 位置', spellcheck: 'false' });
+        const onlyTodo = el('input', { type: 'checkbox' });
+        const pager = el('div', { class: 'nbt-pager' });
+        const MPAGE = 50;
+        let page = 0;
+        const filtered = () => {
+            const k = kw.value.trim().toLowerCase();
+            return untr.filter(u => {
+                if (catSel.value && catOf(u) !== catSel.value) return false;
+                if (k && !(`${u.text} ${u.file} ${u.where}`.toLowerCase().includes(k))) return false;
+                if (onlyTodo.checked && session.getText(u.ref) !== u.text) return false;   // 已改过的不显示
+                return true;
+            });
+        };
         const renderManual = () => {
             list.innerHTML = '';
+            pager.innerHTML = '';
             if (!untr.length) { list.append(el('p', { class: 'nbt-empty', text: '没有需要人工处理的文本。' })); return; }
-            for (const u of untr) {
+            const items = filtered();
+            const pages = Math.max(1, Math.ceil(items.length / MPAGE));
+            page = Math.min(page, pages - 1);
+            for (const u of items.slice(page * MPAGE, page * MPAGE + MPAGE)) {
                 const cur = session.getText(u.ref);
                 if (cur == null) continue;
                 const r = session.resolve(u.ref);
@@ -113,21 +140,33 @@
                     valueEditor(session, u.ref, r.node.t, cur, changed),
                 ));
             }
+            if (!items.length) list.append(el('p', { class: 'nbt-empty', text: '没有符合条件的条目。' }));
+            pager.append(
+                el('button', { class: 'btn btn-secondary btn-sm', text: '上一页', disabled: page === 0, onclick: () => { page--; renderManual(); list.scrollTop = 0; } }),
+                el('span', { text: `第 ${page + 1} / ${pages} 页 · 共 ${items.length} 条` }),
+                el('button', { class: 'btn btn-secondary btn-sm', text: '下一页', disabled: page >= pages - 1, onclick: () => { page++; renderManual(); list.scrollTop = 0; } }),
+            );
         };
+        let ft;
+        catSel.addEventListener('change', () => { page = 0; renderManual(); });
+        onlyTodo.addEventListener('change', () => { page = 0; renderManual(); });
+        kw.addEventListener('input', () => { clearTimeout(ft); ft = setTimeout(() => { page = 0; renderManual(); }, 200); });
         manual.append(
             el('div', { class: 'nbt-tools' },
                 el('button', { class: 'btn btn-secondary btn-sm', text: '导出待翻译表', onclick: () => downloadCsv && downloadCsv(session.workbook()['untranslatable.csv']) }),
                 el('button', { class: 'btn btn-secondary btn-sm', text: '导入翻译表', onclick: () => fileIn.click() }),
                 fileIn, importMsg),
-            el('p', { class: 'nbt-hint', text: '导出的表格在 translation 列填写译文后导入即可批量写回；ref 列是该文本在存档中的位置，请勿修改。' }),
+            el('p', { class: 'nbt-hint', text: '内容很多时建议导出表格，在 Excel 等软件里填写 translation 列后导入，批量写回；ref 列是该文本在存档中的位置，请勿修改。' }),
+            el('div', { class: 'nbt-filters' }, catSel, kw, el('label', { class: 'opt-check' }, onlyTodo, ' 只看未修改')),
             list,
+            pager,
         );
         renderManual();
         panes.manual = manual;
 
         // ---------- 搜索 ----------
         const search = el('div', { class: 'nbt-pane' });
-        const q = el('input', { class: 'nbt-search', type: 'search', placeholder: '搜索键名或内容，如 CustomName、Text、钻石…', spellcheck: 'false' });
+        const q = el('input', { class: 'nbt-search nbt-grow', type: 'search', placeholder: '搜索键名或内容，如 CustomName、Text、钻石…', spellcheck: 'false' });
         const results = el('div', { class: 'nbt-list' });
         let timer;
         const doSearch = () => {
@@ -144,7 +183,20 @@
             if (hits.length > 300) results.append(el('p', { class: 'nbt-empty', text: '只显示前 300 条，请输入更具体的关键词。' }));
         };
         q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(doSearch, 200); });
-        search.append(q, results);
+        const exportSearch = () => {
+            const hits = session.search(q.value, 1e6).filter(h => h.type === T.STRING || EDITABLE.has(h.type));
+            if (!hits.length) return;
+            const rows = [['ref', 'location', 'path', 'type', 'text', 'translation'], ...hits.map(h => [h.ref, h.label, h.pathText, TYPE_NAME[h.type], h.value, ''])];
+            const csv = '\ufeff' + rows.map(r => r.map(x => { const t = String(x); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; }).join(',')).join('\r\n');
+            downloadCsv && downloadCsv(csv, `search_${q.value.trim().replace(/[^\w\u4e00-\u9fff]+/g, '_').slice(0, 20)}`);
+        };
+        search.append(
+            el('div', { class: 'nbt-tools' }, q,
+                el('button', { class: 'btn btn-secondary btn-sm', text: '导出搜索结果', onclick: exportSearch }),
+                el('button', { class: 'btn btn-secondary btn-sm', text: '导入翻译表', onclick: () => fileIn.click() })),
+            el('p', { class: 'nbt-hint', text: '可以把搜索结果（全部，不限 300 条）导出成表格，在 translation 列填写新值后导入，一次改完同类内容，例如搜索 CustomName 批量改所有名字。' }),
+            searchMsg,
+            results);
         panes.search = search;
 
         // ---------- 浏览 ----------
@@ -183,7 +235,8 @@
             ['世界设置', session.records.filter(r => r.kind === 'level')],
             ['方块实体', session.records.filter(r => r.kind === 'block')],
             ['实体', session.records.filter(r => r.kind === 'actor')],
-        ];
+            ['结构', session.records.filter(r => r.kind === 'structure')],
+        ].filter(([, recs]) => recs.length);
         for (const [gname, recs] of groups) {
             const roots = recs.flatMap(rec => rec.tags.map((tg, ri) => ({ rec, ri, tg })));
             const g = el('details', {}, el('summary', {}, el('span', { class: 'nbt-key', text: gname }), el('span', { class: 'nbt-type', text: String(roots.length) })));

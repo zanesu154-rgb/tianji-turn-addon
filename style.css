@@ -396,6 +396,45 @@ body.mode-world .addon-only {
 .btn-sm {
     padding: 6px 12px;
     font-size: 12px;
+    white-space: nowrap;
+}
+
+.nbt-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.nbt-filter {
+    font: inherit;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+}
+
+.nbt-filters input[type=search] {
+    flex: 1;
+    min-width: 140px;
+}
+
+.nbt-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 10px;
+    color: var(--text-secondary);
+}
+
+.nbt-search.nbt-grow {
+    flex: 1;
+    min-width: 180px;
+    margin-bottom: 0;
+    width: auto;
 }
 
 .nbt-list {
@@ -721,6 +760,10 @@ body.mode-world .addon-only {
 
     .nbt-leaf .nbt-key {
         min-width: 0;
+    }
+
+    .nbt-search.nbt-grow {
+        flex-basis: 100%;
     }
 
     .btn {

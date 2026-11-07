@@ -137,7 +137,7 @@ async function extractInnerPacks(zip) {
 let mode = 'addon';
 const MODE_TEXT = {
     addon: { title: '点击上传 .mcaddon / .mcpack / .zip', hint: '处理 .mcaddon / .mcpack：物品、方块、实体、对话、UI、脚本等文本' },
-    world: { title: '点击上传 .mcworld / .mctemplate', hint: '处理世界存档：告示牌、命令方块、NPC 对话 → 翻译键，并在存档内生成对应的资源包。处理前请备份存档' },
+    world: { title: '点击上传 .mcworld / .mctemplate / .mcstructure', hint: '处理世界存档或结构文件：告示牌、命令方块、NPC → 翻译键，并生成对应的资源包；无法翻译的文本可在 NBT 编辑器中修改。处理前请备份' },
 };
 function setMode(m) {
     mode = m;
@@ -181,7 +181,10 @@ function renderSummary(res) {
         <div class="stat"><b>${s.untranslatable}</b><span>${s.world ? '需人工处理' : '无法本地化'}</span></div>
         <div class="stat"><b>${escapeHtml(s.sourceLang)}</b><span>原文语言</span></div>
     </div>`;
-    if (s.world) {
+    if (s.structure) {
+        if (s.createdRP) html += `<p class="summary-note">下载的 zip 里包含改好的结构文件和翻译资源包 <code>${escapeHtml(s.createdRP)}</code>，使用该结构的世界需启用这个资源包。</p>`;
+        if (s.untranslatable) html += `<p class="summary-note">有 ${s.untranslatable} 处文本游戏不支持翻译键，可在下方 NBT 编辑器中直接修改。</p>`;
+    } else if (s.world) {
         if (s.createdRP) html += `<p class="summary-note">下载时会在存档内新建资源包 <code>${escapeHtml(s.createdRP)}</code> 并登记到 world_resource_packs.json，打开存档自动加载。</p>`;
         if (s.untranslatable) html += `<p class="summary-note">有 ${s.untranslatable} 处文本游戏不支持翻译键，可在下方 NBT 编辑器中直接修改。</p>`;
     } else if (s.createdRP) html += `<p class="summary-note">附加包没有资源包，已新建 <code>${escapeHtml(s.createdRP)}/</code> 存放翻译，并让行为包依赖它。</p>`;
@@ -211,9 +214,48 @@ function worldSummary(session) {
     };
 }
 
-/** 存档：按当前（含手动修改的）状态生成文件 */
+/** 单独的 .mcstructure：打开为编辑会话 */
+async function processStructure(file) {
+    if (mode !== 'world') { setMode('world'); log('结构文件在“世界存档”页面处理'); }
+    const session = await NS.openStructure(file.name, new Uint8Array(await file.arrayBuffer()), readOptions(), (m, t) => log(m, t || 'info'));
+    state.session = session;
+    state.fs = null;
+    state.resultName = `${state.originalName}_i18n.zip`;
+    for (const u of session.ctx.untranslatable) log(`[需人工处理] ${u.file} ${u.where}: ${u.text}`, 'warn');
+    renderSummary({ ctx: session.ctx, summary: { ...worldSummary(session), createdRP: session.ctx.entries.size ? `${state.originalName}_texts.mcpack` : null, structure: true } });
+    NS.mountWorldEditor($('nbt-editor'), session, {
+        onChange: () => { state.resultBlob = null; state.workbookBlob = null; },
+        downloadCsv: (text, name) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_${name || 'untranslatable'}.csv`),
+    });
+    setProgress(100, '完成！可在下方编辑后下载');
+    log(`✅ 分析完成：自动转换 ${session.ctx.entries.size} 条，需人工处理 ${session.ctx.untranslatable.length} 处`);
+    downloadLogBtn.disabled = downloadResultBtn.disabled = downloadWorkbookBtn.disabled = false;
+}
+
+/** 存档 / 结构：按当前（含手动修改的）状态生成文件 */
 async function buildWorldOutputs() {
     if (state.resultBlob && state.workbookBlob) return;
+    if (!state.fs) {
+        // 结构文件：输出 zip = 改好的 .mcstructure + 翻译资源包 .mcpack
+        setProgress(90, '生成中...');
+        const res = await state.session.build();
+        const out = new JSZip();
+        out.file(`${state.originalName}.mcstructure`, res.structure);
+        if (res.pack) {
+            const pack = new JSZip();
+            for (const [p, t] of res.pack) pack.file(p, t);
+            out.file(`${state.originalName}_texts.mcpack`, await pack.generateAsync({ type: 'uint8array' }));
+            out.file('README.txt', '1. 导入 ' + state.originalName + '_texts.mcpack，并在使用该结构的世界里启用这个资源包；\n2. 用 ' + state.originalName + '.mcstructure 替换原结构文件（附加包 structures/ 目录或结构方块导入）。\n');
+        }
+        state.resultBlob = await out.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+        const wb = new JSZip();
+        for (const [name, content] of Object.entries(res.workbook)) wb.file(name, content);
+        wb.file('process.log', state.logContent);
+        state.workbookBlob = await wb.generateAsync({ type: 'blob' });
+        log(`✅ 已生成 ${state.resultName}（手动修改 ${state.session.edits} 处）`);
+        setProgress(100, '完成！');
+        return;
+    }
     setProgress(90, '写入存档...');
     const res = await state.session.build(state.fs, (m, t) => log(m, t || 'info'));
     const outZip = await state.fs.toZip();
@@ -242,8 +284,8 @@ function checkVersion() {
 }
 
 async function processFile(file) {
-    const ext = (file.name.match(/\.(mcaddon|mcpack|zip|mcworld|mctemplate)$/i) || [, 'mcaddon'])[1].toLowerCase();
-    state.originalName = file.name.replace(/\.(mcaddon|mcpack|zip|mcworld|mctemplate)$/i, '');
+    const ext = (file.name.match(/\.(mcaddon|mcpack|zip|mcworld|mctemplate|mcstructure)$/i) || [, 'mcaddon'])[1].toLowerCase();
+    state.originalName = file.name.replace(/\.(mcaddon|mcpack|zip|mcworld|mctemplate|mcstructure)$/i, '');
     state.logContent = '';
     state.resultBlob = state.workbookBlob = null;
     logEl.innerHTML = '';
@@ -256,6 +298,7 @@ async function processFile(file) {
     if (!checkVersion()) { setProgress(0, '请刷新页面'); downloadLogBtn.disabled = false; return; }
 
     try {
+        if (ext === 'mcstructure') { await processStructure(file); return; }
         const zip = await JSZip.loadAsync(file);
         const inner = await extractInnerPacks(zip);
         if (inner) log(`解压了 ${inner} 个内层包`);
@@ -286,7 +329,7 @@ async function processFile(file) {
             renderSummary({ ctx: session.ctx, summary: worldSummary(session) });
             NS.mountWorldEditor($('nbt-editor'), session, {
                 onChange: () => { state.resultBlob = null; state.workbookBlob = null; },
-                downloadCsv: (text) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_untranslatable.csv`),
+                downloadCsv: (text, name) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_${name || 'untranslatable'}.csv`),
             });
             setProgress(100, '完成！可在下方编辑后下载');
             log(`✅ 分析完成：自动转换 ${session.ctx.entries.size} 条，需人工处理 ${session.ctx.untranslatable.length} 处`);

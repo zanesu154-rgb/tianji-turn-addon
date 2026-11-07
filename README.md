@@ -77,9 +77,9 @@ const LANG = { en_US: { welcome: "Welcome" }, zh_CN: { welcome: "欢迎" } };
 
 **为避免误改**：如果脚本里自己定义了与上述 API 同名的方法（例如封装了一个 `Menu.title()`），无法确认类型的同名调用不会被改写，并在日志中提示；能确认是 `new ActionFormData()` 链式调用、`const f = new …FormData()` 变量或 `this.form = new …FormData()` 的调用仍会处理。
 
-## 世界存档（网页“世界存档”标签页）
+## 世界存档与结构文件（网页“世界存档”标签页）
 
-上传 `.mcworld` / `.mctemplate`（手机无法导出存档时可导出为模板），工具读取存档的 LevelDB 数据库（`db/`）：
+上传 `.mcworld` / `.mctemplate`（手机无法导出存档时可导出为模板）或 `.mcstructure`。存档会读取 LevelDB 数据库（`db/`），其中用结构方块保存的结构也一并处理：
 
 | 内容 | 处理 |
 |---|---|
@@ -98,7 +98,18 @@ const LANG = { en_US: { welcome: "Welcome" }, zh_CN: { welcome: "欢迎" } };
 
 - **需人工翻译**：列出所有这类文本，逐条原位修改；“导出待翻译表”得到 `untranslatable.csv`，在 `translation` 列填写译文后“导入翻译表”批量写回（`ref` 列是文本在存档中的位置，请勿修改）
 - **搜索**：按键名或内容查找（如 `CustomName`、`LevelName`、某段文字），结果可直接编辑
-- **浏览全部**：方块实体 / 实体 / level.dat 的完整 NBT 树，按需展开；字符串和数字可编辑，数字会按类型校验范围
+- **浏览全部**：方块实体 / 实体 / 结构 / level.dat 的完整 NBT 树，按需展开；字符串和数字可编辑，数字会按类型校验范围
+
+内容很多时：
+- “需人工翻译”可按类别（方块名称、物品名、成书、名字标签、命令）筛选、按关键词过滤、只看未修改，分页显示
+- “搜索”可以把全部结果（不限显示的 300 条）导出成表格，在 `translation` 列填写新值后导入；例如搜索 `CustomName` 一次改完所有名字
+
+### 结构文件 .mcstructure
+
+- 单独上传：下载得到 zip，内含改好的 `.mcstructure` 和翻译资源包 `<名字>_texts.mcpack`（使用该结构的世界需启用）
+- 附加包行为包里的 `structures/*.mcstructure`：随附加包一起转换，翻译写进附加包的资源包
+- 存档里用结构方块保存的结构（`structuretemplate_…`）：随存档一起转换
+- 结构中的翻译键以 `structure.<结构名>.` 开头，避免不同结构的内部坐标冲突
 
 ## 无法本地化的内容
 
