@@ -407,6 +407,19 @@ body.mode-world .addon-only {
     margin-bottom: 10px;
 }
 
+.nbt-cats {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    margin-bottom: 8px;
+    font-size: 0.92em;
+}
+
+.nbt-cats-title {
+    color: var(--text-muted, inherit);
+}
+
 .nbt-filter {
     font: inherit;
     padding: 6px 8px;

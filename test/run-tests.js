@@ -387,6 +387,13 @@ console.log(JSON.stringify(calls));`;
         const acts = JSON.parse(G(npc, 'Actions'));
         check('NPC 名字、正文、按钮 → 翻译键', rr(G(npc, 'RawtextName')) === '你好,claude' && rr(G(npc, 'InterativeText')) === '这是一条测试文本' && rr(acts[0].button_name) === '这是一条测试文本');
         check('NPC 按钮命令保持不变', acts[0].data[0].cmd_line === '/give @a command_block');
+        {
+            const sx = await NS.openWorld(new MemFS(readDir(path.join(__dirname, 'world-fixture'))), {}, () => {});
+            const n0 = sx.workbook()['untranslatable.csv'].split('\n').filter(l => l.includes('命令方块名称')).length;
+            sx.hiddenCats.add('命令方块名称');
+            const csv1 = sx.workbook()['untranslatable.csv'];
+            check('取消勾选“命令方块名称”后不进入导出的待翻译表', n0 === 2 && !csv1.includes('命令方块名称') && csv1.includes('方块名称') && NS.worldCategoryOf({ where: '命令方块名称' }) === '命令方块名称');
+        }
         check('命名的命令方块：名称列入需人工翻译', wr.ctx.untranslatable.filter(u => u.where === '命令方块名称').map(u => u.text).sort().join() === 'say,titleraw');
         check('箱子名、物品名、书名、盔甲架名记入报告', ['也许能修改这个名字', '也许你能改变这个物品的名字', '你能改书名吗？', '能改nametag吗？'].every(t => wr.ctx.untranslatable.some(u => u.text === t)));
         const chest = tags.find(c => G(c, 'id') === 'Chest');

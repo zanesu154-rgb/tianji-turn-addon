@@ -477,6 +477,7 @@
                 }
                 return { applied, skipped };
             },
+            hiddenCats: new Set(),   // 编辑器里取消勾选的类别：不显示、不导出
             workbook() { return makeWorkbook(this); },
         };
     }
@@ -567,14 +568,18 @@
         return session.opt.sourceLang === 'auto' ? NS.detectSourceLang(values) : session.opt.sourceLang;
     }
 
+    /** 待翻译条目的类别（编辑器筛选与导出共用） */
+    const categoryOf = (u) => u.where.startsWith('/') ? '命令' : /成书|讲台书/.test(u.where) ? '成书' : u.where.replace(/（.*$/, '');
+
     function makeWorkbook(session) {
         const { ctx } = session;
+        const hidden = session.hiddenCats || new Set();
         const sourceLang = detectLang(session);
         return {
             'strings.csv': csvText([['key', 'source_text', 'location', 'type'], ...[...ctx.entries].map(([k, e]) => [k, e.value, e.file, e.kind])]),
             // 填写 translation 列后可在网页里“导入翻译表”批量写回
             'untranslatable.csv': csvText([['ref', 'location', 'where', 'text', 'reason', 'translation'],
-                ...ctx.untranslatable.map(u => [u.ref || '', u.file, u.where, u.text, u.reason, ''])]),
+                ...ctx.untranslatable.filter(u => !hidden.has(categoryOf(u))).map(u => [u.ref || '', u.file, u.where, u.text, u.reason, ''])]),
             [`source_${sourceLang}.lang`]: [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n') + '\n',
         };
     }
@@ -625,7 +630,7 @@
         }
 
         return {
-            workbook: makeWorkbook(session),
+            get workbook() { return makeWorkbook(session); },
             summary: {
                 packs: [], processedFiles: records.filter(r => r.dirty).length, newKeys: ctx.entries.size, packKeys: 0, placeholders: 0,
                 untranslatable: ctx.untranslatable.length, warnings: ctx.warnings, missingRefs: [], sourceLang,
@@ -716,6 +721,7 @@
     NS.convertStructureBytes = convertStructureBytes;
     NS.runWorldPipeline = runWorldPipeline;
     NS.worldNodeAt = nodeAt;
+    NS.worldCategoryOf = categoryOf;
     NS.worldRootLabel = rootLabel;
     NS.worldDisplayValue = displayValue;
     NS.worldParseCsv = parseCsv;
