@@ -33,7 +33,7 @@ test/             测试附加包 + 端到端测试（node test/run-tests.js）
 | 实体 `interact` | 只支持旧的数组格式，忽略 `component_groups` | 支持 `{interactions:[…]}` 新格式和组件组；交易表 `economy_trade_table` 也处理 |
 | 命令 | 正则只认 `@a` 形式的目标；`tag @s add title` 也可能被误判；tellraw 中带转义引号的文本漏掉 | 真正解析命令：支持 `execute … run`、带嵌套方括号的选择器、引号玩家名；tellraw 用 JSON 解析，保留 `score`/`selector`/`with` |
 | mcfunction | 改写后丢失缩进和 CRLF | 原样保留 |
-| 多行文本 | 写成 `\n`（lang 值不能含换行，游戏是否识别 `\n` 不确定） | 默认拆成多个键，中间用 `{"text":"\n"}` 连接 |
+| 多行文本 | 写成 `\n`（游戏内实测可正常换行） | 默认一段一个键，值里写 `\n`；勾选“多行文本拆成多个键”则拆开并用 `{"text":"\n"}` 连接 |
 | 格式码 | `§l§a欢迎` 整段进 lang | 首尾格式码留在 rawtext 里，译者只看到正文 |
 | 未提取 | 方块 `crafting_table.table_name`、物品 `interact_button`、动画控制器的命令、没有名称的物品/方块/实体 | 均已处理；无名称的生成英文占位名（按 ID 推测） |
 | JSON 解析 | 尾逗号直接失败 | 支持注释、尾逗号、BOM |
@@ -86,9 +86,10 @@ const LANG = { en_US: { welcome: "Welcome" }, zh_CN: { welcome: "欢迎" } };
 | 告示牌、悬挂告示牌（正反面） | 文本改为 `{"rawtext":[{"translate":…}]}` |
 | 命令方块、命令方块矿车 | `title` / `titleraw` / `tellraw` 改为翻译键 |
 | NPC | 名字、正文、按钮名改为翻译键；按钮命令中的 title/tellraw 同样处理 |
-| `say` / `tell`、容器名、物品名与描述、成书、实体名字标签 | 游戏只按纯文本显示，列入“需人工翻译”，可在 NBT 编辑器中修改 |
+| 容器名、物品名与描述、成书、实体名字标签 | 游戏只按纯文本显示，列入“需人工翻译”，可在 NBT 编辑器中修改 |
 | 玩家背包、盔甲栏、副手、末影箱（含潜影盒内）的物品名与成书 | 同上（本地玩家 `~local_player` 与多人存档的 `player_…`） |
-| 命令方块名称（say 等命令输出时的发送者名） | 同上 |
+| 命令方块名称（转换后 tellraw 前缀里显示的发送者名） | 同上 |
+| `say` / `tell` / `msg` / `w` | 默认转为 `tellraw`，保留 `[发送者] ` 前缀（命令方块用自己的名字，没起名为 `@`），正文变成翻译键；可在选项中改为 titleraw 标题 / 物品栏上方，或不转换 |
 
 写回方式：不改动任何 `.ldb`，只在当前日志（`db/*.log`）末尾追加一条写入记录（与游戏自己的写入方式相同），写完后重新打开数据库逐条校验。翻译放在存档内新建的 `resource_packs/world_texts/`，并登记到 `world_resource_packs.json`，打开存档自动加载。
 
@@ -117,13 +118,15 @@ const LANG = { en_US: { welcome: "Welcome" }, zh_CN: { welcome: "欢迎" } };
 
 ## 无法本地化的内容
 
-以下位置游戏只接受纯文本，工具只会列入报告（界面和 `untranslatable.csv`）：`say` / `tell` / `me` 命令、计分板显示名、`nameTag`、战利品表 `set_name` / `set_lore`、脚本 `setLore`、Boss 血条名称、标题画面闪烁文字。
+`say` / `tell` / `msg` / `w` 命令默认转为 `tellraw`（选项“say / tell 命令”可改为 titleraw 或不转换），选择器如 `@p` 变成 `%1$s` 参数。
+
+以下位置游戏只接受纯文本，工具只会列入报告（界面和 `untranslatable.csv`）：`me` 命令、计分板显示名、`nameTag`、战利品表 `set_name` / `set_lore`、脚本 `setLore`、Boss 血条名称、标题画面闪烁文字。
 
 ## 已知限制
 
 - 混淆后（字符串被编码）的脚本无法提取。
 - 官方文档没有说明以下字段是否支持翻译键，需在游戏中确认：`minecraft:interact_button`（按支持处理）、`minecraft:boss.name` 和战利品 `set_name` / `set_lore`（按不支持处理，保持原样）。
-- 关闭“多行文本拆成多个键”时会写成 `\n`，请在游戏中确认显示正常。
+- lang 值里的 `\n` 已在游戏内确认可以换行，所以多行文本默认不再拆键。
 
 ## 输出
 

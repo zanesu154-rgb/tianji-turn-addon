@@ -2,7 +2,8 @@
  *  commands.js —— 命令文本处理
  *   title  <目标> title|subtitle|actionbar <文本>  →  titleraw ... {"rawtext":[{"translate":...}]}
  *   tellraw / titleraw 的 JSON                     →  text 节点改为 translate（保留 with/score/selector）
- *   say / tell / msg / w / me / scoreboard 显示名  →  无法本地化，只记录到报告
+ *   say / tell / msg / w      →  按选项转为 tellraw / titleraw（默认 tellraw）
+ *   me / scoreboard 显示名    →  无法本地化，只记录到报告
  * ================================================================ */
 (function (root) {
     'use strict';
@@ -87,11 +88,33 @@
         return text.replace(/(\d+)/g, '$1');
     }
 
+
+    /**
+     * say 文本 → tellraw / titleraw。
+     *  - 消息里的选择器（@p、@a[…]）保留为 selector，作为翻译参数 %1$s …
+     *  - tellraw 保留 say 的“[发送者] ”前缀；发送者默认为执行者 @s，命令方块传入它的名字
+     */
+    function convertSay(text, target, mode, ctx, baseKey, meta, sender) {
+        const sels = [];
+        const value = text.replace(/%/g, '%%').replace(/@[aeprsvn](?:\[[^\]]*\])?|@initiator/g, (m) => { sels.push({ selector: m }); return `%${sels.length}$s`; });
+        const literal = value.replace(/%\d+\$s/g, ' ');
+        if (!NS.looksLikeText(literal)) return null;
+        const finalValue = sels.length ? value : text;
+        const key = ctx.alloc(baseKey, finalValue, meta);
+        const node = sels.length ? { translate: key, with: { rawtext: sels } } : { translate: key };
+        const who = sender || { selector: '@s' };
+        if (mode === 'tellraw') {
+            return `tellraw ${target} ${JSON.stringify({ rawtext: [{ text: '[' }, who, { text: '] ' }, node] })}`;
+        }
+        const sub = mode === 'actionbar' ? 'actionbar' : 'title';
+        return `titleraw ${target} ${sub} ${JSON.stringify({ rawtext: [node] })}`;
+    }
+
     /**
      * 处理一条命令。
      * @returns {{cmd: string, changed: boolean}}
      */
-    function translateCommand(cmd, ctx, baseKey, file) {
+    function translateCommand(cmd, ctx, baseKey, file, opts = {}) {
         if (typeof cmd !== 'string' || !cmd.trim()) return { cmd, changed: false };
         const start = findCommandStart(cmd);
         if (start < 0) return { cmd, changed: false };
@@ -148,15 +171,20 @@
             return changed ? { cmd: head + replaced, changed: true } : { cmd, changed: false };
         }
 
-        // ---- 以下命令无法使用翻译键，只记录 ----
-        if (kw === 'say' || kw === 'me') {
-            const text = cmd.substring(skipWs(cmd, afterKw));
-            if (NS.looksLikeText(text)) ctx.report(file, `/${kw}`, text, `${kw} 命令不支持翻译键，可改为 tellraw`);
-        } else if (kw === 'tell' || kw === 'msg' || kw === 'w') {
+        // ---- say / tell / msg / w：按选项转换成 tellraw / titleraw，否则只记录 ----
+        if (kw === 'say' || kw === 'me' || kw === 'tell' || kw === 'msg' || kw === 'w') {
+            const isTell = kw !== 'say' && kw !== 'me';
             const tStart = skipWs(cmd, afterKw);
-            const text = cmd.substring(skipWs(cmd, readTarget(cmd, tStart)));
-            if (NS.looksLikeText(text)) ctx.report(file, `/${kw}`, text, `${kw} 命令不支持翻译键，可改为 tellraw`);
-        } else if (kw === 'scoreboard') {
+            const tEnd = isTell ? readTarget(cmd, tStart) : tStart;
+            const target = isTell ? cmd.substring(tStart, tEnd) : '@a';
+            const text = cmd.substring(skipWs(cmd, tEnd)).replace(/\s+$/, '');
+            const mode = ctx.sayMode || 'keep';
+            const conv = kw !== 'me' && mode !== 'keep' ? convertSay(text, target, mode, ctx, baseKey, meta, opts.sender) : null;
+            if (conv) return { cmd: prefix + conv, changed: true };
+            if (NS.looksLikeText(text)) ctx.report(file, `/${kw}`, text, `${kw} 命令不支持翻译键（可在选项中设置转换为 tellraw / titleraw）`);
+            return { cmd, changed: false };
+        }
+        if (kw === 'scoreboard') {
             const m = /^scoreboard\s+objectives\s+add\s+\S+\s+\S+\s+(.+)$/i.exec(cmd.substring(start));
             if (m && NS.looksLikeText(m[1])) ctx.report(file, '/scoreboard objectives add', m[1].replace(/^"|"$/g, ''), '计分板显示名不支持翻译键');
         }

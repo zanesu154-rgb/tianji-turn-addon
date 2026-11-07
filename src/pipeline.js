@@ -18,7 +18,8 @@
     const DEFAULT_OPTIONS = {
         sourceLang: 'auto',            // auto | zh_CN | en_US | ...
         targetLangs: ['en_US', 'zh_CN'],
-        splitNewlines: true,
+        splitNewlines: false,          // lang 支持 \n 换行（游戏内实测），多行文本默认一个键
+        sayMode: 'tellraw',            // say/tell 转换：keep | tellraw | titleraw | actionbar
         processScripts: true,
         injectRuntime: true,
         fillMissing: true,
@@ -117,6 +118,7 @@
         log(`已有翻译键：${knownKeys.size} 条`);
 
         const ctx = new ExtractContext({ knownKeys, existingValues, splitNewlines: opt.splitNewlines });
+        ctx.sayMode = opt.sayMode;
         const info = { defs: { items: [], blocks: [], entities: [], spawnEggs: [] }, packRoot: '' };
 
         // ---------------- 3. 预扫描 UI / 脚本 ----------------
