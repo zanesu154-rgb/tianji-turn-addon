@@ -127,7 +127,7 @@
             const rel = relOf(p, pk);
             if (pk.type === 'RP' && /^ui\/.*\.json$/i.test(rel)) {
                 const d = await readJson(p);
-                if (d) uiData.push(d);
+                if (d) uiData.push({ path: p, data: d });
             }
             if (opt.processScripts && pk.type === 'BP' && /^scripts\/.*\.(js|mjs)$/i.test(rel)) {
                 scriptInfos.set(p, NS.collectScriptInfo(await fs.readText(p)));
@@ -218,6 +218,15 @@
                 processed++;
                 if (rel !== 'manifest.json') log(`[JSON] ${p}`);
             }
+        }
+
+        // 被翻译文本所在标签原来是 "localize": false 的，已改成 true —— 这些文件可能不是当前处理的文件
+        if (info.uiDirty && info.uiDirty.size) {
+            for (const p of info.uiDirty) {
+                if (!pending.has(p)) processed++;
+                pending.set(p, JSON.stringify(jsonCache.get(p), null, 2));
+            }
+            log(`[UI] ${info.localizeFlips} 个标签原为 "localize": false，已改为 true，否则会直接显示键名`, 'warn');
         }
 
         // ---------------- 5. 缺失的默认名称 ----------------

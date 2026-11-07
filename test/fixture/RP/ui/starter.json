@@ -1,0 +1,12 @@
+{
+  "namespace": "starter",
+  "state": { "type": "panel", "controls": [
+    { "name_label": { "type": "label", "text": "$name", "localize": false } },
+    { "desc@starter.desc_tpl": { "text": "$desc" } }
+  ] },
+  "desc_tpl": { "type": "label", "text": "", "localize": false },
+  "x_btn": { "type": "label", "text": "X" },
+  "token": { "type": "panel", "$tk": "|ROW:TURN|" },
+  "title_label": { "type": "label", "text": "就决定是你了！", "localize": false },
+  "frame": { "type": "panel", "controls": [ { "bulbasaur@starter.state": { "$name": "妙蛙种子", "$desc": "经常能看到妙蛙种子" } } ] }
+}
