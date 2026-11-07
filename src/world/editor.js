@@ -141,10 +141,22 @@
         });
         const list = el('div', { class: 'nbt-list' });
         // ---- 筛选 + 分页（内容很多时）----
-        const catOf = (u) => u.where.startsWith('/') ? '命令' : /成书|讲台书/.test(u.where) ? '成书' : u.where.replace(/（.*$/, '');
+        // 类别勾选：取消勾选的类别不显示，也不进入导出的待翻译表（如命令方块名称）
+        const catOf = NS.worldCategoryOf;
         const cats = [...new Set(untr.map(catOf))];
-        const catSel = el('select', { class: 'nbt-filter' }, el('option', { value: '', text: `全部类别（${untr.length}）` }),
-            ...cats.map(c => el('option', { value: c, text: `${c}（${untr.filter(u => catOf(u) === c).length}）` })));
+        const HKEY = 'addon-i18n.hiddenCats';
+        try { for (const c of JSON.parse(localStorage.getItem(HKEY) || '[]')) if (cats.includes(c)) session.hiddenCats.add(c); } catch (e) { /* 无存储 */ }
+        const saveHidden = () => { try { localStorage.setItem(HKEY, JSON.stringify([...session.hiddenCats])); } catch (e) { /* 无存储 */ } };
+        const catBox = el('div', { class: 'nbt-cats' }, el('span', { class: 'nbt-cats-title', text: '提取类别：' }),
+            ...cats.map(c => {
+                const cb = el('input', { type: 'checkbox' });
+                cb.checked = !session.hiddenCats.has(c);
+                cb.addEventListener('change', () => {
+                    if (cb.checked) session.hiddenCats.delete(c); else session.hiddenCats.add(c);
+                    saveHidden(); page = 0; renderManual(); changed();
+                });
+                return el('label', { class: 'opt-check nbt-cat' }, cb, ` ${c}（${untr.filter(u => catOf(u) === c).length}）`);
+            }));
         const kw = el('input', { class: 'nbt-filter', type: 'search', placeholder: '筛选原文 / 位置', spellcheck: 'false' });
         const onlyTodo = el('input', { type: 'checkbox' });
         const pager = el('div', { class: 'nbt-pager' });
@@ -153,7 +165,7 @@
         const filtered = () => {
             const k = kw.value.trim().toLowerCase();
             return untr.filter(u => {
-                if (catSel.value && catOf(u) !== catSel.value) return false;
+                if (session.hiddenCats.has(catOf(u))) return false;
                 if (k && !(`${u.text} ${u.file} ${u.where}`.toLowerCase().includes(k))) return false;
                 if (onlyTodo.checked && session.getText(u.ref) !== u.text) return false;   // 已改过的不显示
                 return true;
@@ -184,7 +196,6 @@
             );
         };
         let ft;
-        catSel.addEventListener('change', () => { page = 0; renderManual(); });
         onlyTodo.addEventListener('change', () => { page = 0; renderManual(); });
         kw.addEventListener('input', () => { clearTimeout(ft); ft = setTimeout(() => { page = 0; renderManual(); }, 200); });
         manual.append(
@@ -193,7 +204,8 @@
                 el('button', { class: 'btn btn-secondary btn-sm', text: '导入翻译表', onclick: () => fileIn.click() }),
                 fileIn, importMsg),
             el('p', { class: 'nbt-hint', text: '内容很多时建议导出表格，在 Excel 等软件里填写 translation 列后导入，批量写回；ref 列是该文本在存档中的位置，请勿修改。' }),
-            el('div', { class: 'nbt-filters' }, catSel, kw, el('label', { class: 'opt-check' }, onlyTodo, ' 只看未修改')),
+            catBox,
+            el('div', { class: 'nbt-filters' }, kw, el('label', { class: 'opt-check' }, onlyTodo, ' 只看未修改')),
             list,
             pager,
         );
