@@ -1,0 +1,13 @@
+{
+  // 带注释的 manifest
+  "format_version": 2,
+  "header": { "name": "天机转盘", "description": "一个测试附加包", "uuid": "11111111-1111-4111-8111-111111111111", "version": [1,0,0], "min_engine_version": [1,21,0] },
+  "modules": [
+    { "type": "data", "uuid": "11111111-1111-4111-8111-111111111112", "version": [1,0,0] },
+    { "type": "script", "language": "javascript", "entry": "scripts/main.js", "uuid": "11111111-1111-4111-8111-111111111113", "version": [1,0,0] }
+  ],
+  "dependencies": [
+    { "module_name": "@minecraft/server", "version": "2.0.0" },
+    { "module_name": "@minecraft/server-ui", "version": "2.0.0" },
+  ]
+}

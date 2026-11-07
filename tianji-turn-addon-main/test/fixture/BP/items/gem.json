@@ -1,0 +1,1 @@
+{ "format_version": "1.21.0", "minecraft:item": { "description": { "identifier": "tianji:spirit_gem" }, "components": { "minecraft:icon": "tianji:spirit_gem" } } }

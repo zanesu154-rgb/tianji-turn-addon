@@ -1,0 +1,2 @@
+{ "format_version": "1.21.0", "minecraft:item": { "description": { "identifier": "tianji:flame_sword" },
+  "components": { "minecraft:display_name": { "value": "§6烈焰之剑" }, "minecraft:interact_button": "挥动", "minecraft:icon": "tianji:flame_sword" } } }
