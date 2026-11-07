@@ -29,7 +29,7 @@ test/             测试附加包 + 端到端测试（node test/run-tests.js）
 | 键冲突 | 不读已有 lang，新键可能和已有键同名而被跳过，显示成别的文字 | 先读所有已有键；值相同则复用，另一种文字（如 en_US 的 “Altar” 对应 “祭坛”）视为译文复用键 |
 | 战利品 `set_name` / `set_lore` | 改成键名 → 游戏直接显示键名 | 游戏不翻译自定义物品名，改为只列入“无法本地化”报告 |
 | `minecraft:nameable.name` | 当作显示文本处理（该组件没有此字段，`name_filter` 是匹配条件） | 不处理 |
-| `minecraft:boss.name` | 改成与实体名相同的键，可能覆盖实体名 | 不改，列入报告 |
+| `minecraft:boss.name`（首领血条） | 改成与实体名相同的键，可能覆盖实体名 | 单独的键 `entity.<id>.boss_name`（游戏内实测支持翻译键）；已是键的保持不变 |
 | 实体 `interact` | 只支持旧的数组格式，忽略 `component_groups` | 支持 `{interactions:[…]}` 新格式和组件组；交易表 `economy_trade_table` 也处理 |
 | 命令 | 正则只认 `@a` 形式的目标；`tag @s add title` 也可能被误判；tellraw 中带转义引号的文本漏掉 | 真正解析命令：支持 `execute … run`、带嵌套方括号的选择器、引号玩家名；tellraw 用 JSON 解析，保留 `score`/`selector`/`with` |
 | mcfunction | 改写后丢失缩进和 CRLF | 原样保留 |
@@ -120,12 +120,12 @@ const LANG = { en_US: { welcome: "Welcome" }, zh_CN: { welcome: "欢迎" } };
 
 `say` / `tell` / `msg` / `w` 命令默认转为 `tellraw`（选项“say / tell 命令”可改为 titleraw 或不转换），选择器如 `@p` 变成 `%1$s` 参数。
 
-以下位置游戏只接受纯文本，工具只会列入报告（界面和 `untranslatable.csv`）：`me` 命令、计分板显示名、`nameTag`、战利品表 `set_name` / `set_lore`、脚本 `setLore`、Boss 血条名称、标题画面闪烁文字。
+以下位置游戏只接受纯文本，工具只会列入报告（界面和 `untranslatable.csv`）：`me` 命令、计分板显示名、`nameTag`、战利品表 `set_name` / `set_lore`、脚本 `setLore`、标题画面闪烁文字。
 
 ## 已知限制
 
 - 混淆后（字符串被编码）的脚本无法提取。
-- 官方文档没有说明以下字段是否支持翻译键，需在游戏中确认：`minecraft:interact_button`（按支持处理）、`minecraft:boss.name` 和战利品 `set_name` / `set_lore`（按不支持处理，保持原样）。
+- 官方文档没有说明以下字段是否支持翻译键，需在游戏中确认：`minecraft:interact_button`（按支持处理）和战利品 `set_name` / `set_lore`（按不支持处理，保持原样）。
 - lang 值里的 `\n` 已在游戏内确认可以换行，所以多行文本默认不再拆键。
 
 ## 输出

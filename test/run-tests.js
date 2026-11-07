@@ -116,7 +116,7 @@ function renderCommand(cmd, lang) {
     check('战利品表 set_name 未改（游戏不翻译自定义名称）', !changed.includes('BP/loot_tables/chest.json') && res.ctx.untranslatable.some(u => u.text === '传说宝箱'));
     const ent = JSON.parse(out('BP/entities/merchant.json'))['minecraft:entity'];
     check('实体 nameable.name_filter 未动', ent.components['minecraft:nameable'].name_actions[0].name_filter === 'Toast');
-    check('实体 boss 名未动并记入报告', ent.components['minecraft:boss'].name === '神秘商人BOSS');
+    check('实体 boss 血条名 → 翻译键（游戏内实测有效）', zh.get(ent.components['minecraft:boss'].name) === '神秘商人BOSS' && !res.ctx.untranslatable.some(u => u.text === '神秘商人BOSS'));
     check('已有键 action.interact.shear 未动', ent.components['minecraft:interact'].interactions[1].interact_text === 'action.interact.shear');
     const ac = JSON.parse(out('BP/animation_controllers/ac.json'));
     const onEntry = ac.animation_controllers['controller.animation.tianji.fight'].states.fight.on_entry;
