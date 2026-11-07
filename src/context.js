@@ -11,6 +11,21 @@
     //   n  ：还原为 ${JSON转义(expr)}（从纯文本搬进了 JSON 字符串）
     const SENTINEL_RE = /(\d+)|(\d+)/g;
 
+    /**
+     * 多行模板字符串常带有代码缩进（第二行起整体缩进 ≥4 个空格），
+     * 写进 lang 前去掉这部分缩进和行尾空白，译者看到的是干净的文本。
+     */
+    function dedentCode(text) {
+        if (typeof text !== 'string' || text.indexOf('\n') < 0) return text;
+        const lines = text.split('\n');
+        const rest = lines.slice(1).filter(l => l.trim());
+        if (!rest.length) return text;
+        const ind = Math.min(...rest.map(l => /^[ \t]*/.exec(l)[0].length));
+        if (ind < 4) return text;
+        return lines.map((l, i) => (i ? l.slice(Math.min(ind, /^[ \t]*/.exec(l)[0].length)) : l).replace(/[ \t]+$/, '')).join('\n');
+    }
+    NS.dedentCode = dedentCode;
+
     class ExtractContext {
         constructor(options = {}) {
             this.knownKeys = options.knownKeys || new Set();         // 附加包中已有的所有 lang 键
@@ -34,6 +49,7 @@
          * scope   : 去重范围；同一 scope 下相同文本复用同一个键。null = 不去重
          */
         alloc(baseKey, text, { file = '', kind = '', scope = null } = {}) {
+            text = dedentCode(text);
             const base = sanitizeKey(baseKey);
             if (scope) {
                 const d = this.dedupe.get(scope + '\u0000' + text);

@@ -137,6 +137,19 @@ function renderCommand(cmd, lang) {
         check('"%键名" 视为已有键：不改、不新建键，引用记为去掉 % 的键', !chg && blk['minecraft:block'].components['minecraft:display_name'] === '%tile.nico.spawner.name' && cp.entries.size === 0 && cp.referenced.has('tile.nico.spawner.name'));
         check('"%1$s 来了" / "100%" 不当作键', !cp.isKey('%1$s 来了') && !cp.isKey('100%'));
     }
+    {
+        // 多行模板带代码缩进，显示前先 trim 每行（DLCraft 的 Simple Waystone 帮助文本）
+        const src = 'export function help(player){\n        const message = `§a<Waystone Commands>\n                o /scriptevent sw:delete - Deletes all waystones.\n                `;\n        player.sendMessage(message.split("\\n").map(l => l.trim()).join("\\n"));\n}';
+        for (const split of [false, true]) {
+            const cw = new NS.ExtractContext({ splitNewlines: split });
+            const r = NS.processScript(src, 'scripts/w.js', cw, { injectRuntime: true });
+            const sent = [];
+            require('vm').runInNewContext(r.content.replace(/export /g, '') + '\nhelp(player);', { globalThis: {}, player: { sendMessage: (m) => sent.push(m) } });
+            const vals = [...cw.entries.values()].map(e => e.value);
+            check(`带缩进的多行文本：lang 去掉代码缩进，trim 后仍能翻译（${split ? '拆键' : '一个键'}）`,
+                vals.every(v => !/\n /.test(v) && !/^ /.test(v)) && sent[0].rawtext.filter(x => x.translate).length === (split ? 2 : 1) && !sent[0].rawtext.some(x => x.text && /Deletes/.test(x.text)));
+        }
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

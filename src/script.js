@@ -648,9 +648,12 @@
     const s = String(v);
     return lookup(s) || { text: s };
   };
+  // 多行文本按“每行去掉首尾空白”再比一次（代码常先 trim 每行再显示）
+  const N = (s) => s.split("\\n").map((l) => l.trim()).join("\\n");
   const one = (s) => {
     let k = m.get(s);
     if (k) return [{ translate: k }];
+    if (s.indexOf("\\n") >= 0 && (k = m.get(N(s)))) return [{ translate: k }];
     const mm = /^((?:\\u00a7.|\\s)*)([\\s\\S]*?)((?:\\u00a7.|\\s)*)$/.exec(s);
     if (mm && mm[2] !== s && (k = m.get(mm[2]))) {
       const r = [{ translate: k }];
@@ -706,7 +709,10 @@
     return cmd;
   };
   const reg = (exact, pats) => {
-    for (const [s, k] of exact) if (!m.has(s)) m.set(s, k);
+    for (const [s, k] of exact) {
+      if (!m.has(s)) m.set(s, k);
+      if (s.indexOf("\\n") >= 0 && !m.has(N(s))) m.set(N(s), k);
+    }
     for (const [k, lits, ord] of pats) {
       const len = lits.join("").length;
       p.push([k, new RegExp("^" + lits.map(esc).join("([\\\\s\\\\S]*?)") + "$"), len, ord]);
@@ -1132,12 +1138,16 @@
             }
         };
 
-        const registerExact = (text) => {
+        const registerExact = (text, fromSplit = false) => {
             const lines = ctx.splitNewlines ? text.split(/\r?\n/) : [text];
             for (const line of lines) {
                 if (!looksLikeText(line, 'strict')) continue;
                 if (ctx.isKey(line)) continue;
-                exact.push([line, ctx.alloc(keyBase('str'), line, meta('str'))]);
+                // 拆行时每行去掉代码缩进；原样和去空白后的写法都登记
+                const t = (lines.length > 1 || fromSplit) ? line.trim() : line;
+                const k = ctx.alloc(keyBase('str'), t, meta('str'));
+                exact.push([line, k]);
+                if (t !== line) exact.push([t, k]);
             }
         };
         const registerPattern = (parts) => {
@@ -1145,7 +1155,7 @@
             for (const line of lines) {
                 if (!line.length) continue;
                 const hasExpr = line.some(p => !('lit' in p));
-                if (!hasExpr) { registerExact(litText(line)); continue; }
+                if (!hasExpr) { registerExact(litText(line), lines.length > 1); continue; }
                 if (!looksLikeText(litText(line), 'strict')) continue;
                 // 字面量片段：表达式之间的文字（相邻表达式之间为空串）
                 const lits = [''];
