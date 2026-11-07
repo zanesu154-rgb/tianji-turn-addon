@@ -118,6 +118,16 @@ function renderCommand(cmd, lang) {
     check('localize:false 继承自 @模板 → 在子控件上覆盖为 true', st.state.controls[1]['desc@starter.desc_tpl'].localize === true);
     check('单个字母 "X" 不提取', st.x_btn.text === 'X');
 
+    for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
+        ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
+        check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
+    }
+    {
+        const c2 = new NS.ExtractContext({});
+        NS.processScript('export function f(p, x) { p.runCommand(`setblock ${x} 69 -20 stone`); const a = ["fill -20 65 -20 20 67 20 dirt"]; const b = `setblock ${x} 69 20 stone`; return [a, b]; }', 'scripts/d.js', c2, {});
+        check('脚本中的 fill / setblock 命令（含模板字符串）不登记为文本', c2.entries.size === 0, [...c2.entries.values()].map(e => e.value).join(' / '));
+    }
+
     console.log('\n[4] 该提取的都提取了');
     const item = JSON.parse(out('BP/items/sword.json'))['minecraft:item'].components;
     check('物品名', zh.get(item['minecraft:display_name'].value) === '§6烈焰之剑');

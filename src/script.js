@@ -659,7 +659,8 @@
                 if (isTechPosition(n)) return;
                 const parts = flattenConcat(n);
                 if (!parts || !parts.some(p => 'lit' in p)) return;
-                if (looksLikeCommand(parts.find(p => 'lit' in p).lit)) return;
+                // 动态部分用 0 代入后整体判断（如 `setblock ${x} 69 -20 stone`）
+                if (looksLikeCommand(parts.map(p => ('lit' in p) ? p.lit : '0').join(''))) return;
                 registerPattern(parts);
             }
         });

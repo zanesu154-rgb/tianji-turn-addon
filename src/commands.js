@@ -169,10 +169,20 @@
     // 这些词也是常见英文单词，必须带 / 或后面跟选择器才算命令
     const WEAK_COMMANDS = /^(?:\/(say|tell|msg|w|me|tag|give|clear|kill|fill|function|event|camera|damage|ride|loot|music|fog|hud|time|list|op|kick|schedule|place)\s|(tell|msg|w|tag|give|clear|kill|event|camera|damage|ride|loot)\s+[@"])/;
 
+    // 所有命令名（小写）。后面跟着坐标 / 数字 / 选择器 / 命名空间 ID 时一定是命令
+    const ALL_COMMANDS = /^\/?(execute|title|titleraw|tellraw|say|tell|msg|w|me|scoreboard|tag|give|clear|effect|tp|teleport|summon|kill|function|playsound|particle|setblock|fill|clone|structure|gamemode|gamerule|event|dialogue|camera|camerashake|replaceitem|enchant|xp|weather|time|difficulty|spawnpoint|setworldspawn|inputpermission|ability|music|stopsound|playanimation|damage|ride|loot|schedule|scriptevent|tickingarea|fog|hud|testfor|testforblock|testforblocks|place|spreadplayers|recipe|alwaysday|mobevent|volumearea|transfer|locate|op|deop|kick|list)\s+(.*)$/s;
+    const AMBIGUOUS = /^(say|tell|w|me|tag|give|clear|kill|fill|event|camera|music|damage|ride|loot|time|list|place|op|kick|schedule|function|enchant|weather|difficulty|recipe|transfer|locate|hud|fog|ability|clone|structure|effect)$/;
+    const ARG_TOKEN = /(^|\s)(~|\^|-?\d|@[aeprsvn]\b|[a-z0-9_]+:[a-z0-9_]|"[^"]*"\s|true\b|false\b)/;
+
     function looksLikeCommand(s) {
         if (typeof s !== 'string') return false;
         const t = s.trim();
-        return STRONG_COMMANDS.test(t) || WEAK_COMMANDS.test(t);
+        if (STRONG_COMMANDS.test(t) || WEAK_COMMANDS.test(t)) return true;
+        const m = ALL_COMMANDS.exec(t);
+        if (!m) return false;
+        // 同时是英文单词的命令名：要求第一个参数就像命令参数（避免 "list of items: 3 swords"）
+        if (AMBIGUOUS.test(m[1])) return ARG_TOKEN.test(m[2].split(/\s+/)[0] + ' ');
+        return ARG_TOKEN.test(m[2]);
     }
 
     NS.translateCommand = translateCommand;
