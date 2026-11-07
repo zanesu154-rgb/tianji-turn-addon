@@ -207,7 +207,7 @@
 
     // 常用虚词 + 特征字母，用于区分拉丁字母语言
     const LATIN_LANGS = {
-        en_US: { words: 'the is are was and you your to of with for this it in on not what how there have be can will', chars: '' },
+        en_US: { words: 'the is are was were and you your to of with for this that it its in on not what how there have has be can will as by from an or which when than into through more means same also if so do does just', chars: '' },
         es_ES: { words: 'el la los las es son y de que en un una para con por del al cuando está hay muy pero como estoy cuántos', chars: 'ñ¿¡áíóú' },
         fr_FR: { words: 'le la les est sont et de des que en un une pour avec dans du au vous pas je il elle ce suis combien qui ne mon ma où nous', chars: 'çœèêàùâîôë' },
         de_DE: { words: 'der die das ist sind und zu von mit für ein eine nicht den dem ich du wenn auch auf', chars: 'äöüß' },
@@ -316,7 +316,7 @@
             walk(ast, (n) => {
                 if (n.type !== 'ArrayExpression') return;
                 const objs = n.elements.filter(e => e && e.type === 'ObjectExpression' && !used.has(e));
-                if (objs.length < 2) return;
+                if (!objs.length) return;
                 const cols = new Map();   // 字段 → [文本]
                 for (const o of objs) for (const p of o.properties) {
                     const k = propKey(p);
@@ -327,12 +327,14 @@
                 }
                 const colLang = new Map();
                 for (const [k, texts] of cols) {
-                    if (texts.length < 2) continue;
+                    // 只有一行时要求句子足够长，避免两个短词碰巧像不同语言
+                    if (texts.length < 2 && texts[0].split(/\s+/).length < 5) continue;
+                    // 整列合在一起判断（单句常用词太少时也能认出来），再确认没有多数句子明确属于别的语言
+                    const joint = guessLang(texts.join(' '), 3);
                     const cnt = new Map();
                     texts.forEach(t => { const g = guessLang(t); if (g) cnt.set(g, (cnt.get(g) || 0) + 1); });
-                    const best = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0];
-                    if (best && best[1] >= 2 && best[1] / texts.length >= 0.6) colLang.set(k, best[0]);
-                    else colLang.set(k, null);
+                    const contra = [...cnt].filter(([l]) => l !== joint).reduce((a, [, c]) => a + c, 0);
+                    colLang.set(k, joint && contra <= texts.length * 0.3 ? joint : null);
                 }
                 // 只有一个字段判断不出语言时，用文件名提示（如 dialogue_es.js）
                 const unknown = [...colLang].filter(([, l]) => !l).map(([k]) => k);

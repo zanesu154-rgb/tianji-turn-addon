@@ -207,6 +207,15 @@ function renderCommand(cmd, lang) {
         check('外层按语言分组、里面仍是 s/v：英文不会被当成西语/越南语译文', c4.entries.size === 2 && t && t.get('en_US') === 'Light is visible to the human eye.' && t.get('es_ES').startsWith('La luz') && t.get('vi_VN').startsWith('Ánh sáng'));
     }
     {
+        // 单句常用词很少的英文（逐句判断会失败），且只有两行
+        const c5 = new NS.ExtractContext({});
+        NS.processScript(`const DIALOGUE_DATA = [
+          {"s":"Sound is vibration traveling through matter as pressure waves.","v":"Le son est une vibration qui voyage à travers la matière sous forme d'ondes de pression.","d":false},
+          {"s":"Magnetism is force from moving electric charge.","v":"Le magnétisme est la force générée par une charge électrique en mouvement.","d":false}];`, 'scripts/french.js', c5, {});
+        const t5 = c5.translations.get([...c5.entries.keys()][0]);
+        check('整列判断语言：常用词很少的英文句子也能识别（s→en_US, v→fr_FR）', c5.entries.size === 2 && t5 && t5.get('fr_FR') && t5.get('fr_FR').startsWith('Le son'));
+    }
+    {
         const lf = { mode: 'manual', map: new Map(), fileMaps: [['x_lang.js', new Map([['s', 'en_US'], ['v', 'fr_FR']])]] };
         const c3 = new NS.ExtractContext({});
         NS.processScript('export const D = [{ s: "Hello there friend", v: "Salut l\'ami" }];', 'scripts/x_lang.js', c3, { langFields: lf });
