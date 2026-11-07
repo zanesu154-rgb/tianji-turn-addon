@@ -77,6 +77,46 @@
         return String(v);
     }
 
+
+    // ---------------- 游戏的文本长度限制 ----------------
+    // 成书：每页 256 字符、14 行，整本 50 页；书名 16 字符（基岩版）
+    const BOOK_PAGE_MAX = 256, BOOK_PAGE_LINES = 14, BOOK_MAX_PAGES = 50, BOOK_TITLE_MAX = 16;
+
+    /** 路径是否是成书的某一页 / 书名 */
+    function bookField(path) {
+        const n = path.length;
+        if (n >= 3 && path[n - 1] === 'text' && typeof path[n - 2] === 'number' && path[n - 3] === 'pages') return 'page';
+        if (n >= 2 && path[n - 1] === 'title' && path[n - 2] === 'tag') return 'title';
+        return null;
+    }
+
+    /** 把超长文本切成若干页：每页 ≤256 字符、≤14 行，尽量在换行、句末、空格处断开 */
+    function splitPages(text) {
+        const pages = [];
+        let rest = text;
+        while (rest.length) {
+            let take = Math.min(rest.length, BOOK_PAGE_MAX);
+            let chunk = rest.slice(0, take);
+            const lines = chunk.split('\n');
+            if (lines.length > BOOK_PAGE_LINES) { chunk = lines.slice(0, BOOK_PAGE_LINES).join('\n'); take = chunk.length; }
+            if (take < rest.length) {
+                // 在后半段里找最后一个合适的断点
+                const min = Math.floor(take * 0.5);
+                let cut = -1;
+                for (const re of [/\n/g, /[。！？.!?]\s*/g, /[，,；;、]\s*/g, /\s+/g]) {
+                    let m;
+                    re.lastIndex = 0;
+                    while ((m = re.exec(chunk))) { const end = m.index + m[0].length; if (end >= min && end <= take) cut = end; }
+                    if (cut > 0) break;
+                }
+                if (cut > 0) take = cut;
+            }
+            pages.push(rest.slice(0, take).replace(/\n$/, ''));
+            rest = rest.slice(take);
+        }
+        return pages.length ? pages : [''];
+    }
+
     // ---------------- 自动转换 ----------------
     function rawJson(parts) { return JSON.stringify({ rawtext: parts }); }
     function parseRawJson(s) {
@@ -117,13 +157,35 @@
             // say / tell 等报告补上位置
             for (let i = before; i < ctx.untranslatable.length; i++) ctx.untranslatable[i].ref = `${rec.id}|${JSON.stringify(path)}`;
         };
-        const items = (path) => {
+        // 成书正文 → 翻译键（游戏内实测有效）。存储的 JSON 受每页 256 字符限制，超长时退回为单个键
+        const bookPage = (path, text, keyBase, where) => {
+            if (!text) return;
+            if (parseRawJson(text)) { const ex = parseRawJson(text); if (ctx.processRawMessage(ex, keyBase, meta)) setS(path, JSON.stringify(ex)); return; }
+            // 先估算按行拆分后的 JSON 长度，超出就直接整页一个键（避免分配用不到的键）
+            const nLines = text.split('\n').length;
+            const est = 16 + nLines * (keyBase.length + 26) + (nLines - 1) * 14;
+            const parts = ctx.rawParts(text, keyBase, est > BOOK_PAGE_MAX - 10 ? { ...meta, noSplit: true } : meta);
+            if (!parts) return;
+            let raw = rawJson(parts);
+            if (est > BOOK_PAGE_MAX - 10 && nLines > 1) ctx.warn(`${label}: ${where} 行数较多，整页使用一个翻译键（换行写作 \\n）`);
+            if (raw.length > BOOK_PAGE_MAX) {
+                // 行数太多导致 JSON 过长：整页用一个键（换行在 lang 中写作 \n）
+                const one = ctx.rawParts(text, keyBase, { ...meta, noSplit: true });
+                raw = one ? rawJson(one) : raw;
+                if (raw.length > BOOK_PAGE_MAX) { report(path, where, text, '成书页面过长，无法改为翻译键'); return; }
+                ctx.warn(`${label}: ${where} 行数较多，整页使用一个翻译键（换行写作 \\n）`);
+            }
+            setS(path, raw);
+        };
+        const items = (path, keyBase) => {
             const list = nodeAt(rec, path);
             if (!list || list.t !== T.LIST || list.v.et !== T.COMPOUND) return;
             list.v.items.forEach((it, i) => {
                 const name = getStr(it, 'Name') || '';
                 const tag = child(it, 'tag');
                 if (!tag || tag.t !== T.COMPOUND) return;
+                const slot = child(it, 'Slot');
+                const kb = `${keyBase}.s${slot ? slot.v : i}`;
                 const display = child(tag.v, 'display');
                 if (display && display.t === T.COMPOUND) {
                     const dn = getStr(display.v, 'Name');
@@ -132,12 +194,20 @@
                     if (lore && lore.t === T.LIST && lore.v.et === T.STRING) lore.v.items.forEach((l, j) => l.s && report([...path, i, 'tag', 'display', 'Lore', j], `物品描述（${name}）`, l.s, '物品描述不支持翻译键'));
                 }
                 const title = getStr(tag.v, 'title');
-                if (title) report([...path, i, 'tag', 'title'], '成书标题', title, '成书内容不支持翻译键');
+                if (title) report([...path, i, 'tag', 'title'], '成书标题', title, '成书标题暂不确定是否支持翻译键');
                 const pages = child(tag.v, 'pages');
                 if (pages && pages.t === T.LIST && pages.v.et === T.COMPOUND) {
-                    pages.v.items.forEach((pg, j) => { const t = getStr(pg, 'text'); if (t) report([...path, i, 'tag', 'pages', j, 'text'], `成书第 ${j + 1} 页`, t, '成书内容不支持翻译键'); });
+                    const written = name === 'minecraft:written_book';
+                    pages.v.items.forEach((pg, j) => {
+                        const t = getStr(pg, 'text');
+                        if (!t) return;
+                        const pp = [...path, i, 'tag', 'pages', j, 'text'];
+                        // 书与笔（未签名）玩家还能编辑，改成翻译键会在编辑界面显示代码 → 只记录
+                        if (written) bookPage(pp, t, `${kb}.p${j + 1}`, `成书第 ${j + 1} 页`);
+                        else report(pp, `书与笔第 ${j + 1} 页`, t, '书与笔（未签名）玩家还可编辑，不改为翻译键');
+                    });
                 }
-                items([...path, i, 'tag', 'Items']);   // 潜影盒等嵌套容器
+                items([...path, i, 'tag', 'Items'], kb);   // 潜影盒等嵌套容器
             });
         };
 
@@ -158,14 +228,21 @@
             }
             if (id === 'CommandBlock') cmd(P('Command'), `${kp}.command.${pos}`);
             const cn = getStr(c, 'CustomName');
-            if (cn && id !== 'CommandBlock') report(P('CustomName'), '方块名称', cn, '容器/方块的自定义名称不支持翻译键');
-            items(P('Items'));
+            if (cn && id === 'CommandBlock') report(P('CustomName'), '命令方块名称', cn, '命令方块名称（say 等命令输出时显示的发送者名）不支持翻译键');
+            else if (cn) report(P('CustomName'), '方块名称', cn, '容器/方块的自定义名称不支持翻译键');
+            items(P('Items'), `${kp}.book.${pos}`);
             if (child(c, 'book')) {
                 // 讲台上的书：book 是单个物品
                 const bk = child(c, 'book');
                 const pages = bk.t === T.COMPOUND && child(bk.v, 'tag') && child(child(bk.v, 'tag').v, 'pages');
                 if (pages && pages.t === T.LIST && pages.v.et === T.COMPOUND) {
-                    pages.v.items.forEach((pg, j) => { const t = getStr(pg, 'text'); if (t) report(P('book', 'tag', 'pages', j, 'text'), `讲台书第 ${j + 1} 页`, t, '成书内容不支持翻译键'); });
+                    const written = getStr(bk.v, 'Name') !== 'minecraft:writable_book';
+                    pages.v.items.forEach((pg, j) => {
+                        const t = getStr(pg, 'text');
+                        if (!t) return;
+                        if (written) bookPage(P('book', 'tag', 'pages', j, 'text'), t, `${kp}.book.${pos}.lectern.p${j + 1}`, `讲台书第 ${j + 1} 页`);
+                        else report(P('book', 'tag', 'pages', j, 'text'), `讲台书与笔第 ${j + 1} 页`, t, '书与笔（未签名）玩家还可编辑，不改为翻译键');
+                    });
                 }
             }
         } else if (kind === 'actor') {
@@ -207,8 +284,9 @@
             }
             if (getStr(c, 'Command')) cmd(P('Command'), `${kp}.command.${idPart}`);   // 命令方块矿车
             const cn = getStr(c, 'CustomName');
-            if (cn && ident !== 'minecraft:npc') report(P('CustomName'), '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
-            for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory', 'EnderChestInventory', 'PlayerUIItems']) items(P(f));
+            if (cn && ident !== 'minecraft:npc') report(P('CustomName'), ident === 'minecraft:command_block_minecart' ? '命令方块名称' : '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
+            const who = rec.kind === 'player' ? 'player' : idPart;
+            for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory', 'EnderChestInventory', 'PlayerUIItems']) items(P(f), `${kp}.book.${who}.${f.toLowerCase()}`);
         }
         return changed;
     }
@@ -311,11 +389,53 @@
                 const r = this.resolve(ref);
                 if (!r) throw new Error('找不到该位置');
                 if (!(r.node.t === T.STRING || NUM_TYPES.has(r.node.t))) throw new Error('该类型不能直接编辑');
-                if (displayValue(r.node.t, r.node.v) === String(text)) return text;
-                r.node.set(parseValue(r.node.t, String(text)));
+                text = String(text);
+                if (displayValue(r.node.t, r.node.v) === text) return text;
+                const field = bookField(r.path);
+                this.notice = '';
+                if (field === 'title' && text.length > BOOK_TITLE_MAX) this.notice = `书名超过 ${BOOK_TITLE_MAX} 个字符，游戏里可能显示不全`;
+                if (field === 'page' && (text.length > BOOK_PAGE_MAX || text.split('\n').length > BOOK_PAGE_LINES)) {
+                    // 超长：自动分页，在当前页之后插入新页
+                    const pagesPath = r.path.slice(0, -2);
+                    const idx = r.path[r.path.length - 2];
+                    const list = nodeAt(r.rec, pagesPath).v;
+                    const chunks = splitPages(text);
+                    if (list.items.length - 1 + chunks.length > BOOK_MAX_PAGES) throw new Error(`分页后超过 ${BOOK_MAX_PAGES} 页上限，请精简内容`);
+                    const template = list.items[idx];
+                    const extra = chunks.slice(1).map(c => template.map(e => e.n === 'text' ? { ...e, v: new NBT.NbtString(c, null) } : e));
+                    list.items.splice(idx + 1, 0, ...extra);
+                    nodeAt(r.rec, r.path).set(new NBT.NbtString(chunks[0], null));
+                    // 后面各页的位置都后移了：更新所有引用
+                    const prefix = `${r.rec.id}|${JSON.stringify(pagesPath).slice(0, -1)},`;
+                    for (const u of this.ctx.untranslatable) {
+                        if (!u.ref || !u.ref.startsWith(prefix)) continue;
+                        const p = JSON.parse(u.ref.slice(u.ref.indexOf('|') + 1));
+                        if (p[pagesPath.length] > idx) { p[pagesPath.length] += extra.length; u.ref = `${r.rec.id}|${JSON.stringify(p)}`; }
+                    }
+                    // 新页也列入需人工翻译，方便继续修改
+                    const at = this.ctx.untranslatable.findIndex(u => u.ref === ref);
+                    const base = at >= 0 ? this.ctx.untranslatable[at] : { file: r.rec.label, where: '成书', reason: '成书内容不支持翻译键' };
+                    const added = extra.map((_, k) => {
+                        const p = [...pagesPath, idx + 1 + k, 'text'];
+                        return { file: base.file, where: `成书第 ${idx + 2 + k} 页（自动分页）`, text: chunks[k + 1], reason: base.reason, ref: `${r.rec.id}|${JSON.stringify(p)}` };
+                    });
+                    this.ctx.untranslatable.splice(at >= 0 ? at + 1 : this.ctx.untranslatable.length, 0, ...added);
+                    this.notice = `超过每页 ${BOOK_PAGE_MAX} 字符 / ${BOOK_PAGE_LINES} 行的限制，已自动分成 ${chunks.length} 页`;
+                    this.structureChanged = true;
+                    r.rec.dirty = true;
+                    this.edits++;
+                    return chunks[0];
+                }
+                r.node.set(parseValue(r.node.t, text));
                 r.rec.dirty = true;
                 this.edits++;
                 return displayValue(r.node.t, nodeAt(r.rec, r.path).v);
+            },
+            /** 该位置的长度限制（编辑器显示计数用） */
+            limitOf(ref) {
+                const i = ref.indexOf('|');
+                const f = bookField(JSON.parse(ref.slice(i + 1)));
+                return f === 'page' ? { max: BOOK_PAGE_MAX, lines: BOOK_PAGE_LINES, auto: true } : f === 'title' ? { max: BOOK_TITLE_MAX } : null;
             },
             /** 搜索键名或内容（字符串/数字），返回 [{ ref, rec, pathText, type, value }] */
             search(query, limit = 300) {
@@ -596,4 +716,5 @@
     NS.worldRootLabel = rootLabel;
     NS.worldDisplayValue = displayValue;
     NS.worldParseCsv = parseCsv;
+    NS.worldSplitPages = splitPages;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
