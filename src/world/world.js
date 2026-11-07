@@ -1,137 +1,178 @@
 /* ================================================================
- *  world/world.js —— 世界存档（.mcworld / .mctemplate）文本提取
+ *  world/world.js —— 世界存档（.mcworld / .mctemplate）文本提取与编辑
  *
  *  可翻译（改成翻译键）：
  *    告示牌 / 悬挂告示牌 正反面   Text → {"rawtext":[{"translate":…}]}
  *    命令方块 / 命令方块矿车      title / titleraw / tellraw
  *    NPC                         名字 RawtextName、正文 InterativeText、按钮名、按钮命令
- *  只能记录（游戏按纯文本显示）：
+ *  只能记录（游戏按纯文本显示，可在 NBT 编辑器里手动改）：
  *    say / tell 命令、容器名、物品名、物品描述、成书、实体名字标签
  *
- *  写回：只在 db 当前日志末尾追加修改（见 leveldb.js），并在存档里新建一个资源包存放翻译。
+ *  流程分两步：
+ *    openWorld()   读取存档 → 自动转换（只改内存）→ 返回会话，可继续手动编辑
+ *    session.build() 把所有改动写回：db 当前日志末尾追加一条记录 + level.dat + 新资源包
+ *
+ *  每条记录 rec = { id, kind: 'block'|'actor'|'level', key, label, tags, dirty }
+ *  NBT 位置 path = [根标签序号, 子名字 | 列表下标, …]，引用 ref = `${rec.id}|${JSON.stringify(path)}`
  * ================================================================ */
 (function (root) {
     'use strict';
     const NS = root.AddonI18n;
     const { NBT, LevelDB } = NS;
-    const { T, child, getStr, setStr } = NBT;
+    const { T, child, getStr } = NBT;
 
     const isChunkTag = (k, tag) => (k.length === 9 || k.length === 13) && k[k.length - 1] === tag;
     const isActorKey = (k) => k.length >= 11 && String.fromCharCode(...k.subarray(0, 11)) === 'actorprefix';
+    const wantKey = (k) => isChunkTag(k, 49) || isChunkTag(k, 50) || isActorKey(k);
 
-    function rawJson(parts) {
-        return JSON.stringify({ rawtext: parts });
+    // ---------------- NBT 路径 ----------------
+    /** 按路径取节点：返回 { t, v, set(v) } */
+    function nodeAt(rec, path) {
+        let entry = rec.tags[path[0]];
+        if (!entry) return null;
+        let setter = (v) => { entry.v = v; };
+        for (let i = 1; i < path.length; i++) {
+            const seg = path[i];
+            if (entry.t === T.COMPOUND) {
+                const c = entry.v.find(x => x.n === seg);
+                if (!c) return null;
+                entry = c;
+                setter = (v) => { c.v = v; };
+            } else if (entry.t === T.LIST) {
+                const list = entry.v;
+                if (typeof seg !== 'number' || seg >= list.items.length) return null;
+                const idx = seg;
+                entry = { t: list.et, v: list.items[idx] };
+                setter = (v) => { list.items[idx] = v; };
+            } else return null;
+        }
+        return { t: entry.t, v: entry.v, set: setter };
     }
 
-    /** 已经是 {"rawtext":…} JSON 的字符串 */
+    const NUM_TYPES = new Set([T.BYTE, T.SHORT, T.INT, T.LONG, T.FLOAT, T.DOUBLE]);
+    const LIMITS = { [T.BYTE]: [-128, 127], [T.SHORT]: [-32768, 32767], [T.INT]: [-2147483648, 2147483647] };
+
+    /** 把编辑框里的文字转换成该类型的值；不合法抛错 */
+    function parseValue(t, text) {
+        if (t === T.STRING) return new NBT.NbtString(String(text), null);
+        if (t === T.LONG) { if (!/^-?\d+$/.test(text.trim())) throw new Error('需要整数'); return BigInt(text.trim()); }
+        if (t === T.FLOAT || t === T.DOUBLE) { const n = Number(text); if (!Number.isFinite(n)) throw new Error('需要数字'); return n; }
+        if (LIMITS[t]) {
+            if (!/^-?\d+$/.test(text.trim())) throw new Error('需要整数');
+            const n = Number(text); const [lo, hi] = LIMITS[t];
+            if (n < lo || n > hi) throw new Error(`范围 ${lo} ~ ${hi}`);
+            return n;
+        }
+        throw new Error('该类型不能直接编辑');
+    }
+
+    function displayValue(t, v) {
+        if (t === T.STRING) return v.s;
+        if (t === T.LONG) return v.toString();
+        return String(v);
+    }
+
+    // ---------------- 自动转换 ----------------
+    function rawJson(parts) { return JSON.stringify({ rawtext: parts }); }
     function parseRawJson(s) {
         if (typeof s !== 'string' || !/^\s*\{\s*"rawtext"/.test(s)) return null;
         try { return JSON.parse(s); } catch (e) { return null; }
     }
-
-    /** 把一段文字转成 rawtext JSON 字符串；不需要翻译返回 null */
     function textToRaw(ctx, text, baseKey, meta) {
         const existing = parseRawJson(text);
         if (existing) return ctx.processRawMessage(existing, baseKey, meta) ? JSON.stringify(existing) : null;
         const parts = ctx.rawParts(text, baseKey, meta);
         return parts ? rawJson(parts) : null;
     }
-
     function posOf(c) {
         const x = child(c, 'x'), y = child(c, 'y'), z = child(c, 'z');
         return x && y && z ? `${x.v}_${y.v}_${z.v}` : 'unknown';
     }
 
-    /** 物品 / 容器里玩家可见但不能翻译的文字 → 报告 */
-    function reportItems(ctx, items, where) {
-        if (!items || items.t !== T.LIST || items.v.et !== T.COMPOUND) return;
-        for (const it of items.v.items) {
-            const name = getStr(it, 'Name') || '';
-            const tag = child(it, 'tag');
-            if (!tag || tag.t !== T.COMPOUND) continue;
-            const display = child(tag.v, 'display');
-            if (display && display.t === T.COMPOUND) {
-                const dn = getStr(display.v, 'Name');
-                if (dn) ctx.report(where, `物品名（${name}）`, dn, '物品自定义名称不支持翻译键');
-                const lore = child(display.v, 'Lore');
-                if (lore && lore.t === T.LIST) lore.v.items.forEach(l => l && l.s && ctx.report(where, `物品描述（${name}）`, l.s, '物品描述不支持翻译键'));
-            }
-            const title = getStr(tag.v, 'title');
-            if (title) ctx.report(where, '成书标题', title, '成书内容不支持翻译键');
-            const pages = child(tag.v, 'pages');
-            if (pages && pages.t === T.LIST && pages.v.et === T.COMPOUND) {
-                pages.v.items.forEach((pg, i) => { const t = getStr(pg, 'text'); if (t) ctx.report(where, `成书第 ${i + 1} 页`, t, '成书内容不支持翻译键'); });
-            }
-            // 潜影盒等嵌套容器
-            reportItems(ctx, child(tag.v, 'Items'), where);
-        }
-    }
-
-    // ---------------- 方块实体 ----------------
-    function processBlockEntity(ctx, c, where) {
-        const id = getStr(c, 'id') || '';
-        const pos = posOf(c);
+    /** 处理一条记录里的一个根复合标签 */
+    function convertCompound(ctx, rec, ri) {
+        const c = rec.tags[ri].v;
         let changed = false;
-        const meta = { file: `${where} ${id}@${pos}`, kind: 'world', scope: 'world', mode: 'display' };
+        const P = (...segs) => [ri, ...segs];
+        const setS = (path, s) => { nodeAt(rec, path).set(new NBT.NbtString(s, null)); changed = true; };
+        const report = (path, where, text, reason) => {
+            ctx.untranslatable.push({ file: label, where, text, reason, ref: `${rec.id}|${JSON.stringify(path)}` });
+        };
+        const label = rootLabel(rec, ri);
+        const meta = { file: label, kind: 'world', scope: 'world', mode: 'display' };
+        const cmd = (path, baseKey) => {
+            const s = getStr(nodeAt(rec, path.slice(0, -1)).v, path[path.length - 1]);
+            if (!s) return;
+            const before = ctx.untranslatable.length;
+            const r = NS.translateCommand(s, ctx, baseKey, label);
+            if (r.changed) setS(path, r.cmd);
+            // say / tell 等报告补上位置
+            for (let i = before; i < ctx.untranslatable.length; i++) ctx.untranslatable[i].ref = `${rec.id}|${JSON.stringify(path)}`;
+        };
+        const items = (path) => {
+            const list = nodeAt(rec, path);
+            if (!list || list.t !== T.LIST || list.v.et !== T.COMPOUND) return;
+            list.v.items.forEach((it, i) => {
+                const name = getStr(it, 'Name') || '';
+                const tag = child(it, 'tag');
+                if (!tag || tag.t !== T.COMPOUND) return;
+                const display = child(tag.v, 'display');
+                if (display && display.t === T.COMPOUND) {
+                    const dn = getStr(display.v, 'Name');
+                    if (dn) report([...path, i, 'tag', 'display', 'Name'], `物品名（${name}）`, dn, '物品自定义名称不支持翻译键');
+                    const lore = child(display.v, 'Lore');
+                    if (lore && lore.t === T.LIST && lore.v.et === T.STRING) lore.v.items.forEach((l, j) => l.s && report([...path, i, 'tag', 'display', 'Lore', j], `物品描述（${name}）`, l.s, '物品描述不支持翻译键'));
+                }
+                const title = getStr(tag.v, 'title');
+                if (title) report([...path, i, 'tag', 'title'], '成书标题', title, '成书内容不支持翻译键');
+                const pages = child(tag.v, 'pages');
+                if (pages && pages.t === T.LIST && pages.v.et === T.COMPOUND) {
+                    pages.v.items.forEach((pg, j) => { const t = getStr(pg, 'text'); if (t) report([...path, i, 'tag', 'pages', j, 'text'], `成书第 ${j + 1} 页`, t, '成书内容不支持翻译键'); });
+                }
+                items([...path, i, 'tag', 'Items']);   // 潜影盒等嵌套容器
+            });
+        };
 
-        if (id === 'Sign' || id === 'HangingSign') {
-            for (const side of ['FrontText', 'BackText']) {
-                const st = child(c, side);
-                if (!st || st.t !== T.COMPOUND) continue;
-                const text = getStr(st.v, 'Text');
-                if (!text) continue;
-                const raw = textToRaw(ctx, text, `world.sign.${pos}.${side === 'FrontText' ? 'front' : 'back'}`, meta);
-                if (raw) { setStr(st.v, 'Text', raw); changed = true; }
+        if (rec.kind === 'block') {
+            const id = getStr(c, 'id') || '';
+            const pos = posOf(c);
+            if (id === 'Sign' || id === 'HangingSign') {
+                for (const side of ['FrontText', 'BackText']) {
+                    const st = child(c, side);
+                    if (!st || st.t !== T.COMPOUND) continue;
+                    const text = getStr(st.v, 'Text');
+                    if (!text) continue;
+                    const raw = textToRaw(ctx, text, `world.sign.${pos}.${side === 'FrontText' ? 'front' : 'back'}`, meta);
+                    if (raw) setS(P(side, 'Text'), raw);
+                }
+                const old = getStr(c, 'Text');   // 1.20 之前的旧格式
+                if (old) { const raw = textToRaw(ctx, old, `world.sign.${pos}`, meta); if (raw) setS(P('Text'), raw); }
             }
-            // 1.20 之前的旧格式：Text 直接在根上
-            const old = getStr(c, 'Text');
-            if (old) {
-                const raw = textToRaw(ctx, old, `world.sign.${pos}`, meta);
-                if (raw) { setStr(c, 'Text', raw); changed = true; }
+            if (id === 'CommandBlock') cmd(P('Command'), `world.command.${pos}`);
+            const cn = getStr(c, 'CustomName');
+            if (cn && id !== 'CommandBlock') report(P('CustomName'), '方块名称', cn, '容器/方块的自定义名称不支持翻译键');
+            items(P('Items'));
+            if (child(c, 'book')) {
+                // 讲台上的书：book 是单个物品
+                const bk = child(c, 'book');
+                const pages = bk.t === T.COMPOUND && child(bk.v, 'tag') && child(child(bk.v, 'tag').v, 'pages');
+                if (pages && pages.t === T.LIST && pages.v.et === T.COMPOUND) {
+                    pages.v.items.forEach((pg, j) => { const t = getStr(pg, 'text'); if (t) report(P('book', 'tag', 'pages', j, 'text'), `讲台书第 ${j + 1} 页`, t, '成书内容不支持翻译键'); });
+                }
             }
-        }
-
-        if (id === 'CommandBlock') {
-            const cmd = getStr(c, 'Command');
-            if (cmd) {
-                const r = NS.translateCommand(cmd, ctx, `world.command.${pos}`, meta.file);
-                if (r.changed) { setStr(c, 'Command', r.cmd); changed = true; }
-            }
-        }
-
-        const cn = getStr(c, 'CustomName');
-        if (cn && id !== 'CommandBlock') ctx.report(meta.file, '方块名称', cn, '容器/方块的自定义名称不支持翻译键');
-        reportItems(ctx, child(c, 'Items'), meta.file);
-        // 讲台上的书
-        const book = child(c, 'book');
-        if (book && book.t === T.COMPOUND) reportItems(ctx, { t: T.LIST, v: { et: T.COMPOUND, items: [book.v] } }, meta.file);
-        return changed;
-    }
-
-    // ---------------- 实体 ----------------
-    function processActor(ctx, c, where) {
-        const ident = getStr(c, 'identifier') || '';
-        const uid = child(c, 'UniqueID');
-        const idPart = uid ? String(uid.v).replace('-', 'n') : 'x';
-        const meta = { file: `${where} ${ident}#${idPart}`, kind: 'world', scope: 'world', mode: 'display' };
-        let changed = false;
-
-        if (ident === 'minecraft:npc') {
-            const base = `world.npc.${idPart}`;
-            const name = getStr(c, 'RawtextName');
-            if (name) {
-                const raw = textToRaw(ctx, name, `${base}.name`, meta);
-                if (raw) { setStr(c, 'RawtextName', raw); changed = true; }
-            }
-            const text = getStr(c, 'InterativeText');
-            if (text) {
-                const raw = textToRaw(ctx, text, `${base}.text`, meta);
-                if (raw) { setStr(c, 'InterativeText', raw); changed = true; }
-            }
-            const actionsStr = getStr(c, 'Actions');
-            if (actionsStr) {
-                let actions;
-                try { actions = JSON.parse(actionsStr); } catch (e) { actions = null; }
+        } else if (rec.kind === 'actor') {
+            const ident = getStr(c, 'identifier') || '';
+            const uid = child(c, 'UniqueID');
+            const idPart = uid ? String(uid.v).replace('-', 'n') : 'x';
+            if (ident === 'minecraft:npc') {
+                const base = `world.npc.${idPart}`;
+                const name = getStr(c, 'RawtextName');
+                if (name) { const raw = textToRaw(ctx, name, `${base}.name`, meta); if (raw) setS(P('RawtextName'), raw); }
+                const text = getStr(c, 'InterativeText');
+                if (text) { const raw = textToRaw(ctx, text, `${base}.text`, meta); if (raw) setS(P('InterativeText'), raw); }
+                const actionsStr = getStr(c, 'Actions');
+                let actions = null;
+                try { actions = actionsStr ? JSON.parse(actionsStr) : null; } catch (e) { actions = null; }
                 if (Array.isArray(actions)) {
                     let ach = false;
                     actions.forEach((a, i) => {
@@ -142,44 +183,47 @@
                         }
                         if (Array.isArray(a.data)) {
                             const lines = [];
+                            let lch = false;
                             a.data.forEach(d => {
                                 if (d && typeof d.cmd_line === 'string') {
-                                    const r = NS.translateCommand(d.cmd_line, ctx, `${base}.message`, meta.file);
-                                    if (r.changed) { d.cmd_line = r.cmd; ach = true; }
+                                    const r = NS.translateCommand(d.cmd_line, ctx, `${base}.message`, label);
+                                    if (r.changed) { d.cmd_line = r.cmd; lch = true; ach = true; }
                                     lines.push(d.cmd_line);
                                 }
                             });
-                            // "text" 是编辑界面里显示的命令文本，与 cmd_line 保持一致
-                            if (ach && typeof a.text === 'string' && lines.length) a.text = lines.join('\n') + '\n';
+                            if (lch && typeof a.text === 'string' && lines.length) a.text = lines.join('\n') + '\n';
                         }
                     });
-                    if (ach) {
-                        // 保持游戏的 JSON 风格（3 空格缩进、" : "）
-                        setStr(c, 'Actions', JSON.stringify(actions, null, 3).replace(/": /g, '" : ') + '\n');
-                        changed = true;
-                    }
+                    if (ach) setS(P('Actions'), JSON.stringify(actions, null, 3).replace(/": /g, '" : ') + '\n');
                 }
             }
+            if (getStr(c, 'Command')) cmd(P('Command'), `world.command.${idPart}`);   // 命令方块矿车
+            const cn = getStr(c, 'CustomName');
+            if (cn && ident !== 'minecraft:npc') report(P('CustomName'), '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
+            for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory']) items(P(f));
         }
-
-        // 命令方块矿车
-        const cmd = getStr(c, 'Command');
-        if (cmd) {
-            const r = NS.translateCommand(cmd, ctx, `world.command.${idPart}`, meta.file);
-            if (r.changed) { setStr(c, 'Command', r.cmd); changed = true; }
-        }
-
-        const cn = getStr(c, 'CustomName');
-        if (cn && ident !== 'minecraft:npc') ctx.report(meta.file, '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
-        for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory']) reportItems(ctx, child(c, f), meta.file);
         return changed;
     }
 
-    // ---------------- 主流程 ----------------
-    /**
-     * fs 接口同 pipeline.js；另需 readBytes(path) → Promise<Uint8Array>、writeBytes(path, u8)
-     */
-    async function runWorldPipeline(fs, userOptions = {}, log = () => {}) {
+    /** 一条记录里第 ri 个根标签的名称（一个区块的方块实体存在同一条记录里） */
+    function rootLabel(rec, ri) {
+        const c = rec.tags[ri] && rec.tags[ri].v;
+        if (rec.kind === 'level') return 'level.dat（世界设置）';
+        if (!Array.isArray(c)) return rec.kind;
+        if (rec.kind === 'block') {
+            const id = getStr(c, 'id') || '?';
+            const x = child(c, 'x'), y = child(c, 'y'), z = child(c, 'z');
+            return `${id} @ ${x ? x.v : '?'}, ${y ? y.v : '?'}, ${z ? z.v : '?'}`;
+        }
+        const ident = (getStr(c, 'identifier') || '?').replace(/^minecraft:/, '');
+        const name = getStr(c, 'CustomName');
+        const pos = child(c, 'Pos');
+        const p = pos && pos.t === T.LIST ? pos.v.items.map(n => Math.round(n)).join(', ') : '';
+        return `${ident}${name ? ` “${name}”` : ''}${p ? ` @ ${p}` : ''}`;
+    }
+
+    // ---------------- 打开存档 ----------------
+    async function openWorld(fs, userOptions = {}, log = () => {}) {
         const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: true, baseName: 'world', ...userOptions };
         const all = fs.list();
         const levelDat = all.filter(p => /(^|\/)level\.dat$/.test(p)).sort((a, b) => a.length - b.length)[0];
@@ -194,45 +238,196 @@
         if (all.includes(rootDir + 'levelname.txt')) levelName = (await fs.readText(rootDir + 'levelname.txt')).trim() || levelName;
         log(`[存档] ${levelName}  db 文件 ${dbFiles.size} 个`);
 
-        const db = await LevelDB.openDb(dbFiles, (k) => isChunkTag(k, 49) || isChunkTag(k, 50) || isActorKey(k));
+        const db = await LevelDB.openDb(dbFiles, wantKey);
         log(`[数据库] 有效数据表 ${db.info.tables} 个，当前日志 ${db.info.currentLog || '无'}，最新序列号 ${db.info.lastSeq}`);
 
-        const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines });
-        const puts = [];
-        let nBE = 0, nActor = 0, nChanged = 0;
+        const records = [];
+        // level.dat：8 字节头（版本、长度）+ NBT
+        const ldBytes = await fs.readBytes(levelDat);
+        try {
+            const tags = NBT.readAll(ldBytes.subarray(8));
+            const rec = { id: 0, kind: 'level', key: null, tags, dirty: false, header: new DataView(ldBytes.buffer, ldBytes.byteOffset).getInt32(0, true) };
+            rec.label = rootLabel(rec, 0);
+            records.push(rec);
+        } catch (e) { log(`[跳过] level.dat 无法解析：${e.message}`, 'warn'); }
+
         for (const e of db.entries()) {
-            const isBE = isChunkTag(e.key, 49);
-            const isEntityList = isChunkTag(e.key, 50);
             let tags;
             try { tags = NBT.readAll(e.value); } catch (err) { log(`[跳过] 无法解析的记录：${err.message}`, 'warn'); continue; }
-            let changed = false;
-            for (const tg of tags) {
-                if (tg.t !== T.COMPOUND) continue;
-                if (isBE) { nBE++; if (processBlockEntity(ctx, tg.v, '方块实体')) changed = true; }
-                else { nActor++; if (processActor(ctx, tg.v, isEntityList ? '实体(旧)' : '实体')) changed = true; }
-            }
-            if (changed) {
-                puts.push({ key: e.key, value: NBT.writeAll(tags) });
-                nChanged++;
-            }
+            if (!tags.length) continue;
+            const rec = { id: records.length, kind: isChunkTag(e.key, 49) ? 'block' : 'actor', key: e.key, tags, dirty: false };
+            rec.label = rootLabel(rec, 0);
+            records.push(rec);
         }
-        log(`扫描方块实体 ${nBE} 个、实体 ${nActor} 个；修改记录 ${nChanged} 条，提取文本 ${ctx.entries.size} 条`);
 
-        // ---- 写回数据库 ----
+        const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines });
+        let nBE = 0, nActor = 0;
+        for (const rec of records) {
+            if (rec.kind === 'level') continue;
+            rec.tags.forEach((tg, ri) => {
+                if (tg.t !== T.COMPOUND) return;
+                rec.kind === 'block' ? nBE++ : nActor++;
+                if (convertCompound(ctx, rec, ri)) rec.dirty = true;
+            });
+        }
+        const auto = records.filter(r => r.dirty).length;
+        log(`扫描方块实体 ${nBE} 个、实体 ${nActor} 个；自动转换 ${auto} 条记录，提取文本 ${ctx.entries.size} 条，需人工处理 ${ctx.untranslatable.length} 处`);
+
+        // 原始 world_resource_packs.json（多次生成时都基于原文件，避免重复登记）
+        const wrpPath = rootDir + 'world_resource_packs.json';
+        let wrpOriginal = [];
+        if (all.includes(wrpPath)) { const d = NS.parseJsonLenient(await fs.readText(wrpPath)); if (Array.isArray(d)) wrpOriginal = d; }
+        const byId = (id) => records[id];
+        const session = {
+            records, ctx, levelName, rootDir, levelDatPath: levelDat, opt, wrpOriginal,
+            edits: 0,
+            /** 解析引用 "记录号|[路径]" */
+            resolve(ref) {
+                const i = ref.indexOf('|');
+                const rec = byId(Number(ref.slice(0, i)));
+                if (!rec) return null;
+                const path = JSON.parse(ref.slice(i + 1));
+                const node = nodeAt(rec, path);
+                return node ? { rec, path, node } : null;
+            },
+            getText(ref) { const r = this.resolve(ref); return r ? displayValue(r.node.t, r.node.v) : null; },
+            /** 修改一个值；返回新值显示文本。类型不对抛错 */
+            setValue(ref, text) {
+                const r = this.resolve(ref);
+                if (!r) throw new Error('找不到该位置');
+                if (!(r.node.t === T.STRING || NUM_TYPES.has(r.node.t))) throw new Error('该类型不能直接编辑');
+                if (displayValue(r.node.t, r.node.v) === String(text)) return text;
+                r.node.set(parseValue(r.node.t, String(text)));
+                r.rec.dirty = true;
+                this.edits++;
+                return displayValue(r.node.t, nodeAt(r.rec, r.path).v);
+            },
+            /** 搜索键名或内容（字符串/数字），返回 [{ ref, rec, pathText, type, value }] */
+            search(query, limit = 300) {
+                const q = String(query || '').trim().toLowerCase();
+                const out = [];
+                if (!q) return out;
+                for (const rec of records) {
+                    const visit = (t, v, path, name) => {
+                        if (out.length >= limit) return;
+                        if (t === T.COMPOUND) { v.forEach(c => visit(c.t, c.v, [...path, c.n], c.n)); return; }
+                        if (t === T.LIST) { v.items.forEach((x, i) => visit(v.et, x, [...path, i], `[${i}]`)); return; }
+                        if (t !== T.STRING && !NUM_TYPES.has(t)) return;
+                        const val = displayValue(t, v);
+                        if (String(name).toLowerCase().includes(q) || val.toLowerCase().includes(q)) {
+                            out.push({ ref: `${rec.id}|${JSON.stringify(path)}`, rec, label: rootLabel(rec, path[0]), pathText: pathText(rec, path), type: t, value: val });
+                        }
+                    };
+                    rec.tags.forEach((tg, ri) => visit(tg.t, tg.v, [ri], tg.n));
+                    if (out.length >= limit) break;
+                }
+                return out;
+            },
+            /** 导入翻译表（untranslatable.csv 填好 translation 列）；返回 { applied, skipped } */
+            importCsv(text) {
+                const rows = parseCsv(text.replace(/^﻿/, ''));
+                const head = rows.shift() || [];
+                const iRef = head.indexOf('ref'), iTr = head.indexOf('translation'), iText = head.indexOf('text');
+                if (iRef < 0 || iTr < 0) throw new Error('表格缺少 ref 或 translation 列');
+                let applied = 0, skipped = 0;
+                for (const r of rows) {
+                    const ref = r[iRef], tr = r[iTr];
+                    if (!ref || tr == null || tr === '') { skipped++; continue; }
+                    const cur = this.getText(ref);
+                    if (cur == null) { skipped++; continue; }
+                    // 原文已被改动过（与表中不一致）时仍以表为准，但记录下来
+                    try { this.setValue(ref, tr); applied++; } catch (e) { skipped++; }
+                    void iText;
+                }
+                return { applied, skipped };
+            },
+            /** 写出：db 日志、level.dat、资源包、翻译表 */
+            async build(outFs, buildLog = log) {
+                return buildWorld(this, outFs, dbFiles, db, buildLog);
+            },
+            workbook() { return makeWorkbook(this); },
+        };
+        return session;
+    }
+
+    function pathText(rec, path) {
+        return path.slice(1).map(s => typeof s === 'number' ? `[${s}]` : `.${s}`).join('').replace(/^\./, '');
+    }
+
+    function parseCsv(text) {
+        const rows = [];
+        let row = [], cell = '', q = false;
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+            if (q) {
+                if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+                else cell += ch;
+            } else if (ch === '"') q = true;
+            else if (ch === ',') { row.push(cell); cell = ''; }
+            else if (ch === '\n' || ch === '\r') {
+                if (ch === '\r' && text[i + 1] === '\n') i++;
+                row.push(cell); rows.push(row); row = []; cell = '';
+            } else cell += ch;
+        }
+        if (cell || row.length) { row.push(cell); rows.push(row); }
+        return rows.filter(r => r.some(c => c !== ''));
+    }
+
+    function csvText(rows) {
+        return '﻿' + rows.map(r => r.map(x => { const t = String(x == null ? '' : x); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; }).join(',')).join('\r\n');
+    }
+
+    function detectLang(session) {
+        const values = [...session.ctx.entries.values()].map(e => e.value);
+        return session.opt.sourceLang === 'auto' ? NS.detectSourceLang(values) : session.opt.sourceLang;
+    }
+
+    function makeWorkbook(session) {
+        const { ctx } = session;
+        const sourceLang = detectLang(session);
+        return {
+            'strings.csv': csvText([['key', 'source_text', 'location', 'type'], ...[...ctx.entries].map(([k, e]) => [k, e.value, e.file, e.kind])]),
+            // 填写 translation 列后可在网页里“导入翻译表”批量写回
+            'untranslatable.csv': csvText([['ref', 'location', 'where', 'text', 'reason', 'translation'],
+                ...ctx.untranslatable.map(u => [u.ref || '', u.file, u.where, u.text, u.reason, ''])]),
+            [`source_${sourceLang}.lang`]: [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n') + '\n',
+        };
+    }
+
+    async function buildWorld(session, fs, dbFiles, db, log) {
+        const { ctx, records, rootDir, levelName, opt } = session;
+        const dbDir = rootDir + 'db/';
+
+        // ---- 数据库 ----
+        const puts = records.filter(r => r.dirty && r.kind !== 'level').map(r => ({ key: r.key, value: NBT.writeAll(r.tags) }));
         if (puts.length) {
             const r = LevelDB.appendPuts(dbFiles, db, puts);
-            fs.writeBytes(dbDir + r.name, r.bytes);
-            // 自检：重新打开，确认每条修改都能读回
             const check = new Map(dbFiles); check.set(r.name, r.bytes);
-            const db2 = await LevelDB.openDb(check, (k) => isChunkTag(k, 49) || isChunkTag(k, 50) || isActorKey(k));
+            const db2 = await LevelDB.openDb(check, wantKey);
             const bad = puts.filter(pu => { const v = db2.get(pu.key); return !v || v.length !== pu.value.length || v.some((x, i) => x !== pu.value[i]); });
             if (bad.length) throw new Error(`写回自检失败（${bad.length} 条），已中止，未生成文件`);
-            log(`[写回] 追加到 db/${r.name}，并已重新读取校验 ${puts.length} 条`);
+            fs.writeBytes(dbDir + r.name, r.bytes);
+            log(`[写回] 追加到 db/${r.name}，已重新读取校验 ${puts.length} 条`);
+        }
+
+        // ---- level.dat ----
+        const lv = records.find(r => r.kind === 'level');
+        if (lv && lv.dirty) {
+            const body = NBT.writeAll(lv.tags);
+            const out = new Uint8Array(8 + body.length);
+            const dv = new DataView(out.buffer);
+            dv.setInt32(0, lv.header, true);
+            dv.setInt32(4, body.length, true);
+            out.set(body, 8);
+            fs.writeBytes(session.levelDatPath, out);
+            // 世界列表显示的名字来自 levelname.txt
+            const ln = getStr(lv.tags[0].v, 'LevelName');
+            if (ln != null && fs.list().includes(rootDir + 'levelname.txt')) fs.writeText(rootDir + 'levelname.txt', ln);
+            log('[写回] level.dat 已更新');
         }
 
         // ---- 资源包 ----
-        const values = [...ctx.entries.values()].map(e => e.value);
-        const sourceLang = opt.sourceLang === 'auto' ? NS.detectSourceLang(values) : opt.sourceLang;
+        const sourceLang = detectLang(session);
         let packDir = null;
         if (ctx.entries.size) {
             const uuid = () => (root.crypto && root.crypto.randomUUID) ? root.crypto.randomUUID()
@@ -253,31 +448,33 @@
                 fs.writeText(`${packDir}texts/${l}.lang`, head + body + '\n');
             }
             fs.writeText(`${packDir}texts/languages.json`, JSON.stringify(langs, null, 2));
-            // 登记到存档
             const wrp = rootDir + 'world_resource_packs.json';
-            let list = [];
-            if (all.includes(wrp)) { const d = NS.parseJsonLenient(await fs.readText(wrp)); if (Array.isArray(d)) list = d; }
-            list.push({ pack_id: packUuid, version: [1, 0, 0] });
+            const list = [...session.wrpOriginal, { pack_id: packUuid, version: [1, 0, 0] }];
             fs.writeText(wrp, JSON.stringify(list, null, 2));
             log(`[资源包] 新建 ${packDir}，语言 ${langs.join(', ')}，已登记到 world_resource_packs.json`);
         }
 
-        // ---- 翻译表 ----
-        const csv = (rows) => '﻿' + rows.map(r => r.map(x => { const t = String(x == null ? '' : x); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; }).join(',')).join('\r\n');
-        const workbook = {
-            'strings.csv': csv([['key', 'source_text', 'location', 'type'], ...[...ctx.entries].map(([k, e]) => [k, e.value, e.file, e.kind])]),
-            'untranslatable.csv': csv([['location', 'where', 'text', 'reason'], ...ctx.untranslatable.map(u => [u.file, u.where, u.text, u.reason])]),
-            [`source_${sourceLang}.lang`]: [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n') + '\n',
-        };
         return {
-            ctx, workbook,
+            workbook: makeWorkbook(session),
             summary: {
-                packs: [], processedFiles: nChanged, newKeys: ctx.entries.size, packKeys: 0, placeholders: 0,
+                packs: [], processedFiles: records.filter(r => r.dirty).length, newKeys: ctx.entries.size, packKeys: 0, placeholders: 0,
                 untranslatable: ctx.untranslatable.length, warnings: ctx.warnings, missingRefs: [], sourceLang,
-                createdRP: packDir, restructured: false, inputGroups: 0, world: true,
+                createdRP: packDir, restructured: false, inputGroups: 0, world: true, manualEdits: session.edits,
             },
         };
     }
 
+    /** 一步完成（测试与非交互使用） */
+    async function runWorldPipeline(fs, userOptions = {}, log = () => {}) {
+        const session = await openWorld(fs, userOptions, log);
+        const r = await session.build(fs, log);
+        return { ctx: session.ctx, session, ...r };
+    }
+
+    NS.openWorld = openWorld;
     NS.runWorldPipeline = runWorldPipeline;
+    NS.worldNodeAt = nodeAt;
+    NS.worldRootLabel = rootLabel;
+    NS.worldDisplayValue = displayValue;
+    NS.worldParseCsv = parseCsv;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

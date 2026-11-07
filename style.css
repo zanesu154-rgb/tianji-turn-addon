@@ -326,6 +326,218 @@ body.mode-world .addon-only {
     color: var(--warning);
 }
 
+/* ---- 存档 NBT 编辑器 ---- */
+.nbt-editor {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+    font-size: 13px;
+}
+
+.nbt-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.nbt-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.nbt-badge {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.nbt-hint {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin: 6px 0 12px;
+    line-height: 1.6;
+}
+
+.nbt-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+    overflow-x: auto;
+}
+
+.nbt-tabs button {
+    font: inherit;
+    padding: 8px 12px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.nbt-tabs button.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+    font-weight: 500;
+}
+
+.nbt-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.nbt-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 560px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.nbt-row {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+}
+
+.nbt-loc {
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    word-break: break-all;
+}
+
+.nbt-loc b {
+    color: var(--text);
+    font-weight: 500;
+}
+
+.nbt-orig {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-bottom: 6px;
+    word-break: break-all;
+}
+
+.nbt-value {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+
+.nbt-input {
+    width: 100%;
+    font: inherit;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 12px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.nbt-input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.nbt-input.edited {
+    border-color: var(--success);
+    background: color-mix(in srgb, var(--success) 6%, var(--bg));
+}
+
+.nbt-input.invalid {
+    border-color: var(--error);
+}
+
+.nbt-msg {
+    color: var(--error);
+    font-size: 12px;
+}
+
+.nbt-search {
+    width: 100%;
+    font: inherit;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    margin-bottom: 12px;
+    box-sizing: border-box;
+}
+
+.nbt-empty {
+    color: var(--text-muted);
+}
+
+.nbt-tree {
+    padding-left: 16px;
+    max-height: 620px;
+    overflow: auto;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 12px;
+}
+
+.nbt-tree details > summary {
+    cursor: pointer;
+    padding: 3px 0;
+    list-style-position: outside;
+}
+
+.nbt-children {
+    padding-left: 16px;
+    border-left: 1px dashed var(--border);
+    margin-left: 4px;
+}
+
+.nbt-leaf {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.nbt-key {
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.nbt-leaf .nbt-key {
+    min-width: 120px;
+    padding-top: 6px;
+}
+
+.nbt-type {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-left: 6px;
+    white-space: nowrap;
+}
+
+.nbt-leaf .nbt-type {
+    padding-top: 7px;
+    margin-left: 0;
+    min-width: 46px;
+}
+
 /* ---- 下载按钮 ---- */
 .download-section {
     display: flex;
@@ -497,6 +709,18 @@ body.mode-world .addon-only {
 
     .summary-stats {
         grid-template-columns: repeat(2, 1fr);
+    }
+
+    .nbt-editor {
+        padding: 16px;
+    }
+
+    .nbt-leaf {
+        flex-wrap: wrap;
+    }
+
+    .nbt-leaf .nbt-key {
+        min-width: 0;
     }
 
     .btn {
