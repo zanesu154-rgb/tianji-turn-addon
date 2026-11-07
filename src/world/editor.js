@@ -234,6 +234,7 @@
         const groups = [
             ['世界设置', session.records.filter(r => r.kind === 'level')],
             ['方块实体', session.records.filter(r => r.kind === 'block')],
+            ['玩家', session.records.filter(r => r.kind === 'player')],
             ['实体', session.records.filter(r => r.kind === 'actor')],
             ['结构', session.records.filter(r => r.kind === 'structure')],
         ].filter(([, recs]) => recs.length);
