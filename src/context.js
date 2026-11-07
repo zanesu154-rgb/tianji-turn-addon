@@ -100,7 +100,9 @@
             if (typeof text !== 'string') return null;
             const hasSentinel = /\d+|\d+/.test(text);
             const literalOnly = text.replace(SENTINEL_RE, ' ');
-            if (!looksLikeText(literalOnly, meta.mode || 'loose')) return null;
+            // mode 'display'：已确定是给玩家看的位置（告示牌、NPC 对话），只要有文字就翻译
+            const textOk = (t) => meta.mode === 'display' ? NS.hasLetters(t) : looksLikeText(t, meta.mode || 'loose');
+            if (!textOk(literalOnly)) return null;
             if (!hasSentinel && this.isKey(text)) { this.ref(text.trim(), meta.file); return null; }
 
             const nodes = [];
@@ -122,7 +124,7 @@
                 lines.forEach((line, i) => {
                     if (i > 0) nodes.push({ text: '\n' });
                     if (!line) return;
-                    if (looksLikeText(line, 'loose')) {
+                    if (textOk(line)) {
                         nodes.push({ translate: this.alloc(baseKey, line, meta) });
                     } else {
                         nodes.push({ text: line });

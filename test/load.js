@@ -2,9 +2,11 @@
 const path = require('path');
 const fs = require('fs');
 globalThis.acorn = require('../vendor/acorn.js');
-for (const f of ['util', 'context', 'commands', 'json', 'script', 'pipeline']) {
+for (const f of ['util', 'context', 'commands', 'json', 'script', 'pipeline', 'world/nbt', 'world/leveldb', 'world/world']) {
     require(path.join(__dirname, '..', 'src', f + '.js'));
 }
+const zlib = require('zlib');
+globalThis.AddonI18n.inflate = async (b, k) => new Uint8Array(k === 'deflate-raw' ? zlib.inflateRawSync(b) : zlib.inflateSync(b));
 
 class MemFS {
     constructor(files) { this.files = new Map(files); }
@@ -15,6 +17,8 @@ class MemFS {
         return typeof v === 'string' ? v : Buffer.from(v).toString('utf8');
     }
     writeText(p, s) { this.files.set(p, s); }
+    async readBytes(p) { const v = this.files.get(p); return typeof v === 'string' ? new TextEncoder().encode(v) : new Uint8Array(v); }
+    writeBytes(p, b) { this.files.set(p, b); }
     move(a, b) { const v = this.files.get(a); this.files.delete(a); this.files.set(b, v); }
 }
 

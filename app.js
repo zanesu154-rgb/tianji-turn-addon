@@ -71,9 +71,19 @@ class ZipFS {
     async readText(p) {
         const v = this.entries.get(p);
         if (v === undefined) throw new Error(`文件不存在: ${p}`);
-        return typeof v === 'string' ? v : v.async('string');
+        if (typeof v === 'string') return v;
+        if (v instanceof Uint8Array) return new TextDecoder().decode(v);
+        return v.async('string');
     }
     writeText(p, s) { this.entries.set(p, s); }
+    async readBytes(p) {
+        const v = this.entries.get(p);
+        if (v === undefined) throw new Error(`文件不存在: ${p}`);
+        if (typeof v === 'string') return new TextEncoder().encode(v);
+        if (v instanceof Uint8Array) return v;
+        return v.async('uint8array');
+    }
+    writeBytes(p, b) { this.entries.set(p, b); }
     move(a, b) {
         const v = this.entries.get(a);
         this.entries.delete(a);
@@ -82,7 +92,7 @@ class ZipFS {
     async toZip() {
         const z = new JSZip();
         for (const [p, v] of this.entries) {
-            z.file(p, typeof v === 'string' ? v : await v.async('uint8array'));
+            z.file(p, typeof v === 'string' || v instanceof Uint8Array ? v : await v.async('uint8array'));
         }
         return z;
     }
@@ -121,6 +131,24 @@ async function extractInnerPacks(zip) {
 }
 
 // ================================================================
+//  模式：附加包 / 世界存档
+// ================================================================
+
+let mode = 'addon';
+const MODE_TEXT = {
+    addon: { title: '点击上传 .mcaddon / .mcpack / .zip', hint: '处理 .mcaddon / .mcpack：物品、方块、实体、对话、UI、脚本等文本' },
+    world: { title: '点击上传 .mcworld / .mctemplate', hint: '处理世界存档：告示牌、命令方块、NPC 对话 → 翻译键，并在存档内生成对应的资源包。处理前请备份存档' },
+};
+function setMode(m) {
+    mode = m;
+    document.body.classList.toggle('mode-world', m === 'world');
+    document.querySelectorAll('.mode-tab').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+    $('drop-title').textContent = MODE_TEXT[m].title;
+    $('mode-hint').textContent = MODE_TEXT[m].hint;
+}
+document.querySelectorAll('.mode-tab').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+// ================================================================
 //  选项
 // ================================================================
 
@@ -149,11 +177,13 @@ function renderSummary(res) {
     const list = (items, fmt) => `<ul>${items.slice(0, 200).map(x => `<li>${fmt(x)}</li>`).join('')}${items.length > 200 ? `<li>…共 ${items.length} 条</li>` : ''}</ul>`;
     let html = `<div class="summary-stats">
         <div class="stat"><b>${s.newKeys}</b><span>提取的文本</span></div>
-        <div class="stat"><b>${s.processedFiles}</b><span>修改的文件</span></div>
+        <div class="stat"><b>${s.processedFiles}</b><span>${s.world ? '修改的存档记录' : '修改的文件'}</span></div>
         <div class="stat"><b>${s.untranslatable}</b><span>无法本地化</span></div>
         <div class="stat"><b>${escapeHtml(s.sourceLang)}</b><span>原文语言</span></div>
     </div>`;
-    if (s.createdRP) html += `<p class="summary-note">附加包没有资源包，已新建 <code>${escapeHtml(s.createdRP)}/</code> 存放翻译，并让行为包依赖它。</p>`;
+    if (s.world) {
+        if (s.createdRP) html += `<p class="summary-note">已在存档内新建资源包 <code>${escapeHtml(s.createdRP)}</code> 并登记到 world_resource_packs.json，打开存档会自动加载。请先在副本上测试，确认告示牌、命令方块、NPC 显示正常。</p>`;
+    } else if (s.createdRP) html += `<p class="summary-note">附加包没有资源包，已新建 <code>${escapeHtml(s.createdRP)}/</code> 存放翻译，并让行为包依赖它。</p>`;
     if (s.placeholders) html += `<p class="summary-note">${s.placeholders} 个物品/方块/实体原本没有名称，已按 ID 生成英文占位名，请在 lang 中确认。</p>`;
     if (s.inputGroups) html += `<p class="summary-note">脚本里有 ${s.inputGroups} 处匹配玩家聊天输入的关键词/正则。游戏不会翻译玩家输入，已列在翻译表的 <code>input_aliases.csv</code> 中，可按语言补充说法后交给作者加进正则。</p>`;
     if (untr.length) {
@@ -176,7 +206,7 @@ function renderSummary(res) {
 // ================================================================
 
 // 页面各脚本文件版本不一致（通常是浏览器缓存）时，提示强制刷新
-const REQUIRED = ['runPipeline', 'processScript', 'collectTranslationGroups', 'collectUiVarUsage', 'translateCommand', 'regexPhrases'];
+const REQUIRED = ['runPipeline', 'processScript', 'collectTranslationGroups', 'collectUiVarUsage', 'translateCommand', 'regexPhrases', 'runWorldPipeline'];
 function checkVersion() {
     const missing = REQUIRED.filter(n => typeof NS[n] !== 'function');
     if (missing.length) {
@@ -187,8 +217,8 @@ function checkVersion() {
 }
 
 async function processFile(file) {
-    const ext = (file.name.match(/\.(mcaddon|mcpack|zip)$/i) || [, 'mcaddon'])[1].toLowerCase();
-    state.originalName = file.name.replace(/\.(mcaddon|mcpack|zip)$/i, '');
+    const ext = (file.name.match(/\.(mcaddon|mcpack|zip|mcworld|mctemplate)$/i) || [, 'mcaddon'])[1].toLowerCase();
+    state.originalName = file.name.replace(/\.(mcaddon|mcpack|zip|mcworld|mctemplate)$/i, '');
     state.logContent = '';
     state.resultBlob = state.workbookBlob = null;
     logEl.innerHTML = '';
@@ -214,7 +244,13 @@ async function processFile(file) {
             baseName: state.originalName,
             onProgress: (r, p) => setProgress(5 + Math.floor(r * 75), `处理: ${p.split('/').pop()}`),
         };
-        const res = await NS.runPipeline(fs, options, (m, t) => log(m, t || 'info'));
+        // 压缩包里有 level.dat + db/ → 世界存档
+        const isWorld = fs.list().some(p => /(^|\/)level\.dat$/.test(p)) && fs.list().some(p => /(^|\/)db\/CURRENT$/.test(p));
+        if (isWorld && mode !== 'world') { setMode('world'); log('检测到世界存档，已切换到“世界存档”模式'); }
+        if (!isWorld && mode === 'world') { setMode('addon'); log('这不是世界存档，已切换到“附加包”模式'); }
+        const res = isWorld
+            ? await NS.runWorldPipeline(fs, options, (m, t) => log(m, t || 'info'))
+            : await NS.runPipeline(fs, options, (m, t) => log(m, t || 'info'));
         const s = res.summary;
 
         for (const w of s.warnings) log(`⚠ ${w}`, 'warn');
@@ -225,7 +261,8 @@ async function processFile(file) {
         const outZip = await fs.toZip();
         state.resultBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
         const multiPack = s.packs.length > 1 || s.restructured;
-        const outExt = ext === 'mcpack' && !multiPack ? 'mcpack' : 'mcaddon';
+        const outExt = s.world ? (ext === 'mctemplate' ? 'mctemplate' : 'mcworld')
+            : ext === 'mcpack' && !multiPack ? 'mcpack' : 'mcaddon';
         state.resultName = `${state.originalName}_i18n.${outExt}`;
 
         // 翻译表：CSV（Excel 可直接打开）+ 源语言 lang + 报告

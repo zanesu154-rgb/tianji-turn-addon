@@ -77,6 +77,21 @@ const LANG = { en_US: { welcome: "Welcome" }, zh_CN: { welcome: "欢迎" } };
 
 **为避免误改**：如果脚本里自己定义了与上述 API 同名的方法（例如封装了一个 `Menu.title()`），无法确认类型的同名调用不会被改写，并在日志中提示；能确认是 `new ActionFormData()` 链式调用、`const f = new …FormData()` 变量或 `this.form = new …FormData()` 的调用仍会处理。
 
+## 世界存档（网页“世界存档”标签页）
+
+上传 `.mcworld` / `.mctemplate`（手机无法导出存档时可导出为模板），工具读取存档的 LevelDB 数据库（`db/`）：
+
+| 内容 | 处理 |
+|---|---|
+| 告示牌、悬挂告示牌（正反面） | 文本改为 `{"rawtext":[{"translate":…}]}` |
+| 命令方块、命令方块矿车 | `title` / `titleraw` / `tellraw` 改为翻译键 |
+| NPC | 名字、正文、按钮名改为翻译键；按钮命令中的 title/tellraw 同样处理 |
+| `say` / `tell`、容器名、物品名与描述、成书、实体名字标签 | 游戏只按纯文本显示，列入“无法本地化”报告 |
+
+写回方式：不改动任何 `.ldb`，只在当前日志（`db/*.log`）末尾追加一条写入记录（与游戏自己的写入方式相同），写完后重新打开数据库逐条校验。翻译放在存档内新建的 `resource_packs/world_texts/`，并登记到 `world_resource_packs.json`，打开存档自动加载。
+
+**请先在存档副本上测试。** 告示牌和 NPC 使用 rawtext 的行为来自社区报告，需要在游戏内确认显示正常。
+
 ## 无法本地化的内容
 
 以下位置游戏只接受纯文本，工具只会列入报告（界面和 `untranslatable.csv`）：`say` / `tell` / `me` 命令、计分板显示名、`nameTag`、战利品表 `set_name` / `set_lore`、脚本 `setLore`、Boss 血条名称、标题画面闪烁文字。

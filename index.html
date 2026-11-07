@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>栈主的附加包汉化工具</title>
-    <link rel="stylesheet" href="style.css?v=2026.11.07-8">
+    <link rel="stylesheet" href="style.css?v=2026.11.07-9">
 </head>
 <body>
     <div class="container">
@@ -15,6 +15,13 @@
             <p class="subtitle">提取 Minecraft 基岩版附加包中玩家可见的文本，生成可多语种翻译的 lang 文件</p>
         </header>
 
+        <!-- 模式切换 -->
+        <nav class="mode-tabs" role="tablist">
+            <button class="mode-tab active" data-mode="addon" role="tab">附加包</button>
+            <button class="mode-tab" data-mode="world" role="tab">世界存档</button>
+        </nav>
+        <p id="mode-hint" class="mode-hint">处理 .mcaddon / .mcpack：物品、方块、实体、对话、UI、脚本等文本</p>
+
         <!-- 上传区 -->
         <div id="drop-zone" class="drop-zone">
             <div class="drop-icon">
@@ -24,9 +31,9 @@
                     <line x1="12" y1="3" x2="12" y2="15"/>
                 </svg>
             </div>
-            <p class="drop-title">点击上传 .mcaddon / .mcpack / .zip</p>
+            <p class="drop-title" id="drop-title">点击上传 .mcaddon / .mcpack / .zip</p>
             <p class="drop-hint">或拖拽文件到此处</p>
-            <input type="file" id="file-input" accept=".mcaddon,.mcpack,.zip" hidden>
+            <input type="file" id="file-input" accept=".mcaddon,.mcpack,.zip,.mcworld,.mctemplate" hidden>
         </div>
 
         <!-- 选项 -->
@@ -49,15 +56,15 @@
                     <span>生成语言文件（逗号分隔）</span>
                     <input id="opt-targets" type="text" value="en_US, zh_CN" spellcheck="false">
                 </label>
-                <label class="opt-field opt-wide">
+                <label class="opt-field opt-wide addon-only">
                     <span>脚本自带翻译字段（留空自动识别；off 关闭；手动：s=en_US, v=vi_VN；按文件：dialogue_es.js:v=es_ES）</span>
                     <input id="opt-langfields" type="text" value="" placeholder="自动识别" spellcheck="false">
                 </label>
-                <label class="opt-check"><input id="opt-scripts" type="checkbox" checked> 处理脚本（scripts/*.js）</label>
-                <label class="opt-check"><input id="opt-runtime" type="checkbox" checked> 注入运行时翻译（变量、对象表等动态文本）</label>
+                <label class="opt-check addon-only"><input id="opt-scripts" type="checkbox" checked> 处理脚本（scripts/*.js）</label>
+                <label class="opt-check addon-only"><input id="opt-runtime" type="checkbox" checked> 注入运行时翻译（变量、对象表等动态文本）</label>
                 <label class="opt-check"><input id="opt-split" type="checkbox" checked> 多行文本拆成多个键（最稳妥）</label>
-                <label class="opt-check"><input id="opt-fill" type="checkbox" checked> 从其他语言补全缺失键</label>
-                <label class="opt-check"><input id="opt-placeholder" type="checkbox" checked> 为没有名称的物品/方块/实体生成占位名</label>
+                <label class="opt-check addon-only"><input id="opt-fill" type="checkbox" checked> 从其他语言补全缺失键</label>
+                <label class="opt-check addon-only"><input id="opt-placeholder" type="checkbox" checked> 为没有名称的物品/方块/实体生成占位名</label>
             </div>
         </details>
 
@@ -113,19 +120,22 @@
 
         <!-- 页脚 -->
         <footer class="footer">
-            <p>由 <a href="https://github.com/zanesu154-rgb" target="_blank">栈主</a> 制作 · 纯前端处理，文件不上传 · <span id="app-version">v2026.11.07-8</span></p>
+            <p>由 <a href="https://github.com/zanesu154-rgb" target="_blank">栈主</a> 制作 · 纯前端处理，文件不上传 · <span id="app-version">v2026.11.07-9</span></p>
         </footer>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js"></script>
-    <script src="vendor/acorn.js?v=2026.11.07-8"></script>
-    <script src="src/util.js?v=2026.11.07-8"></script>
-    <script src="src/context.js?v=2026.11.07-8"></script>
-    <script src="src/commands.js?v=2026.11.07-8"></script>
-    <script src="src/json.js?v=2026.11.07-8"></script>
-    <script src="src/script.js?v=2026.11.07-8"></script>
-    <script src="src/pipeline.js?v=2026.11.07-8"></script>
-    <script src="app.js?v=2026.11.07-8"></script>
+    <script src="vendor/acorn.js?v=2026.11.07-9"></script>
+    <script src="src/util.js?v=2026.11.07-9"></script>
+    <script src="src/context.js?v=2026.11.07-9"></script>
+    <script src="src/commands.js?v=2026.11.07-9"></script>
+    <script src="src/json.js?v=2026.11.07-9"></script>
+    <script src="src/script.js?v=2026.11.07-9"></script>
+    <script src="src/pipeline.js?v=2026.11.07-9"></script>
+    <script src="src/world/nbt.js?v=2026.11.07-9"></script>
+    <script src="src/world/leveldb.js?v=2026.11.07-9"></script>
+    <script src="src/world/world.js?v=2026.11.07-9"></script>
+    <script src="app.js?v=2026.11.07-9"></script>
 </body>
 </html>
