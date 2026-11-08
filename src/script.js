@@ -796,7 +796,25 @@
         return r2;
       }
     }
-    return list(s);
+    return runs(s) || list(s);
+  };
+  // 按颜色码分段，每段都认识（或没有文字）时逐段翻译："§a+2 max health §8[flat]§r"
+  const runs = (s) => {
+    const parts = s.split(/(\\u00a7.)/);
+    if (parts.length < 3) return null;
+    const els = []; let hit = false;
+    for (const x of parts) {
+      if (!x) continue;
+      if (/^\\u00a7.$/.test(x) || !/[^\\s\\d\\p{P}\\p{S}]/u.test(x)) { els.push({ text: x }); continue; }
+      const nm2 = /^([\\s\\d+\\-.,%:\\/()]*)([\\s\\S]*?)([\\s\\d+\\-.,%:\\/()]*)$/.exec(x);
+      const k2 = m.get(x) || (nm2 && m.get(nm2[2]));
+      if (!k2) return null;
+      hit = true;
+      if (!m.get(x) && nm2[1]) els.push({ text: nm2[1] });
+      els.push({ translate: k2 });
+      if (!m.get(x) && nm2[3]) els.push({ text: nm2[3] });
+    }
+    return hit ? els : null;
   };
   const F = (t) => t.replace(/\u00a7./g, "").trim();
   const F2 = (t) => t.replace(/\u00a7./g, "");
@@ -1458,6 +1476,15 @@
             return [...tmp.entries.values()].map(e => e.value);
         };
 
+        // entit${n > 1 ? "ies" : "y"}：分支是粘在前一个单词上的词尾，不是独立文字
+        const gluedSuffix = (q) => {
+            const t = q.parent;
+            if (t.type === 'TemplateLiteral') {
+                const i = t.expressions.indexOf(q);
+                return i >= 0 && /[A-Za-z]$/.test(t.quasis[i].value.cooked || '');
+            }
+            return isStr(t.left) && t.right === q && /[A-Za-z]$/.test(t.left.value);
+        };
         const isPlusOperand = (n) => n.parent && n.parent.type === 'BinaryExpression' && n.parent.operator === '+';
         walk(ast, (n) => {
             if (handled.has(n)) return;
@@ -1470,7 +1497,8 @@
                 const q = n.parent;
                 if (q && q.type === 'ConditionalExpression' && q.test !== n && q.parent && handled.has(q.parent)
                     && (q.parent.type === 'TemplateLiteral' || (q.parent.type === 'BinaryExpression' && q.parent.operator === '+'))
-                    && /^[A-Za-z][A-Za-z' -]{1,40}$/.test(v) && !ctx.isKey(v) && !exact.some(([x]) => x === v)) {
+                    && /^[A-Za-z][A-Za-z' -]{1,40}$/.test(v) && !ctx.isKey(v) && !exact.some(([x]) => x === v)
+                    && !gluedSuffix(q)) {
                     exact.push([v, ctx.alloc(keyBase('word'), v, meta('word'))]);
                     return;
                 }
@@ -1487,6 +1515,38 @@
                 if (looksLikeCommand(parts.map(p => ('lit' in p) ? p.lit : '0').join(''))) return;
                 registerPattern(parts);
             }
+        });
+
+        const forceText = (v, hint = 'word') => {
+            if (ctx.isKey(v) || exact.some(([x]) => x === v)) return;
+            exact.push([v, ctx.alloc(keyBase(hint), v, meta(hint))]);
+        };
+        // 数据表里的名称列：{ mel: ["melee damage", "flat", 3, "added to every melee hit"], … }
+        // 同一列全是互不相同的短词组、且表里另有一列是说明文字时，这列名称也是显示用的
+        walk(ast, (n) => {
+            if (n.type !== 'ObjectExpression' || n.properties.length < 3) return;
+            const rows = n.properties.map(p => p.value);
+            if (!rows.every(r => r && r.type === 'ArrayExpression')) return;
+            const len = rows[0].elements.length;
+            if (len < 2 || !rows.every(r => r.elements.length === len)) return;
+            const col = (i) => rows.map(r => r.elements[i]);
+            const textCol = [...Array(len).keys()].some(i => { const c = col(i); return c.filter(e => isStr(e) && looksLikeText(e.value, 'loose')).length >= c.length * 0.5; });
+            if (!textCol) return;
+            for (let i = 0; i < len; i++) {
+                const c = col(i);
+                if (!c.every(e => isStr(e) && !handled.has(e) && /^[A-Za-z][A-Za-z '\-]{1,40}$/.test(e.value))) continue;
+                if (new Set(c.map(e => e.value)).size < c.length * 0.8) continue;   // 单位、类型这类重复值的列不是名称
+                for (const e of c) { forceText(e.value); handled.add(e); }
+            }
+        });
+        // 大写常量里的显示用标签：const FLAT = "§8[flat]";
+        walk(ast, (n) => {
+            if (n.type !== 'VariableDeclarator' || n.id.type !== 'Identifier' || !/^[A-Z][A-Z0-9_]+$/.test(n.id.name) || !isStr(n.init)) return;
+            const v = n.init.value, plain = NS.stripFormatting(v).trim();
+            if (!/[A-Za-z]{2,}/.test(plain) || plain.length > 40 || /^[\w.:\/-]+$/.test(plain) || looksLikeCommand(v) || ctx.isKey(v)) return;
+            if (!/\u00a7|[\[\](){}<>]/.test(v)) return;
+            forceText(plain);
+            handled.add(n.init);
         });
 
         // 跨文件预扫描得到的参数文字（如默认值 'item'、调用处传入的 'block'）
