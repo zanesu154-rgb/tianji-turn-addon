@@ -142,6 +142,10 @@
         const P = (...segs) => [...base, ...segs];
         const setS = (path, s) => { nodeAt(rec, path).set(new NBT.NbtString(s, null)); changed = true; };
         const report = (path, where, text, reason) => {
+            // 格式码标记（§u§a§p）、技术 ID、数字、已是翻译键的名字不需要人工翻译
+            if (typeof text !== 'string' || ctx.isKey(text)) return;
+            const plain = NS.stripFormatting(text).trim();
+            if (!NS.hasLetters(plain) || (/^[\w.:-]+$/.test(plain) && /[_:]/.test(plain))) return;
             ctx.untranslatable.push({ file: label, where, text, reason, ref: `${rec.id}|${JSON.stringify(path)}` });
         };
         const label = unitLabel(rec, c, kind);

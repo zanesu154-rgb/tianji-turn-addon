@@ -249,7 +249,7 @@
             portuguese: 'pt_BR', italian: 'it_IT', russian: 'ru_RU', japanese: 'ja_JP', korean: 'ko_KR', chinese: 'zh_CN', english: 'en_US' };
         const m = /(?:^|[_\-.])([a-z]{2}(?:[_\-][a-z]{2})?)$/i.exec(base);
         if (m) { const l = localeOfKey(m[1]); if (l) return l; }
-        for (const tok of base.toLowerCase().split(/[_\-.]+/)) if (NAMES[tok]) return NAMES[tok];
+        for (const tok of base.toLowerCase().split(/[_\-.]+/)) if (Object.prototype.hasOwnProperty.call(NAMES, tok)) return NAMES[tok];
         return null;
     }
 
@@ -1089,7 +1089,7 @@
                     }
                 }
                 // 无法翻译的显示位置：记录
-                if (name && UNTRANSLATABLE_CALLS[name]) {
+                if (name && Object.prototype.hasOwnProperty.call(UNTRANSLATABLE_CALLS, name)) {
                     const args = name === 'addObjective' ? [n.arguments[1]] :
                         (n.arguments[0] && n.arguments[0].type === 'ArrayExpression' ? n.arguments[0].elements : [n.arguments[0]]);
                     for (const a of args) {

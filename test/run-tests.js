@@ -209,6 +209,19 @@ export function show(p, lang){ p.sendMessage(u(lang,"ui.play")); p.sendMessage(u
             sent.length === 4 && sent[0].rawtext[0].translate === play[0] && sent[2].rawtext[0].translate === play[0]
             && sent[1].rawtext[0].translate === lang[0] && sent[3].rawtext[0].translate === lang[0] && sent[1].rawtext[0].with.rawtext.length === 1);
     }
+    {
+        const cr = new NS.ExtractContext({});
+        NS.processScript('const o = {}; o.hasOwnProperty("Rotation"); o.toString("Hello there"); item.setLore(["Sharp blade"]);', 'scripts/x.js', cr, {});
+        check('报告：hasOwnProperty / toString 等原型方法名不误报', !cr.untranslatable.some(u => /hasOwnProperty|toString|native/.test(u.where + u.reason)) && cr.untranslatable.some(u => u.text === 'Sharp blade'));
+        const c2 = new NS.ExtractContext({});
+        ['§u', '0', 'ui:§burn0', '5fs_br:jungle_barrel.name', 'Maple Barrel'].forEach(t => c2.report('f', '实体名字标签', t, 'x'));
+        check('报告：格式码、数字、技术 ID、已有键不列入', c2.untranslatable.length === 1 && c2.untranslatable[0].text === 'Maple Barrel');
+        const dm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        dm.files.set('BP/scripts/dup.js', Buffer.from('item.setLore(["Dup lore"]); item.setLore(["Dup lore"]);'));
+        const dr = await NS.runPipeline(dm, { baseName: 'fixture' }, () => {});
+        const dl = dr.ctx.untranslatable.filter(u => u.text === 'Dup lore');
+        check('报告：同一文件同一位置同一文字合并，记录次数', dl.length === 1 && dl[0].count === 2 && dr.workbook['untranslatable.csv'].split('\n')[0].includes('count'));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
