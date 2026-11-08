@@ -171,6 +171,7 @@ function renderCommand(cmd, lang) {
     }
     check('只有 %键名 引用的文本不提取（JSON UI 常见）', !NS.looksLikeText('§z(%deesse.caseSensitive)') && !NS.looksLikeText('<%menu.serverGenericName> %progressScreen.saving')
         && NS.looksLikeText('欢迎 %1$s') && NS.looksLikeText('Saving %menu.world now') && NS.looksLikeText('打开 %gui.done'));
+    check('带重音字母的键名（déesse.extPacks.title）视为已有键', NS.isLikelyKey('déesse.extPacks.title') && NS.isLikelyKey('déesse.compability.gamepad.desc_1') && !NS.isLikelyKey('Déesse CORE (core)') && !NS.isLikelyKey('é.1'));
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

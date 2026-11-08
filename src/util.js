@@ -40,13 +40,14 @@
         if (!t) return false;
         if (knownKeys && knownKeys.has(t)) return true;
         if (/\s/.test(t) || hasCJK(t) || t.includes('§')) return false;
-        if (!/^[A-Za-z0-9_\-:]+(\.[A-Za-z0-9_\-:]+)+$/.test(t)) return false;
+        // 允许带重音的拉丁字母（如 déesse.extPacks.title）
+        if (!/^[\p{L}\p{N}_\-:]+(\.[\p{L}\p{N}_\-:]+)+$/u.test(t)) return false;
         // 版本号 / 小数
         if (/^[\d.]+$/.test(t)) return false;
         // 文件名
         if (/\.(png|jpe?g|tga|json|js|mjs|ogg|wav|fsb|mcfunction|lang|material)$/i.test(t)) return false;
         // 每一段至少要有字母
-        return t.split('.').filter(seg => /[A-Za-z]/.test(seg)).length >= 2;
+        return t.split('.').filter(seg => /\p{L}/u.test(seg)).length >= 2;
     }
 
     /** 看起来像技术标识符 / 路径 / 代码，而不是给玩家看的文字 */
