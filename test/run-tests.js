@@ -169,6 +169,8 @@ function renderCommand(cmd, lang) {
         const js = pm.files.get('BP/scripts/req_utils.js').toString();
         check('函数参数拼进提示文字：默认值 item 和调用处传入的 block 也登记翻译', vals.includes('item') && vals.includes('block') && !vals.includes('minecraft:stone') && /\["item","script\.req_utils\.word/.test(js));
     }
+    check('只有 %键名 引用的文本不提取（JSON UI 常见）', !NS.looksLikeText('§z(%deesse.caseSensitive)') && !NS.looksLikeText('<%menu.serverGenericName> %progressScreen.saving')
+        && NS.looksLikeText('欢迎 %1$s') && NS.looksLikeText('Saving %menu.world now') && NS.looksLikeText('打开 %gui.done'));
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
