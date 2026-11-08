@@ -80,7 +80,8 @@
      */
     function looksLikeText(s, mode = 'loose') {
         if (typeof s !== 'string') return false;
-        const plain = stripFormatting(s).trim();
+        // "%menu.serverGenericName" 这类是游戏内的键引用，显示时自动翻译；去掉后没剩文字 → 不是待提取的文本
+        const plain = stripFormatting(s).replace(/%[A-Za-z_][\w:-]*(?:\.[\w:-]+)+/g, ' ').trim();
         if (!plain) return false;
         if (!hasLetters(plain)) return false;
         if (hasCJK(plain)) return !looksLikeCode(plain);
