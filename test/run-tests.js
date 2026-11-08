@@ -172,6 +172,20 @@ function renderCommand(cmd, lang) {
     check('只有 %键名 引用的文本不提取（JSON UI 常见）', !NS.looksLikeText('§z(%deesse.caseSensitive)') && !NS.looksLikeText('<%menu.serverGenericName> %progressScreen.saving')
         && NS.looksLikeText('欢迎 %1$s') && NS.looksLikeText('Saving %menu.world now') && NS.looksLikeText('打开 %gui.done'));
     check('带重音字母的键名（déesse.extPacks.title）视为已有键', NS.isLikelyKey('déesse.extPacks.title') && NS.isLikelyKey('déesse.compability.gamepad.desc_1') && !NS.isLikelyKey('Déesse CORE (core)') && !NS.isLikelyKey('é.1'));
+    {
+        // Déesse UI：别的模板把 $text 拼进表达式，不应影响只把 $text 当标签文字的模板
+        const vm2 = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        vm2.files.set('RP/ui/v_common.json', Buffer.from(JSON.stringify({ namespace: 'vc',
+            text_desc: { type: 'label', text: '$text' },
+            hash_label: { type: 'label', text: "('§z#' + $text)" },
+            wrapper: { type: 'panel', controls: [{ 'inner@vc.hash_label': {} }] } })));
+        vm2.files.set('RP/ui/v_page.json', Buffer.from(JSON.stringify({ namespace: 'vp',
+            a: { type: 'panel', controls: [{ 'list@vc.text_desc': { $text: '- Quick Container' } }, { 'h@vc.hash_label': { $text: 'Color Code' } }, { 'w@vc.wrapper': { $text: 'Wrapped Hash' } }] } })));
+        await NS.runPipeline(vm2, { baseName: 'fixture' }, () => {});
+        const vp = JSON.parse(vm2.files.get('RP/ui/v_page.json').toString()).a.controls;
+        check('UI 变量按模板判断：只当标签文字的提取，拼进表达式的（含子控件模板里）不提取',
+            vp[0]['list@vc.text_desc'].$text !== '- Quick Container' && vp[1]['h@vc.hash_label'].$text === 'Color Code' && vp[2]['w@vc.wrapper'].$text === 'Wrapped Hash');
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

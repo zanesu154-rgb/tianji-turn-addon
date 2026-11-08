@@ -358,6 +358,65 @@
         return { textVars, nonText, consumers, elements };
     }
 
+    /**
+     * 变量 $name 在控件 obj（及其继承的模板、子控件引用的模板）里是否被“非文字”地使用：
+     * 出现在表达式 / 绑定里，或赋给 text 以外的属性。变量只向下传递，所以只看这棵子树。
+     * 子控件自己重新赋值了 $name 的，那一支不算。
+     */
+    function varMisused(obj, key, ns, name, elements, seen = new Set()) {
+        const sig = `${key}|${ns}|${name}`;
+        if (seen.has(sig) || seen.size > 400) return false;
+        seen.add(sig);
+        const tplOf = (k, curNs) => {
+            if (!k || !k.includes('@')) return null;
+            const ref = k.split('@')[1];
+            if (ref.startsWith('$')) return null;
+            return elements && elements.get(ref.includes('.') ? ref : `${curNs}.${ref}`);
+        };
+        const re = new RegExp('\\$' + name + '(?![A-Za-z0-9_])');
+        const visit = (node, curNs) => {
+            if (Array.isArray(node)) return node.some(n => visit(n, curNs));
+            if (!node || typeof node !== 'object') return false;
+            for (const [k, v] of Object.entries(node)) {
+                if (typeof v === 'string') {
+                    if (!re.test(v)) continue;
+                    const exact = v.trim() === '$' + name;
+                    if (exact && k === 'text') continue;
+                    if (exact && k.startsWith('$')) {        // 透传给另一个变量 → 看那个变量怎么用
+                        if (varMisused(node, '', curNs, varNameOf(k), elements, seen)) return true;
+                        continue;
+                    }
+                    return true;
+                }
+                if (Array.isArray(v)) {
+                    for (const item of v) {
+                        if (!item || typeof item !== 'object' || Array.isArray(item)) { if (visit(item, curNs)) return true; continue; }
+                        const ks = Object.keys(item);
+                        if (ks.length === 1 && item[ks[0]] && typeof item[ks[0]] === 'object' && !Array.isArray(item[ks[0]])) {
+                            const ck = ks[0], child = item[ks[0]];
+                            if (Object.keys(child).some(x => x.startsWith('$') && varNameOf(x) === name && !x.includes('|default'))) continue;
+                            if (visit(child, curNs)) return true;
+                            const t = tplOf(ck, curNs);
+                            if (t && varMisused(t.obj, t.key, t.ns, name, elements, seen)) return true;
+                        } else if (visit(item, curNs)) return true;
+                    }
+                    continue;
+                }
+                if (v && typeof v === 'object') {
+                    if (k.startsWith('$')) { if (visit(v, curNs)) return true; continue; }
+                    if (Object.keys(v).some(x => x.startsWith('$') && varNameOf(x) === name && !x.includes('|default'))) continue;
+                    if (visit(v, curNs)) return true;
+                    const t = tplOf(k, curNs);
+                    if (t && varMisused(t.obj, t.key, t.ns, name, elements, seen)) return true;
+                }
+            }
+            return false;
+        };
+        if (visit(obj, ns)) return true;
+        const base = tplOf(key, ns);
+        return !!(base && varMisused(base.obj, base.key, base.ns, name, elements, seen));
+    }
+
     /** 沿 "名字@命名空间.模板" 继承链查找 localize；未设置返回 undefined */
     function effectiveLocalize(obj, key, ns, elements, depth = 0) {
         if (obj && typeof obj.localize === 'boolean') return obj.localize;
@@ -410,7 +469,11 @@
                         changed = true;
                     } else if (k.startsWith('$')) {
                         const name = varNameOf(k);
-                        if (usage.textVars.has(name) && !usage.nonText.has(name) && okText(v)) {
+                        // 只看这个控件（及其模板）里变量怎么用；别处同名变量用在表达式里不影响这里
+                        const misused = usage.elements && usage.elements.size
+                            ? varMisused(node, nodeKey, ns, name, usage.elements)
+                            : usage.nonText.has(name);
+                        if (usage.textVars.has(name) && !misused && okText(v)) {
                             node[k] = ctx.alloc(`ui.${fileBase}.${ctrl}.${name}`, v, { file, kind: 'ui', scope: 'ui' });
                             for (const c of usage.consumers.get(name) || []) ensureLocalized(c.obj, c.key, c.ns, c.path);
                             changed = true;
