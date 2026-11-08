@@ -200,6 +200,13 @@
     // 所有命令名（小写）。后面跟着坐标 / 数字 / 选择器 / 命名空间 ID 时一定是命令
     const ALL_COMMANDS = /^\/?(execute|title|titleraw|tellraw|say|tell|msg|w|me|scoreboard|tag|give|clear|effect|tp|teleport|summon|kill|function|playsound|particle|setblock|fill|clone|structure|gamemode|gamerule|event|dialogue|camera|camerashake|replaceitem|enchant|xp|weather|time|difficulty|spawnpoint|setworldspawn|inputpermission|ability|music|stopsound|playanimation|damage|ride|loot|schedule|scriptevent|tickingarea|fog|hud|testfor|testforblock|testforblocks|place|spreadplayers|recipe|alwaysday|mobevent|volumearea|transfer|locate|op|deop|kick|list)\s+(.*)$/s;
     const AMBIGUOUS = /^(say|tell|w|me|tag|give|clear|kill|fill|event|camera|music|damage|ride|loot|time|list|place|op|kick|schedule|function|enchant|weather|difficulty|recipe|transfer|locate|hud|fog|ability|clone|structure|effect)$/;
+    // 第一个参数是子命令关键字、后面还跟着命令参数时也是命令
+    const SUBCOMMANDS = {
+        event: /^entity$/, loot: /^(spawn|give|insert|replace)$/, time: /^(set|add|query)$/, music: /^(play|queue|stop|volume)$/,
+        fog: /^(push|pop|remove)$/, schedule: /^(on_area_loaded|delay|clear)$/, place: /^(structure|feature|featurerule|jigsaw)$/,
+        structure: /^(save|load|delete)$/, recipe: /^(give|take)$/, locate: /^(structure|biome)$/, ride: /^@/, damage: /^@/,
+        camera: /^@/, hud: /^@/, ability: /^@/, transfer: /^@/,
+    };
     const ARG_TOKEN = /(^|\s)(~|\^|-?\d|@[aeprsvn]\b|[a-z0-9_]+:[a-z0-9_]|"[^"]*"\s|true\b|false\b)/;
 
     function looksLikeCommand(s) {
@@ -208,8 +215,12 @@
         if (STRONG_COMMANDS.test(t) || WEAK_COMMANDS.test(t)) return true;
         const m = ALL_COMMANDS.exec(t);
         if (!m) return false;
+        // 子命令关键字：event entity …、camera @s set …、loot spawn …、time set …
+        const first = m[2].split(/\s+/)[0];
+        const sub = SUBCOMMANDS[m[1].replace(/^\//, '')];
+        if (sub && sub.test(first) && ARG_TOKEN.test(m[2].slice(first.length))) return true;
         // 同时是英文单词的命令名：要求第一个参数就像命令参数（避免 "list of items: 3 swords"）
-        if (AMBIGUOUS.test(m[1])) return ARG_TOKEN.test(m[2].split(/\s+/)[0] + ' ');
+        if (AMBIGUOUS.test(m[1])) return ARG_TOKEN.test(first + ' ');
         return ARG_TOKEN.test(m[2]);
     }
 
