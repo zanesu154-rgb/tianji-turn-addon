@@ -224,6 +224,11 @@ function extra(p, lang){ p.sendMessage(u(lang,"ui.extra")); }`;
         const dl = dr.ctx.untranslatable.filter(u => u.text === 'Dup lore');
         check('报告：同一文件同一位置同一文字合并，记录次数', dl.length === 1 && dl[0].count === 2 && dr.workbook['untranslatable.csv'].split('\n')[0].includes('count'));
     }
+    {
+        const ce = new NS.ExtractContext({});
+        NS.processScript('e.runCommand("event entity @s[tag=5fs_br:death] 5fs_br:death"); const x = "event entity @s 5fs_br:death"; d.runCommandAsync(x); p.runCommand("Some odd text here");', 'scripts/c.js', ce, {});
+        check('命令：event entity … / runCommand 里原样执行的字符串不当作文本', ce.entries.size === 0 && NS.looksLikeCommand('time set 1000') && !NS.looksLikeCommand('event entity gets angry'));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

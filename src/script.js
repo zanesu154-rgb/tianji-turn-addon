@@ -1051,6 +1051,7 @@
             if (isStr(e)) {
                 const r = translateCommand(e.value, ctx, keyBase('command'), file);
                 if (r.changed) { markHandled(e); overrides.set(e, () => JSON.stringify(r.cmd)); }
+                else handled.add(e);   // 原样执行的命令字符串，不是显示文本
                 return;
             }
             const parts = (e.type === 'TemplateLiteral' || (e.type === 'BinaryExpression' && e.operator === '+')) ? flattenConcat(e) : null;
