@@ -258,6 +258,21 @@ export function f(p, b){ b.button(onLight("§7Quick buy: §8OFF")); p.sendMessag
         check('条件常量展开成完整句式（%1$s only / · gate / · shared）', vals.includes('§7%1$s only') || vals.some(v => /%1\$s only/.test(v)) && vals.some(v => /%1\$s · gate/.test(v)));
         check('  └ 运行时：换过颜色码、前面加了颜色码的句式、数值 + 名称 都能翻译', out.length === 4 && out.every(tr), JSON.stringify(out));
     }
+    {
+        // YTAUN：属性表名称列 + 常量标签 "§8[flat]" + 运行时按颜色分段
+        const src = `const FLAT = "§8[flat]";
+const TREE = { stats: { mel: ["melee damage","flat",3,"added to every melee hit"], hp: ["max health","flat",20,"more hearts for you"], arm: ["armor","flat",10,"less damage taken from hits"] } };
+function fmt(k, v){ const [label] = TREE.stats[k]; return \`+\${v} \${label} \${FLAT}\`; }
+export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt("arm", 2).replace(" " + FLAT, "") + "§r"); b.body(\`entit\${n > 1 ? "ies" : "y"} removed\`); }`;
+        const cs = new NS.ExtractContext({});
+        const r = NS.processScript(src, 'scripts/ui/tree.js', cs, { injectRuntime: true });
+        const vals = [...cs.entries.values()].map(e => e.value);
+        const out = [];
+        require('vm').runInNewContext(r.content.replace(/export /g, '') + '\nf(b, 2);', { globalThis: {}, b: { body: (x) => out.push(x) } });
+        check('属性表名称列（armor / max health）和常量标签 [flat] 登记翻译；词尾 ies 不登记', ['armor', 'max health', 'melee damage', '[flat]'].every(v => vals.includes(v)) && !vals.includes('ies') && !vals.includes('flat'));
+        const js = JSON.stringify(out[0]);
+        check('  └ 运行时：“§a+2 max health §8[flat]§r” 按颜色分段逐段翻译', (js.match(/"translate"/g) || []).length >= 2 && js.includes('+2 '), js);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
