@@ -342,6 +342,43 @@
         const userMap = (fieldMode && fieldMode.map) || new Map();
         if (fieldMode && fieldMode.mode === 'off') return { groups, notes, sentenceRules };
 
+        // 变量名 → 赋给它的对象字面量（const a = {...} / a = {...}），用于解析 { en_US: a } 或 register("en_US", a, b)
+        const objBind = new Map();
+        walk(ast, (n) => {
+            if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && n.init.type === 'ObjectExpression') objBind.set(n.id.name, n.init);
+            else if (n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'Identifier' && n.right.type === 'ObjectExpression') objBind.set(n.left.name, n.right);
+        });
+        const resolveObj = (nd) => nd && (nd.type === 'ObjectExpression' ? nd : nd.type === 'Identifier' ? objBind.get(nd.name) : null);
+
+        // pairs: [[语言, 对象/数组节点]…]；同一路径下不同语言的字符串组成一组
+        const emitPairs = (pairs) => {
+            const byPath = new Map();
+            const collect = (node, lang, path) => {
+                if (!node) return;
+                if (node.type === 'Identifier' && path === '') node = resolveObj(node);
+                if (!node) return;
+                if (isStr(node) || (node.type === 'TemplateLiteral' && !node.expressions.length)) {
+                    if (!byPath.has(path)) byPath.set(path, new Map());
+                    const nd = isStr(node) ? node : Object.assign(node, { value: node.quasis[0].value.cooked });
+                    byPath.get(path).set(lang, nd);
+                } else if (node.type === 'ObjectExpression') {
+                    used.add(node);
+                    for (const p of node.properties) { const k = propKey(p); if (k != null) collect(p.value, lang, `${path}.${k}`); }
+                } else if (node.type === 'ArrayExpression') {
+                    node.elements.forEach((e, i) => collect(e, lang, `${path}[${i}]`));
+                }
+            };
+            for (const [lang, nd] of pairs) collect(nd, lang, '');
+            let n = 0;
+            for (const m of byPath.values()) {
+                const vals = [...m.values()].map(nd => nd.value);
+                if (m.size >= 2 && new Set(vals).size > 1 && vals.some(v => looksLikeText(v, 'loose'))) { m.fromDict = true; groups.push(m); n++; }
+                // 只有某种非英语字典里才有的条目（作者没写英文）→ 也归到该语言
+                else if (m.size === 1 && !m.has('en_US') && looksLikeText(vals[0], 'loose')) { m.fromDict = true; groups.push(m); n++; }
+            }
+            return n;
+        };
+
         const emit = (objNode, langOf) => {
             const byPath = new Map();
             const collect = (node, lang, path) => {
@@ -382,6 +419,27 @@
                 p.value.elements.some(e => e && e.type === 'ObjectExpression'))) return;
             emit(n, langOfKey);
         });
+
+        // (a2) 按语言分开的字典，用带语言代码的调用登记：
+        //      register("en_US", dictA, dictB); register("ja_JP", dictC, dictD)   （打包后的脚本常见，如 Bedrock Reimagined）
+        //      { en_US: dictA, ja_JP: dictC }（值是变量名）
+        {
+            const pairs = [];
+            walk(ast, (n) => {
+                if (n.type === 'CallExpression' && n.arguments.length >= 2 && isStr(n.arguments[0])) {
+                    const lang = localeOfKey(n.arguments[0].value);
+                    if (!lang) return;
+                    for (const a of n.arguments.slice(1)) { const o = resolveObj(a); if (o && !used.has(o)) pairs.push([lang, o]); }
+                } else if (n.type === 'ObjectExpression' && !used.has(n)) {
+                    const lp = n.properties.filter(p => { const k = propKey(p); return k != null && localeOfKey(k) && p.value && p.value.type === 'Identifier' && resolveObj(p.value); });
+                    if (lp.length >= 2) { used.add(n); lp.forEach(p => pairs.push([localeOfKey(propKey(p)), resolveObj(p.value)])); }
+                }
+            });
+            if (new Set(pairs.map(p => p[0])).size >= 2) {
+                const n = emitPairs(pairs);
+                if (n) notes.push(`识别到按语言登记的翻译字典（${[...new Set(pairs.map(p => p[0]))].join(', ')}），合并 ${n} 组`);
+            }
+        }
 
         // (b) 自动识别“语言不同的平行字段”
         //     对象数组 [{ s: "英文", v: "西语" }, ...]
@@ -1079,13 +1137,14 @@
             for (const x of parts) { if (x.lit != null) lits[lits.length - 1] += x.lit; else { order.push(x.g); lits.push(''); } }
             return { lits, order };
         };
-        const PH = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+        // 占位符：${name}（模板字面量写法）或 {0}（运行时 replaceAll 填入）
+        const PH = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{(\d{1,2})\}/g;
         for (const g of tables.groups) {
             const nodes = [...g.values()].filter(nd => !handled.has(nd));
-            if (nodes.length < 2) continue;
+            if (nodes.length < (g.fromDict ? 1 : 2)) continue;
             // 字符串里带 ${name} 占位符（脚本运行时才填入）→ 按句式登记，按占位符名字对齐参数
             const srcEntry = g.has('en_US') ? ['en_US', g.get('en_US')] : [...g.entries()][0];
-            const names = [...srcEntry[1].value.matchAll(PH)].map(m => m[1]);
+            const names = [...srcEntry[1].value.matchAll(PH)].map(m => m[1] || '#' + m[2]);
             if (names.length) {
                 const uniq = [...new Set(names)];
                 const toParts = (text) => {
@@ -1093,7 +1152,7 @@
                     let last = 0;
                     for (const m of text.matchAll(PH)) {
                         if (m.index > last) parts.push({ lit: text.slice(last, m.index) });
-                        const gi = uniq.indexOf(m[1]) + 1;
+                        const gi = uniq.indexOf(m[1] || '#' + m[2]) + 1;
                         if (!gi) return null;
                         parts.push({ g: gi });
                         last = m.index + m[0].length;

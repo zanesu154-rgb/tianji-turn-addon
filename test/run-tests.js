@@ -186,6 +186,29 @@ function renderCommand(cmd, lang) {
         check('UI 变量按模板判断：只当标签文字的提取，拼进表达式的（含子控件模板里）不提取',
             vp[0]['list@vc.text_desc'].$text !== '- Quick Container' && vp[1]['h@vc.hash_label'].$text === 'Color Code' && vp[2]['w@vc.wrapper'].$text === 'Wrapped Hash');
     }
+    {
+        // Bedrock Reimagined：每种语言一个字典，Ns("en_US", a, b) 登记；u(lang, key, ...args) 用 {0} 填参数
+        const src = `var a,b,c,d,X;a={"ui.play":"How to Play","ui.lang":"§aLanguage set to {0}","ui.only":"Back"};
+c={"ui.play":"遊び方","ui.lang":"§a言語を {0} に設定しました"};
+d={"ui.play":"Как играть","ui.lang":"§aЯзык: {0}","ui.extra":"Секвойный олень"};
+function Ns(e,...t){let m=X.get(e);m||(m=new Map,X.set(e,m));for(let i of t)for(let n in i)m.set(n,i[n])}
+X=new Map;Ns("en_US",a);Ns("ja_JP",c);Ns("ru_RU",d);
+function u(e,t,...r){let n=X.get(e)?.get(t)??X.get("en_US").get(t);for(let i=0;i<r.length;i++)n=n.replaceAll("{"+i+"}",String(r[i]));return n}
+export function show(p, lang){ p.sendMessage(u(lang,"ui.play")); p.sendMessage(u(lang,"ui.lang","日本語")); }`;
+        const cd = new NS.ExtractContext({});
+        const r = NS.processScript(src, 'scripts/imports.js', cd, { injectRuntime: true });
+        const byVal = (v) => [...cd.entries].find(([, e]) => e.value === v);
+        const play = byVal('How to Play'), lang = byVal('§aLanguage set to %1$s'), extra = byVal('Секвойный олень');
+        const tr = (k, l) => cd.translations.get(k) && cd.translations.get(k).get(l);
+        const sent = [];
+        require('vm').runInNewContext(r.content.replace(/export /g, '') + '\nshow(p,"ja_JP");show(p,"ru_RU");', { globalThis: {}, p: { sendMessage: (m) => sent.push(m) } });
+        check('按语言登记的字典（Ns("en_US", 字典)）：各语言共用一个键，{0} → %1$s',
+            play && lang && tr(play[0], 'ja_JP') === '遊び方' && tr(play[0], 'ru_RU') === 'Как играть' && tr(lang[0], 'ja_JP') === '§a言語を %1$s に設定しました'
+            && extra && tr(extra[0], 'ru_RU') === 'Секвойный олень' && !byVal('遊び方') && !byVal('Как играть'));
+        check('  └ 运行时：脚本按自己的语言取出的日文/俄文也能对应到同一个键（含参数）',
+            sent.length === 4 && sent[0].rawtext[0].translate === play[0] && sent[2].rawtext[0].translate === play[0]
+            && sent[1].rawtext[0].translate === lang[0] && sent[3].rawtext[0].translate === lang[0] && sent[1].rawtext[0].with.rawtext.length === 1);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
