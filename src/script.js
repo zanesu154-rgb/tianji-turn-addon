@@ -339,8 +339,9 @@
         const notes = [];
         const sentenceRules = [];
         const used = new Set();
+        const ignoredNodes = new Set();   // 残留的无用字典条目：不提取
         const userMap = (fieldMode && fieldMode.map) || new Map();
-        if (fieldMode && fieldMode.mode === 'off') return { groups, notes, sentenceRules };
+        if (fieldMode && fieldMode.mode === 'off') return { groups, notes, sentenceRules, ignoredNodes };
 
         // 变量名 → 赋给它的对象字面量（const a = {...} / a = {...}），用于解析 { en_US: a } 或 register("en_US", a, b)
         const objBind = new Map();
@@ -370,11 +371,47 @@
             };
             for (const [lang, nd] of pairs) collect(nd, lang, '');
             let n = 0;
-            for (const m of byPath.values()) {
+            // 没有英文版本的条目：只有代码里用到这个字典键时才保留
+            // （作者改了键名后，其他语言字典里常残留旧键，如 gluttony_ring ↔ 英文的 gluttony_rings）
+            let usedKey = null;
+            const isUsed = (path) => {
+                if (!usedKey) {
+                    const lits = new Set(), pats = [];
+                    walk(ast, (x) => {
+                        if (isStr(x) && x.parent && x.parent.type !== 'Property') lits.add(x.value);
+                        else if (isStr(x) && x.parent && x.parent.type === 'Property' && x.parent.value === x) lits.add(x.value);
+                        else if (x.type === 'BinaryExpression' && x.operator === '+' && !(x.parent && x.parent.type === 'BinaryExpression' && x.parent.operator === '+')) {
+                            // "guide.mob." + t + ".name" 这类拼接出来的键
+                            const parts = [];
+                            const flat = (e) => { if (e.type === 'BinaryExpression' && e.operator === '+') { flat(e.left); flat(e.right); } else parts.push(e); };
+                            flat(x);
+                            if (parts.some(isStr)) {
+                                const src = parts.map(e => isStr(e) ? e.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '.+').join('');
+                                if (src.replace(/\.\+/g, '').length >= 4) pats.push(new RegExp('^' + src + '$'));
+                            }
+                        }
+                        else if (x.type === 'TemplateLiteral' && x.expressions.length) {
+                            const q = x.quasis.map(t => (t.value.cooked || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+                            if (q.join('').length >= 4) pats.push(new RegExp('^' + q.join('.+') + '$'));
+                        }
+                    });
+                    usedKey = (k) => lits.has(k) || pats.some(r => r.test(k));
+                }
+                const k = path.replace(/^\./, '');
+                return usedKey(k);
+            };
+            let orphan = 0;
+            for (const [path, m] of byPath) {
+                if (!m.has('en_US') && /^\.[^.[\]]+(\.[^.[\]]+)+$/.test(path) && !isUsed(path)) { orphan++; continue; }
                 const vals = [...m.values()].map(nd => nd.value);
                 if (m.size >= 2 && new Set(vals).size > 1 && vals.some(v => looksLikeText(v, 'loose'))) { m.fromDict = true; groups.push(m); n++; }
                 // 只有某种非英语字典里才有的条目（作者没写英文）→ 也归到该语言
                 else if (m.size === 1 && !m.has('en_US') && looksLikeText(vals[0], 'loose')) { m.fromDict = true; groups.push(m); n++; }
+            }
+            if (orphan) {
+                notes.push(`${orphan} 条字典条目没有英文版本、代码中也没有用到（多为改名后残留的旧键），已忽略`);
+                // 这些字符串不再作为普通文字提取
+                const kept = new Set(groups); for (const m of byPath.values()) if (!m.has('en_US') && !kept.has(m)) for (const nd of m.values()) ignoredNodes.add(nd);
             }
             return n;
         };
@@ -598,7 +635,7 @@
                 notes.push(`自动识别句式规则（正则 → 模板）${rules.length} 条：英文 → ${lang}`);
             });
         }
-        return { groups, notes, sentenceRules };
+        return { groups, notes, sentenceRules, ignoredNodes };
 
     }
 
@@ -1130,6 +1167,13 @@
         }
         const tables = collectTranslationGroups(ast, { mode: lf.mode === 'manual' && !fileMap.size ? 'auto' : lf.mode, map: fileMap, fileHint: langHintFromFile(file) });
         let tableEntries = 0;
+        // 原文优先用英文；没有英文时用拉丁字母语言（方便译者），最后才用其他文字
+        const pickSource = (g) => {
+            for (const l of ['en_US', 'en_GB']) if (g.has(l)) return [l, g.get(l)];
+            const latin = [...g.entries()].find(([, nd]) => !/[^\u0000-\u024f\u1e00-\u1eff\s\p{P}\p{S}\p{N}]/u.test(nd.value));
+            return latin || [...g.entries()][0];
+        };
+        for (const nd of tables.ignoredNodes || []) handled.add(nd);
         // 句式规则：英文句式与译文句式共用一个键，运行时两种原文都能匹配
         const toValue = (parts) => parts.map(x => x.lit != null ? x.lit.replace(/%/g, '%%') : `%${x.g}$s`).join('');
         const toLits = (parts) => {
@@ -1143,7 +1187,7 @@
             const nodes = [...g.values()].filter(nd => !handled.has(nd));
             if (nodes.length < (g.fromDict ? 1 : 2)) continue;
             // 字符串里带 ${name} 占位符（脚本运行时才填入）→ 按句式登记，按占位符名字对齐参数
-            const srcEntry = g.has('en_US') ? ['en_US', g.get('en_US')] : [...g.entries()][0];
+            const srcEntry = pickSource(g);
             const names = [...srcEntry[1].value.matchAll(PH)].map(m => m[1] || '#' + m[2]);
             if (names.length) {
                 const uniq = [...new Set(names)];
@@ -1173,7 +1217,7 @@
                 continue;
             }
             // 以英文为原文（没有英文时用第一列）
-            const [firstLang, firstNode] = g.has('en_US') ? ['en_US', g.get('en_US')] : [...g.entries()][0];
+            const [firstLang, firstNode] = pickSource(g);
             const key = ctx.alloc(keyBase('str'), firstNode.value, meta('str'));
             for (const [lang, nd] of g) {
                 ctx.addTranslation(key, lang, nd.value);
