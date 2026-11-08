@@ -240,6 +240,24 @@ function extra(p, lang){ p.sendMessage(u(lang,"ui.extra")); }`;
         check('模板 ${} 里三元分支的文字也登记（" Starter kit added…"、mastered / complete）', vals.includes('Starter kit added to your pack.') && vals.includes('mastered') && vals.includes('complete'));
         check('  └ 运行时：join(", ") 拼起来的名称列表逐项翻译', JSON.stringify(out[0]).split('"translate"').length === 3 && out[2].rawtext && out[2].rawtext.filter(x => x.translate).length === 2);
     }
+    {
+        // YTAUN Skill Tree 原包：onLight 换颜色码、"§c" + reason、"+2.5 skill xp"、const kind = 条件 ? " only" : …
+        const src = `const META={xp:["skill xp","%"]};
+function onLight(t){ return String(t).replace(/§7/g,"§8"); }
+function reason(c){ return { ok:false, reason: \`Needs \${c} skill point\${c > 1 ? "s" : ""}.\` }; }
+function side(where, node, off){ const kind = node.ex ? " only" : node.gate ? " · gate" : " · shared"; return \`§7\${where}\${kind}§r\`; }
+function stat(v){ return \`+\${v} \${META.xp[0]}\`; }
+export function f(p, b){ b.button(onLight("§7Quick buy: §8OFF")); p.sendMessage("§c" + reason(2).reason); b.body(side("Archer", { ex: true })); b.body("§a" + stat(2.5) + "§r"); }`;
+        const cz = new NS.ExtractContext({});
+        const r = NS.processScript(src, 'scripts/ui/tree.js', cz, { injectRuntime: true });
+        const vals = [...cz.entries.values()].map(e => e.value);
+        const out = [];
+        const sink = { sendMessage: (x) => out.push(x), button: (x) => out.push(x), body: (x) => out.push(x) };
+        require('vm').runInNewContext(r.content.replace(/export /g, '') + '\nf(sink, sink);', { globalThis: {}, sink });
+        const tr = (x) => x && typeof x === 'object' && JSON.stringify(x).includes('"translate"');
+        check('条件常量展开成完整句式（%1$s only / · gate / · shared）', vals.includes('§7%1$s only') || vals.some(v => /%1\$s only/.test(v)) && vals.some(v => /%1\$s · gate/.test(v)));
+        check('  └ 运行时：换过颜色码、前面加了颜色码的句式、数值 + 名称 都能翻译', out.length === 4 && out.every(tr), JSON.stringify(out));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

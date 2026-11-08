@@ -756,15 +756,51 @@
       if (mm[3]) r.push({ text: mm[3] });
       return r;
     }
-    for (const [pk, re, , ord] of p) {
-      const x = re.exec(s);
-      if (!x) continue;
-      let caps = x.slice(1);
-      if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
-      return [{ translate: pk, with: { rawtext: caps.map(T) } }];
+    const pat = (t) => {
+      for (const [pk, re, , ord] of p) {
+        const x = re.exec(t);
+        if (!x) continue;
+        let caps = x.slice(1);
+        if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
+        return [{ translate: pk, with: { rawtext: caps.map(T) } }];
+      }
+      return null;
+    };
+    let r = pat(s);
+    if (r) return r;
+    // 句式两端多了颜色码（如 "§c" + reason）
+    if (mm && mm[2] !== s && mm[2] && (r = pat(mm[2]))) {
+      if (mm[1]) r.unshift({ text: mm[1] });
+      if (mm[3]) r.push({ text: mm[3] });
+      return r;
+    }
+    // 数值 + 名称（如 "+2.5 skill xp"、"12 xp"）：名称认识时只翻名称，数字和符号原样保留
+    const nm = /^((?:\\u00a7.|[\\s\\d+\\-.,%:\\/()\\ue000-\\uf8ff])*)([\\s\\S]*?)((?:\\u00a7.|[\\s\\d+\\-.,%:\\/()\\ue000-\\uf8ff])*)$/.exec(s);
+    if (nm && nm[2] && nm[2] !== s && /\\d/.test(nm[1] + nm[3]) && (k = m.get(nm[2]))) {
+      const r3 = [{ translate: k }];
+      if (nm[1]) r3.unshift({ text: nm[1] });
+      if (nm[3]) r3.push({ text: nm[3] });
+      return r3;
+    }
+    // 颜色码被代码替换过（如浅色背景下把 §7 换成 §8）：忽略颜色码再比一次，用原文的颜色
+    const core = mm ? mm[2] : s;
+    const sf = F(core);
+    if (sf && /[^\s\d\p{P}]/u.test(sf)) {
+      if (!cf) { cf = new Map(); for (const [t, kk] of m) { const f = F(t); if (f && !cf.has(f)) cf.set(f, kk); } }
+      if ((k = cf.get(sf))) {
+        const r2 = [{ translate: k }];
+        // 原文自带颜色码，两端只补回空白
+        const w1 = mm ? F2(mm[1]) : "", w3 = mm ? F2(mm[3]) : "";
+        if (w1) r2.unshift({ text: w1 });
+        if (w3) r2.push({ text: w3 });
+        return r2;
+      }
     }
     return list(s);
   };
+  const F = (t) => t.replace(/\u00a7./g, "").trim();
+  const F2 = (t) => t.replace(/\u00a7./g, "");
+  let cf = null;
   // 用逗号 / 分号 / 竖线等拼起来的列表（如 names.join(", ")）：每一项都认识时逐项翻译
   const list = (s) => {
     const parts = s.split(/((?:\\s|\\u00a7.)*[,;|\\u00b7\\u2022\\/\\uff0c\\u3001](?:\\s|\\u00a7.)*)/);
@@ -824,6 +860,7 @@
     return cmd;
   };
   const reg = (exact, pats) => {
+    cf = null;
     for (const [s, k] of exact) {
       if (!m.has(s)) m.set(s, k);
       if (s.indexOf("\\n") >= 0 && !m.has(N(s))) m.set(N(s), k);
@@ -993,6 +1030,7 @@
             });
         };
 
+        const wordy = (t) => /[A-Za-z]{2,}|[\u3040-\u30ff\u4e00-\u9fff]/.test(NS.stripFormatting(t)) && !looksLikeCommand(t);
         const meta = (hint) => ({ file, kind: 'script', scope: 'script', hint });
         const keyBase = (hint) => `script.${fb}.${hint}`;
 
@@ -1005,7 +1043,8 @@
                 if (li > 0) els.push(JSON.stringify({ text: '\n' }));
                 if (!line.length) return;
                 const lit = litText(line);
-                if (looksLikeText(lit, 'loose') && !(line.length === 1 && ctx.isKey(lit))) {
+                const dyn = line.some(p => !('lit' in p));
+                if ((looksLikeText(lit, 'loose') || (dyn && wordy(lit))) && !(line.length === 1 && ctx.isKey(lit))) {
                     // 剥离首尾格式码
                     const first = line[0], last = line[line.length - 1];
                     let lead = '', tail = '';
@@ -1338,13 +1377,70 @@
                 else exact.push([t, k]);
             }
         };
-        const registerPattern = (parts) => {
+        // ${cond ? " only" : " · gate"}、或 const kind = cond ? … : …; `${where}${kind}`：
+        // 分支全是字符串时展开成几种固定写法分别登记（译者看到完整句子，运行时也能整句匹配）
+        const literalChoices = (e, depth = 0) => {
+            if (!e || depth > 3) return null;
+            if (isStr(e)) return [e.value];
+            if (e.type === 'TemplateLiteral' && !e.expressions.length) return [e.quasis[0].value.cooked || ''];
+            if (e.type === 'ConditionalExpression') {
+                const a = literalChoices(e.consequent, depth + 1), b = literalChoices(e.alternate, depth + 1);
+                return a && b ? [...a, ...b] : null;
+            }
+            if (e.type === 'Identifier' && depth === 0) {
+                // 同一函数里 const x = 条件 ? "…" : "…"
+                let fn = e.parent;
+                while (fn && !/Function/.test(fn.type) && fn.type !== 'Program') fn = fn.parent;
+                if (!fn) return null;
+                let init = null, count = 0;
+                walk(fn.body || fn, (d) => { if (d.type === 'VariableDeclarator' && d.id.type === 'Identifier' && d.id.name === e.name) { count++; init = d.init; } });
+                if (count !== 1 || !init || init.type !== 'ConditionalExpression') return null;
+                const c = literalChoices(init, depth + 1);
+                if (c) for (const lit of (function f(x) { return x.type === 'ConditionalExpression' ? [...f(x.consequent), ...f(x.alternate)] : [x]; })(init)) handled.add(lit);
+                return c;
+            }
+            return null;
+        };
+        const expandChoices = (parts) => {
+            let variants = [[]];
+            let expanded = false;
+            for (const p of parts) {
+                const ch = ('expr' in p) ? literalChoices(p.expr) : null;
+                if (ch && ch.length <= 6 && variants.length * ch.length <= 12) {
+                    expanded = true;
+                    variants = variants.flatMap(v => [...new Set(ch)].map(c => [...v, { lit: c }]));
+                } else variants = variants.map(v => [...v, p]);
+            }
+            if (!expanded) return null;
+            // 合并相邻字面量
+            return variants.map(v => v.reduce((acc, p) => {
+                const last = acc[acc.length - 1];
+                if ('lit' in p && last && 'lit' in last) last.lit += p.lit; else if (!('lit' in p) || p.lit) acc.push({ ...p });
+                return acc;
+            }, []));
+        };
+
+        const registerPattern = (parts, relaxed = false) => {
+            if (!relaxed) {
+                const vs = expandChoices(parts);
+                if (vs) {
+                    if (!looksLikeText(litText(parts), 'loose') && !vs.some(v => looksLikeText(litText(v), 'loose'))) return;
+                    for (const v of vs) {
+                        if (!v.length) continue;
+                        if (!v.some(p => !('lit' in p))) {
+                            const t = litText(v).trim();
+                            if (wordy(t) && !ctx.isKey(t) && !exact.some(([x]) => x === t)) exact.push([t, ctx.alloc(keyBase('str'), t, meta('str'))]);
+                        } else registerPattern(v, true);
+                    }
+                    return;
+                }
+            }
             const lines = ctx.splitNewlines ? splitLines(parts) : [parts];
             for (const line of lines) {
                 if (!line.length) continue;
                 const hasExpr = line.some(p => !('lit' in p));
                 if (!hasExpr) { registerExact(litText(line), lines.length > 1); continue; }
-                if (!looksLikeText(litText(line), 'strict')) continue;
+                if (relaxed ? !wordy(litText(line)) : !looksLikeText(litText(line), 'strict')) continue;
                 // 字面量片段：表达式之间的文字（相邻表达式之间为空串）
                 const lits = [''];
                 for (const p of line) {
