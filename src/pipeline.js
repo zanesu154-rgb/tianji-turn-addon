@@ -449,7 +449,17 @@
         }
         for (const [rootDir, m] of ctx.packEntries) for (const [k, v] of m) rows.push([k, v, rootDir + '/manifest.json', 'manifest']);
         const stringsCsv = '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
-        const untrRows = [['file', 'where', 'text', 'reason'], ...ctx.untranslatable.map(u => [u.file, u.where, u.text, u.reason])];
+        // 同一文件、同一位置、同一文字只列一次（结构里堆叠的实体、交易表里重复的物品等），记录出现次数
+        {
+            const seen = new Map();
+            for (const u of ctx.untranslatable) {
+                const k = `${u.file}\u0000${u.where}\u0000${u.text}`;
+                if (seen.has(k)) seen.get(k).count++;
+                else seen.set(k, Object.assign(u, { count: 1 }));
+            }
+            ctx.untranslatable = [...seen.values()];
+        }
+        const untrRows = [['file', 'where', 'text', 'reason', 'count'], ...ctx.untranslatable.map(u => [u.file, u.where, u.text, u.reason, u.count])];
         const untranslatableCsv = '﻿' + untrRows.map(r => r.map(csvCell).join(',')).join('\r\n');
         // 玩家输入匹配表：按内部标记 / 回答汇总，列出已支持的语言，留空列给要补充的语言
         let inputCsv = null;

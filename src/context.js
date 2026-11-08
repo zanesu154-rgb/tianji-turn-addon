@@ -90,6 +90,8 @@
 
         report(file, where, text, reason) {
             if (isEmptyText(text)) return;
+            // 只有格式码（§u）、数字、技术 ID、已有翻译键的不是给玩家看的文字，不列入报告
+            if (!NS.looksLikeText(text) || this.isKey(text)) return;
             this.untranslatable.push({ file, where, text, reason });
         }
 
