@@ -229,6 +229,17 @@ function extra(p, lang){ p.sendMessage(u(lang,"ui.extra")); }`;
         NS.processScript('e.runCommand("event entity @s[tag=5fs_br:death] 5fs_br:death"); const x = "event entity @s 5fs_br:death"; d.runCommandAsync(x); p.runCommand("Some odd text here");', 'scripts/c.js', ce, {});
         check('命令：event entity … / runCommand 里原样执行的字符串不当作文本', ce.entries.size === 0 && NS.looksLikeCommand('time set 1000') && !NS.looksLikeCommand('event entity gets angry'));
     }
+    {
+        // YTAUN Skill Tree：三元分支里的文字、join(", ") 拼起来的名称列表
+        const src = 'const PROF={combat:{name:"Combat"},miner:{name:"Miner"}};\nexport function f(p,m,kit,mine){ p.sendMessage(`§aYour path: §f${m}§a.${kit ? " Starter kit added to your pack." : ""}§r`); p.sendMessage(`§6Branch ${m} ${mine ? "mastered" : "complete"}.`); p.sendMessage(["combat","miner"].map(x=>"§f"+PROF[x].name).join("§7, ")); }';
+        const cy = new NS.ExtractContext({});
+        const r = NS.processScript(src, 'scripts/ui/picker.js', cy, { injectRuntime: true });
+        const vals = [...cy.entries.values()].map(e => e.value);
+        const out = [];
+        require('vm').runInNewContext(r.content.replace(/export /g, '') + '\nf(p,"Mage",true,false);', { globalThis: {}, p: { sendMessage: (x) => out.push(x) } });
+        check('模板 ${} 里三元分支的文字也登记（" Starter kit added…"、mastered / complete）', vals.includes('Starter kit added to your pack.') && vals.includes('mastered') && vals.includes('complete'));
+        check('  └ 运行时：join(", ") 拼起来的名称列表逐项翻译', JSON.stringify(out[0]).split('"translate"').length === 3 && out[2].rawtext && out[2].rawtext.filter(x => x.translate).length === 2);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

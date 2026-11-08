@@ -763,7 +763,27 @@
       if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
       return [{ translate: pk, with: { rawtext: caps.map(T) } }];
     }
-    return null;
+    return list(s);
+  };
+  // 用逗号 / 分号 / 竖线等拼起来的列表（如 names.join(", ")）：每一项都认识时逐项翻译
+  const list = (s) => {
+    const parts = s.split(/((?:\\s|\\u00a7.)*[,;|\\u00b7\\u2022\\/\\uff0c\\u3001](?:\\s|\\u00a7.)*)/);
+    if (parts.length < 3) return null;
+    const els = [];
+    for (let i = 0; i < parts.length; i++) {
+      const x = parts[i];
+      if (i % 2) { els.push({ text: x }); continue; }
+      if (!x) continue;
+      let k = m.get(x), y = null;
+      if (k) y = [{ translate: k }];
+      else {
+        const mm = /^((?:\\u00a7.|\\s)*)([\\s\\S]*?)((?:\\u00a7.|\\s)*)$/.exec(x);
+        if (mm && (k = m.get(mm[2]))) { y = [{ translate: k }]; if (mm[1]) y.unshift({ text: mm[1] }); if (mm[3]) y.push({ text: mm[3] }); }
+      }
+      if (!y) return null;
+      els.push(...y);
+    }
+    return els;
   };
   const lookup = (s) => {
     if (cache.has(s)) return cache.get(s);
@@ -960,7 +980,18 @@
             const [a, b] = p.exprRange;
             return `(${src.slice(a.start, b.end)})`;
         };
-        const markHandled = (node) => walk(node, (n) => handled.add(n));
+        // 标记已静态改写的节点。模板 ${…} 里的表达式、拼接里的非字面量部分会原样保留（运行时 T() 翻译），
+        // 其中的字符串（如 ${kit ? " Starter kit added." : ""}）仍要登记到运行时映射，所以不往里标记。
+        const markHandled = (node) => {
+            const skip = new Set();
+            walk(node, (n) => {
+                if (skip.has(n)) { walk(n, (x) => skip.add(x)); return; }
+                handled.add(n);
+                if (n.type === 'TemplateLiteral') n.expressions.forEach(e => { if (!isStr(e)) skip.add(e); });
+                else if (n.type === 'BinaryExpression' && n.operator === '+')
+                    [n.left, n.right].forEach(e => { if (!isStr(e) && e.type !== 'TemplateLiteral' && !(e.type === 'BinaryExpression' && e.operator === '+')) skip.add(e); });
+            });
+        };
 
         const meta = (hint) => ({ file, kind: 'script', scope: 'script', hint });
         const keyBase = (hint) => `script.${fb}.${hint}`;
@@ -1299,10 +1330,12 @@
                 if (!looksLikeText(line, 'strict')) continue;
                 if (ctx.isKey(line)) continue;
                 // 拆行时每行去掉代码缩进；原样和去空白后的写法都登记
-                const t = (lines.length > 1 || fromSplit) ? line.trim() : line;
+                const multi = lines.length > 1 || fromSplit || line.indexOf('\n') >= 0;
+                const t = (lines.length > 1 || fromSplit || !multi) ? line.trim() : line;
                 const k = ctx.alloc(keyBase('str'), t, meta('str'));
-                exact.push([line, k]);
-                if (t !== line) exact.push([t, k]);
+                if (multi) { exact.push([line, k]); if (t !== line) exact.push([t, k]); }
+                // 单行首尾空格（如 " Starter kit added."）：lang 里存去空格的文字，运行时找到后再把空格补回
+                else exact.push([t, k]);
             }
         };
         const registerPattern = (parts) => {
@@ -1337,6 +1370,14 @@
                 if (isTechPosition(n)) return;
                 const v = n.value;
                 if (looksLikeCommand(v)) { commandTexts(v).forEach(registerExact); return; }
+                // 已改写的显示文本里 ${cond ? "mastered" : "complete"} 这种分支：单个小写词也是给玩家看的
+                const q = n.parent;
+                if (q && q.type === 'ConditionalExpression' && q.test !== n && q.parent && handled.has(q.parent)
+                    && (q.parent.type === 'TemplateLiteral' || (q.parent.type === 'BinaryExpression' && q.parent.operator === '+'))
+                    && /^[A-Za-z][A-Za-z' -]{1,40}$/.test(v) && !ctx.isKey(v) && !exact.some(([x]) => x === v)) {
+                    exact.push([v, ctx.alloc(keyBase('word'), v, meta('word'))]);
+                    return;
+                }
                 registerExact(v);
                 return;
             }
