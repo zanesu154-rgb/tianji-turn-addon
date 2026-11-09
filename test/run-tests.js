@@ -387,6 +387,18 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
             /"translate"/.test(dlg) && loneLang && /Huh\? Hello/.test(loneLang.toString()) && wrp.some(p => p.pack_id === loneUuid)
             && !em.files.has(prefix + 'resource_packs/Fx_BP_texts/manifest.json') && 'packs_strings.csv' in er.workbook);
     }
+    {
+        // 自定义 NPC 实体（low:npc）：按 NPC 数据字段识别
+        const { T, NbtString, writeAll } = NS.NBT;
+        const S = (n, v) => ({ t: T.STRING, n, v: new NbtString(v, null) });
+        const L = (n, et, items) => ({ t: T.LIST, n, v: { et, items } });
+        const C = (n, v) => ({ t: T.COMPOUND, n, v });
+        const npc = [S('identifier', 'low:npc'), S('CustomName', 'NPC'), S('RawtextName', '§6Raymond'), S('InterativeText', 'Huh? Hello'), L('Pos', T.FLOAT, [0.5, 1, 0.5]), { t: T.LONG, n: 'UniqueID', v: -7n }];
+        const root = [{ t: T.INT, n: 'format_version', v: 1 }, L('size', T.INT, [1, 1, 1]), C('structure', [L('block_indices', T.LIST, [{ et: T.INT, items: [-1] }, { et: T.INT, items: [-1] }]), L('entities', T.COMPOUND, [npc]), C('palette', [C('default', [L('block_palette', T.COMPOUND, []), C('block_position_data', [])])])]), L('structure_world_origin', T.INT, [0, 0, 0])];
+        const st = await NS.openStructure('bro.mcstructure', writeAll([{ t: T.COMPOUND, n: '', v: root }]), {}, () => {});
+        const vals = [...st.ctx.entries.values()].map(e => e.value);
+        check('自定义 NPC 实体（low:npc）的对话和名字也提取，CustomName 不误报', vals.includes('Huh? Hello') && vals.includes('Raymond') && !st.ctx.untranslatable.some(u => u.text === 'NPC'), JSON.stringify(vals));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
