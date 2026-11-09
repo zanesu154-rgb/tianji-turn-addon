@@ -256,7 +256,9 @@
             const ident = getStr(c, 'identifier') || '';
             const uid = child(c, 'UniqueID');
             const idPart = uid ? String(uid.v).replace('-', 'n') : 'x';
-            if (ident === 'minecraft:npc') {
+            // 自定义 NPC（如 low:npc，runtime_identifier 为 minecraft:npc）：按是否带 NPC 数据判断，不只看 ID
+            const isNpc = ident === 'minecraft:npc' || ['InterativeText', 'RawtextName', 'Actions'].some(k => getStr(c, k) != null);
+            if (isNpc) {
                 const base = `${kp}.npc.${idPart}`;
                 const name = getStr(c, 'RawtextName');
                 if (name) { const raw = textToRaw(ctx, name, `${base}.name`, meta); if (raw) setS(P('RawtextName'), raw); }
@@ -291,7 +293,7 @@
             }
             if (getStr(c, 'Command')) cmd(P('Command'), `${kp}.command.${idPart}`);   // 命令方块矿车
             const cn = getStr(c, 'CustomName');
-            if (cn && ident !== 'minecraft:npc' && (ident !== 'minecraft:command_block_minecart' || ctx.listCommandBlockNames)) report(P('CustomName'), ident === 'minecraft:command_block_minecart' ? '命令方块名称' : '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
+            if (cn && !isNpc && (ident !== 'minecraft:command_block_minecart' || ctx.listCommandBlockNames)) report(P('CustomName'), ident === 'minecraft:command_block_minecart' ? '命令方块名称' : '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
             const who = rec.kind === 'player' ? 'player' : idPart;
             for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory', 'EnderChestInventory', 'PlayerUIItems']) items(P(f), `${kp}.book.${who}.${f.toLowerCase()}`);
         }
