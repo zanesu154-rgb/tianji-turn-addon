@@ -32,6 +32,36 @@ const summaryEl = $('summary');
 //  日志 / 进度
 // ================================================================
 
+/** 大量逐条记录：日志文件里全部保留，页面只显示前 100 条 */
+function logMany(items, fmt, type = 'warn') {
+    const SHOW = 100;
+    items.forEach((u, i) => {
+        const line = `[${new Date().toLocaleTimeString()}] ${fmt(u)}`;
+        if (i < SHOW) log(fmt(u), type);
+        else state.logContent += line + '\n';
+    });
+    if (items.length > SHOW) log(`……另有 ${items.length - SHOW} 条未在页面显示（见“下载日志”或下方编辑器 / 翻译表）`, type);
+}
+
+// 日志：先攒起来，每帧最多写一次页面（上万行时逐行写会卡死，手机上尤其明显）
+let logQueue = [];
+let logFlushScheduled = false;
+function flushLog() {
+    logFlushScheduled = false;
+    if (!logQueue.length) return;
+    const frag = document.createDocumentFragment();
+    for (const [line, type] of logQueue) {
+        const span = document.createElement('span');
+        span.className = `log-${type}`;
+        span.textContent = line + '\n';
+        frag.appendChild(span);
+    }
+    logQueue = [];
+    logEl.appendChild(frag);
+    // 页面上最多保留 3000 行，完整内容在“下载日志”里
+    while (logEl.childNodes.length > 3000) logEl.removeChild(logEl.firstChild);
+    logEl.scrollTop = logEl.scrollHeight;
+}
 function log(msg, type = 'info') {
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
     state.logContent += line + '\n';
@@ -40,11 +70,8 @@ function log(msg, type = 'info') {
         toggleLogBtn.textContent = '收起';
         logAutoExpanded = true;
     }
-    const span = document.createElement('span');
-    span.className = `log-${type}`;
-    span.textContent = line + '\n';
-    logEl.appendChild(span);
-    logEl.scrollTop = logEl.scrollHeight;
+    logQueue.push([line, type]);
+    if (!logFlushScheduled) { logFlushScheduled = true; requestAnimationFrame(flushLog); }
 }
 
 function setProgress(percent, text) {
@@ -223,7 +250,7 @@ async function processStructure(file) {
     state.session = session;
     state.fs = null;
     state.resultName = `${state.originalName}_i18n.zip`;
-    for (const u of session.ctx.untranslatable) log(`[需人工处理] ${u.file} ${u.where}: ${u.text}`, 'warn');
+    logMany(session.ctx.untranslatable, u => `[需人工处理] ${u.file} ${u.where}: ${u.text}`);
     renderSummary({ ctx: session.ctx, summary: { ...worldSummary(session), createdRP: session.ctx.entries.size ? `${state.originalName}_texts.mcpack` : null, structure: true } });
     NS.mountWorldEditor($('nbt-editor'), session, {
         onChange: () => { state.resultBlob = null; state.workbookBlob = null; },
@@ -291,6 +318,7 @@ async function processFile(file) {
     state.logContent = '';
     state.resultBlob = state.workbookBlob = null;
     logEl.innerHTML = '';
+    logQueue = [];
     logAutoExpanded = false;
     summaryEl.hidden = true;
     downloadLogBtn.disabled = downloadResultBtn.disabled = downloadWorkbookBtn.disabled = true;
@@ -326,7 +354,7 @@ async function processFile(file) {
             // 存档：先打开并自动转换（只改内存），可在 NBT 编辑器里继续手动修改，下载时才写出
             const session = await NS.openWorld(fs, options, (m, t) => log(m, t || 'info'));
             state.session = session;
-            for (const u of session.ctx.untranslatable) log(`[需人工处理] ${u.file} ${u.where}: ${u.text}`, 'warn');
+            logMany(session.ctx.untranslatable, u => `[需人工处理] ${u.file} ${u.where}: ${u.text}`);
             state.resultName = `${state.originalName}_i18n.${ext === 'mctemplate' ? 'mctemplate' : 'mcworld'}`;
             renderSummary({ ctx: session.ctx, summary: worldSummary(session) });
             NS.mountWorldEditor($('nbt-editor'), session, {
@@ -342,7 +370,7 @@ async function processFile(file) {
         const s = res.summary;
 
         for (const w of s.warnings) log(`⚠ ${w}`, 'warn');
-        for (const u of res.ctx.untranslatable) log(`[无法本地化] ${u.file} ${u.where}: ${u.text}（${u.reason}）`, 'warn');
+        logMany(res.ctx.untranslatable, u => `[无法本地化] ${u.file} ${u.where}: ${u.text}（${u.reason}）`);
         log(`新增翻译键 ${s.newKeys} 条，包名/描述 ${s.packKeys} 条，修改文件 ${s.processedFiles} 个`);
 
         setProgress(85, '打包中...');
