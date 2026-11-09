@@ -233,7 +233,7 @@
             // 命令方块执行 say 时，发送者名是它自己的名字（没起名时为 @）
             if (id === 'CommandBlock') cmd(P('Command'), `${kp}.command.${pos}`, { text: getStr(c, 'CustomName') || '@' });
             const cn = getStr(c, 'CustomName');
-            if (cn && id === 'CommandBlock') report(P('CustomName'), '命令方块名称', cn, '命令方块名称（say 等命令输出时显示的发送者名）不支持翻译键');
+            if (cn && id === 'CommandBlock') { if (ctx.listCommandBlockNames) report(P('CustomName'), '命令方块名称', cn, '命令方块名称（say 等命令输出时显示的发送者名）不支持翻译键'); }
             else if (cn) report(P('CustomName'), '方块名称', cn, '容器/方块的自定义名称不支持翻译键');
             items(P('Items'), `${kp}.book.${pos}`);
             if (child(c, 'book')) {
@@ -291,7 +291,7 @@
             }
             if (getStr(c, 'Command')) cmd(P('Command'), `${kp}.command.${idPart}`);   // 命令方块矿车
             const cn = getStr(c, 'CustomName');
-            if (cn && ident !== 'minecraft:npc') report(P('CustomName'), ident === 'minecraft:command_block_minecart' ? '命令方块名称' : '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
+            if (cn && ident !== 'minecraft:npc' && (ident !== 'minecraft:command_block_minecart' || ctx.listCommandBlockNames)) report(P('CustomName'), ident === 'minecraft:command_block_minecart' ? '命令方块名称' : '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
             const who = rec.kind === 'player' ? 'player' : idPart;
             for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory', 'EnderChestInventory', 'PlayerUIItems']) items(P(f), `${kp}.book.${who}.${f.toLowerCase()}`);
         }
@@ -490,7 +490,7 @@
 
     // ---------------- 打开存档 ----------------
     async function openWorld(fs, userOptions = {}, log = () => {}) {
-        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: false, sayMode: 'tellraw', baseName: 'world', ...userOptions };
+        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: false, sayMode: 'tellraw', listCommandBlockNames: false, baseName: 'world', ...userOptions };
         const all = fs.list();
         const levelDat = all.filter(p => /(^|\/)level\.dat$/.test(p)).sort((a, b) => a.length - b.length)[0];
         if (!levelDat) throw new Error('没有找到 level.dat，这不是世界存档');
@@ -531,6 +531,7 @@
 
         const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines });
         ctx.sayMode = opt.sayMode;
+        ctx.listCommandBlockNames = !!opt.listCommandBlockNames;
         convertRecords(ctx, records, log);
 
         // 原始 world_resource_packs.json（多次生成时都基于原文件，避免重复登记）
@@ -680,7 +681,7 @@
 
     /** 单独的结构文件：打开为可编辑会话 */
     async function openStructure(fileName, bytes, userOptions = {}, log = () => {}) {
-        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: false, sayMode: 'tellraw', ...userOptions };
+        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: false, sayMode: 'tellraw', listCommandBlockNames: false, ...userOptions };
         const name = fileName.replace(/^.*\//, '').replace(/\.mcstructure$/i, '');
         const rec = structureRecord(name, bytes);
         const size = child(rec.tags[0].v, 'size');
@@ -688,6 +689,7 @@
         const records = [rec];
         const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines });
         ctx.sayMode = opt.sayMode;
+        ctx.listCommandBlockNames = !!opt.listCommandBlockNames;
         convertRecords(ctx, records, log);
         const session = makeSession(records, ctx, opt, { structureName: name, levelName: name });
         /** 返回 { structure: Uint8Array, pack: Map(路径→文本) | null, workbook, summary } */

@@ -20,6 +20,7 @@
         targetLangs: ['en_US', 'zh_CN'],
         splitNewlines: false,          // lang 支持 \n 换行（游戏内实测），多行文本默认一个键
         sayMode: 'tellraw',            // say/tell 转换：keep | tellraw | titleraw | actionbar
+        listCommandBlockNames: false,  // 命令方块名称多为作者工作用标记，默认不列入需人工翻译
         processScripts: true,
         injectRuntime: true,
         fillMissing: true,
@@ -119,6 +120,7 @@
 
         const ctx = new ExtractContext({ knownKeys, existingValues, splitNewlines: opt.splitNewlines });
         ctx.sayMode = opt.sayMode;
+        ctx.listCommandBlockNames = !!opt.listCommandBlockNames;
         const info = { defs: { items: [], blocks: [], entities: [], spawnEggs: [] }, packRoot: '' };
 
         // ---------------- 3. 预扫描 UI / 脚本 ----------------
