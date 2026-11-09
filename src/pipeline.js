@@ -118,7 +118,8 @@
         }
         log(`已有翻译键：${knownKeys.size} 条`);
 
-        const ctx = new ExtractContext({ knownKeys, existingValues, splitNewlines: opt.splitNewlines });
+        if (typeof NS.ExtractContext !== 'function') throw new Error('页面文件没有完整加载（context.js），请刷新页面后重试');
+        const ctx = new NS.ExtractContext({ knownKeys, existingValues, splitNewlines: opt.splitNewlines });
         ctx.sayMode = opt.sayMode;
         ctx.listCommandBlockNames = !!opt.listCommandBlockNames;
         const info = { defs: { items: [], blocks: [], entities: [], spawnEggs: [] }, packRoot: '' };
@@ -336,6 +337,7 @@
             if (rootPack) {
                 const newRoot = `${NS.sanitizeKeyPart(opt.baseName)}_BP`;
                 for (const f of fs.list()) fs.move(f, `${newRoot}/${f}`);
+                for (const rec of ctx.structureRecords || []) rec.file = `${newRoot}/${rec.file}`;
                 for (const [k, v] of [...pending]) { pending.delete(k); pending.set(`${newRoot}/${k}`, v); }
                 if (ctx.packEntries.has('')) { ctx.packEntries.set(newRoot, ctx.packEntries.get('')); ctx.packEntries.delete(''); }
                 if (packLangs.has('')) {

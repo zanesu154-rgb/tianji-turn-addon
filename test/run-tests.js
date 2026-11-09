@@ -324,6 +324,20 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const hits = st.search('已翻译：');
         check('附加包内结构：翻译表带 ref，可导入并写回 .mcstructure', !!ss && sRows.length > 0 && h.includes('translation') && imp.applied >= sRows.length && n === 1 && hits.length >= sRows.length, JSON.stringify({ rows: sRows.length, imp, n, hits: hits.length }));
     }
+    {
+        // 只有结构的单个 .mcpack（包在根目录，转换时移入子文件夹）：手动修改写回移动后的位置
+        const files = new Map();
+        files.set('manifest.json', Buffer.from(JSON.stringify({ format_version: 2, header: { name: 'MyStructures', uuid: 'c0000000-0000-4000-8000-000000000001', version: [1, 0, 0], min_engine_version: [1, 20, 0] }, modules: [{ type: 'data', uuid: 'c0000000-0000-4000-8000-000000000002', version: [1, 0, 0] }] })));
+        files.set('structures/village.mcstructure', readDir(path.join(__dirname, 'fixture')).get('BP/structures/village.mcstructure'));
+        const rm = new MemFS(files);
+        const rr = await NS.runPipeline(rm, { baseName: 'sp' }, () => {});
+        const ss = rr.structureSession;
+        if (ss) ss.setValue(ss.ctx.untranslatable[0].ref, '根目录改名');
+        const n = ss ? ss.applyTo(rm) : 0;
+        const moved = rm.files.get('sp_BP/structures/village.mcstructure');
+        const st = moved && await NS.openStructure('v.mcstructure', moved, {}, () => {});
+        check('根目录结构包：移入子文件夹后，手动修改写回新位置（不在根目录多出文件）', n === 1 && !rm.files.has('structures/village.mcstructure') && st && st.search('根目录改名').length === 1);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

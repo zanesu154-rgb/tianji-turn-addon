@@ -302,7 +302,7 @@ async function buildWorldOutputs() {
 // ================================================================
 
 // 页面各脚本文件版本不一致（通常是浏览器缓存）时，提示强制刷新
-const REQUIRED = ['runPipeline', 'processScript', 'collectTranslationGroups', 'collectUiVarUsage', 'translateCommand', 'regexPhrases', 'runWorldPipeline'];
+const REQUIRED = ['ExtractContext', 'runPipeline', 'processScript', 'collectTranslationGroups', 'collectUiVarUsage', 'translateCommand', 'regexPhrases', 'runWorldPipeline', 'openStructure', 'convertStructureBytes', 'makeAddonStructureSession', 'mountWorldEditor', 'collectParamTexts'];
 function checkVersion() {
     const missing = REQUIRED.filter(n => typeof NS[n] !== 'function');
     if (missing.length) {
