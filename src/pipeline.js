@@ -313,7 +313,8 @@
         // 去掉 BP / RP 等后缀后的名字：Foo_BP ↔ Foo_RP、Foo/BP ↔ Foo/RP、Foo [BP] ↔ Foo [RP]
         const stripKind = (t) => String(t || '').toLowerCase().replace(/[\[\]()]/g, ' ').trim()
             .replace(/[\s_\-.\/]*(bp|rp|behaviou?r[\s_-]*packs?|resources?[\s_-]*packs?|behaviou?r|resources?|beh|res|b|r)$/i, '').replace(/[\s_\-.\/]+$/, '');
-        const baseName = (pk) => stripKind(pk.root) || stripKind(pk.manifest.header && pk.manifest.header.name);
+        // 比较最后一级文件夹名（behavior_packs/Foo_BP ↔ resource_packs/Foo_RP）；最后一级只是 BP/RP 时用整个路径
+        const baseName = (pk) => stripKind(pk.root.split('/').pop()) || stripKind(pk.root) || stripKind(pk.manifest.header && pk.manifest.header.name);
         const pairOf = new Map();   // BP.root → RP
         {
             const bpsAll = packs.filter(p => p.type === 'BP'), rpsAll = packs.filter(p => p.type === 'RP');
@@ -362,7 +363,7 @@
             }
             const bpName = (bps[0] && bps[0].manifest.header.name) || opt.baseName;
             const realBpName = ctx.packEntries.get(bps[0] && bps[0].root)?.get('pack.name') || bpName;
-            const rpRoot = packs.filter(p => p.type === 'BP').length > 1
+            const rpRoot = opt.newRpRoot ? opt.newRpRoot(bpNeedingRp) : packs.filter(p => p.type === 'BP').length > 1
                 ? `${NS.sanitizeKeyPart(bpNeedingRp.root.split('/').pop() || opt.baseName)}_texts_RP`
                 : `${NS.sanitizeKeyPart(opt.baseName)}_texts_RP`;
             const uuid = () => (root.crypto && root.crypto.randomUUID) ? root.crypto.randomUUID()
@@ -570,6 +571,7 @@
             inputGroups: ctx.inputTables.length,
             sourceLang,
             createdRP: createdRP ? createdRP.root : null,
+            createdRPs: createdRPs.map(p => ({ root: p.root, uuid: p.manifest.header.uuid })),
             restructured,
         };
         return {
