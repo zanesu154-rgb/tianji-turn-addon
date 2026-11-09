@@ -68,8 +68,11 @@
         if (/^[a-z]+[A-Z][A-Za-z0-9]*$/.test(t)) return true;          // camelCase
         if (/^[a-z0-9_]+(\.[a-z0-9_]+)+$/i.test(t)) return true;       // a.b.c
         if (/^[#$]/.test(t)) return true;                              // UI 绑定 / 变量
-        if (/^[{[].*[}\]]$/s.test(t)) return true;                     // JSON
-        if (/=>|\bfunction\b|\breturn\b|;\s*$/.test(t)) return true;
+        if (/^[{[].*[}\]]$/s.test(t)) {                                // JSON（"[Info] 文字 [x]" 这种不算）
+            try { JSON.parse(t); return true; } catch (e) { if (/^\{\s*"/.test(t)) return true; }
+        }
+        // 代码特征；英文里的 “fails to function”、“return to base” 不算
+        if (/=>|\bfunction\s*[\w$]*\s*\(|\breturn\s+[\w$.()[\]'"]+\s*;|;\s*$/.test(t)) return true;
         if (/^q\.|^query\.|^v\.|^variable\.|^math\./.test(t)) return true; // Molang
         return false;
     }
