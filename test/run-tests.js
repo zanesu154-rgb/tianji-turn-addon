@@ -288,6 +288,26 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const kv = [...ck.entries.values()].map(e => e.value);
         check('拼出翻译键 / ID / 路径的模板（potion.${id}.splash.name）不提取', kv.length === 1 && kv[0] === 'Potion of %1$s');
     }
+    {
+        // 多个附加包放在一起：每个包的文字写进自己的资源包
+        const files = new Map();
+        for (const [n, b] of readDir(path.join(__dirname, 'fixture'))) files.set('Fixture/' + n, b);
+        const man = (name, uuid, type, deps) => Buffer.from(JSON.stringify({ format_version: 2, header: { name, uuid, version: [1, 0, 0], min_engine_version: [1, 20, 0] }, modules: [{ type, uuid: uuid.replace(/^./, 'f'), version: [1, 0, 0], entry: 'scripts/main.js' }], dependencies: deps }));
+        files.set('Other [BP]/manifest.json', man('Other BP', 'a0000000-0000-4000-8000-000000000001', 'script', [{ uuid: 'a0000000-0000-4000-8000-000000000002', version: [1, 0, 0] }]));
+        files.set('Other [BP]/scripts/main.js', Buffer.from('import { world } from "@minecraft/server"; world.sendMessage("Hello from the other pack!");'));
+        files.set('Other [RP]/manifest.json', man('Other RP', 'a0000000-0000-4000-8000-000000000002', 'resources'));
+        files.set('Lone_BP/manifest.json', man('Lone', 'b0000000-0000-4000-8000-000000000001', 'script'));
+        files.set('Lone_BP/scripts/main.js', Buffer.from('import { world } from "@minecraft/server"; world.sendMessage("Lonely message here!");'));
+        const mm = new MemFS(files);
+        await NS.runPipeline(mm, { baseName: 'mix' }, () => {});
+        const vals = (p) => mm.files.has(p) ? [...NS.parseLang(mm.files.get(p).toString()).values()] : [];
+        const fx = vals('Fixture/RP/texts/en_US.lang'), ot = vals('Other [RP]/texts/en_US.lang');
+        const lone = [...mm.files.keys()].find(p => /Lone_BP_texts_RP\/texts\/en_US\.lang$/.test(p));
+        const lv = lone ? vals(lone) : [];
+        check('多个附加包：各自的文字写进各自的资源包，不混在一起',
+            ot.includes('Hello from the other pack!') && !fx.includes('Hello from the other pack!') && !ot.includes('Lonely message here!')
+            && lv.includes('Lonely message here!') && !fx.includes('Lonely message here!') && fx.length > 10 && ot.length < 5);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

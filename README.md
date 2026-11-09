@@ -16,6 +16,15 @@ vendor/acorn.js   JS 解析器（MIT）
 test/             测试附加包 + 端到端测试（node test/run-tests.js）
 ```
 
+
+### 多个附加包放在一起
+
+一个 .mcaddon / .zip 里有多个附加包时，按包分别写 lang：
+
+- 行为包与资源包配对：先看 manifest 的 dependencies（任一方向），再看去掉 BP/RP 后缀的文件夹名或包名（`Foo_BP` ↔ `Foo_RP`、`Foo/BP` ↔ `Foo/RP`、`Foo [BP]` ↔ `Foo [RP]`）
+- 每个翻译键写进“用到它的文件”所在包对应的资源包；两个包都用到同一句时两边都写
+- 没有资源包的行为包各自新建一个 `<行为包名>_texts_RP`，并让该行为包依赖它
+
 ## 第一步：修正的问题
 
 | 问题 | 原来 | 现在 |
