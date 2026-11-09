@@ -273,6 +273,15 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const js = JSON.stringify(out[0]);
         check('  └ 运行时：“§a+2 max health §8[flat]§r” 按颜色分段逐段翻译', (js.match(/"translate"/g) || []).length >= 2 && js.includes('+2 '), js);
     }
+    {
+        const src = 'const N={a:{name:"Tanker"},b:{name:"Demolitionist"}};\nexport function f(p){ const next=["a","b"].map(x=>N[x].name); p.sendMessage(`§7You may now start: §f${next.join("§7 or §f")}§7.§r`); }';
+        const cj = new NS.ExtractContext({});
+        const r = NS.processScript(src, 'scripts/ui/tree.js', cj, { injectRuntime: true });
+        const out = [];
+        require('vm').runInNewContext(r.content.replace(/export /g, '') + '\nf(p);', { globalThis: {}, p: { sendMessage: (x) => out.push(x) } });
+        const js = JSON.stringify(out[0]);
+        check('join("§7 or §f") 拼接的列表：分隔词 or 登记，运行时逐项翻译', [...cj.entries.values()].some(e => e.value === 'or') && (js.match(/"translate"/g) || []).length === 4, js);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
