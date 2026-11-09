@@ -557,11 +557,41 @@
         ctx.listCommandBlockNames = !!opt.listCommandBlockNames;
         convertRecords(ctx, records, log);
 
+        // ---- 存档自带的行为包 / 资源包（地图常把对话、函数、脚本放在这里）：按附加包流程处理 ----
+        let embedded = null;
+        const embeddedManifests = all.filter(f => f.startsWith(rootDir) && /^(behavior_packs|resource_packs)\/[^/]+\/manifest\.json$/.test(f.slice(rootDir.length)) && !f.startsWith(packDir));
+        if (embeddedManifests.length && NS.runPipeline) {
+            const sub = {
+                list: () => fs.list().filter(f => f.startsWith(rootDir) && /^(behavior_packs|resource_packs)\//.test(f.slice(rootDir.length)) && !f.startsWith(packDir)).map(f => f.slice(rootDir.length)),
+                readText: (p) => fs.readText(rootDir + p),
+                readBytes: (p) => fs.readBytes(rootDir + p),
+                writeText: (p, t) => fs.writeText(rootDir + p, t),
+                writeBytes: (p, b) => fs.writeBytes(rootDir + p, b),
+                move: () => { throw new Error('不支持'); },
+            };
+            log(`[存档] 发现存档自带的包 ${embeddedManifests.length} 个，按附加包方式提取`);
+            try {
+                embedded = await NS.runPipeline(sub, {
+                    ...NS.DEFAULT_OPTIONS, ...opt, baseName: levelName,
+                    newRpRoot: (bp) => `resource_packs/${NS.sanitizeKeyPart(bp.root.split('/').pop())}_texts`,
+                }, (m, t) => log('  ' + m, t));
+            } catch (e) { log(`[存档] 自带包处理失败：${e.message}`, 'warn'); }
+        }
+
         // 原始 world_resource_packs.json（多次生成时都基于原文件，避免重复登记）
         const wrpPath = rootDir + 'world_resource_packs.json';
         let wrpOriginal = [];
         if (all.includes(wrpPath)) { const d = NS.parseJsonLenient(await fs.readText(wrpPath)); if (Array.isArray(d)) wrpOriginal = d; }
-        const session = makeSession(records, ctx, opt, { levelName, rootDir, levelDatPath: levelDat, wrpOriginal, existingPack, packDir });
+        // 自带行为包没有资源包时新建的翻译资源包：登记到 world_resource_packs.json
+        if (embedded && embedded.summary.createdRPs) for (const c of embedded.summary.createdRPs) {
+            if (!wrpOriginal.some(p => p && p.pack_id === c.uuid)) wrpOriginal.push({ pack_id: c.uuid, version: [1, 0, 0] });
+        }
+        if (embedded && embedded.summary.createdRPs && embedded.summary.createdRPs.length) fs.writeText(wrpPath, JSON.stringify(wrpOriginal, null, 2));
+        if (embedded) {
+            ctx.warnings.push(...embedded.ctx.warnings);
+            log(`[存档] 自带包：新增翻译键 ${embedded.summary.newKeys} 条，无法本地化 ${embedded.ctx.untranslatable.length} 处（见翻译表 packs_untranslatable.csv）`);
+        }
+        const session = makeSession(records, ctx, opt, { levelName, rootDir, levelDatPath: levelDat, wrpOriginal, existingPack, packDir, embedded });
         session.build = async function (outFs, buildLog = log) { return buildWorld(this, outFs, dbFiles, db, buildLog); };
         return session;
     }
@@ -611,6 +641,8 @@
             'untranslatable.csv': csvText([['ref', 'location', 'where', 'text', 'reason', 'translation'],
                 ...ctx.untranslatable.filter(u => !hidden.has(categoryOf(u))).map(u => [u.ref || '', u.file, u.where, u.text, u.reason, ''])]),
             [`source_${sourceLang}.lang`]: [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n') + '\n',
+            // 存档自带的行为包 / 资源包
+            ...(session.embedded ? Object.fromEntries(Object.entries(session.embedded.workbook).map(([n, c]) => [`packs_${n}`, c])) : {}),
         };
     }
 

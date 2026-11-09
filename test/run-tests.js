@@ -367,6 +367,26 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const wrp = JSON.parse(wm.files.get([...wm.files.keys()].find(p => p.endsWith('world_resource_packs.json'))).toString());
         check('存档再次转换：已有翻译资源包保留译文，新键追加，不重复登记', zh1.get(k0) === '【已翻译】' && r2.ctx.entries.size > 0 && [...r2.ctx.entries.keys()].every(k => zh1.has(k) && !zh0.has(k)) && packs.length === 1 && wrp.length === new Set(wrp.map(p => p.pack_id)).size);
     }
+    {
+        // 存档自带的行为包 / 资源包：对话、脚本等按附加包流程提取；无资源包的行为包在 resource_packs/ 新建并登记
+        const files = new Map(readDir(path.join(__dirname, 'world-fixture')));
+        for (const [n, b] of readDir(path.join(__dirname, 'fixture'))) {
+            if (n.startsWith('BP/')) files.set('behavior_packs/Fx_BP/' + n.slice(3), b);
+            else if (n.startsWith('RP/')) files.set('resource_packs/Fx_RP/' + n.slice(3), b);
+        }
+        files.set('behavior_packs/Lone/manifest.json', Buffer.from(JSON.stringify({ format_version: 2, header: { name: 'Lone', uuid: 'd0000000-0000-4000-8000-000000000001', version: [1, 0, 0], min_engine_version: [1, 20, 0] }, modules: [{ type: 'data', uuid: 'd0000000-0000-4000-8000-000000000002', version: [1, 0, 0] }] })));
+        files.set('behavior_packs/Lone/dialogue/raymond.json', Buffer.from(JSON.stringify({ format_version: '1.17', 'minecraft:npc_dialogue': { scenes: [{ scene_tag: 'raymond', npc_name: '§6Raymond', text: 'Huh? Hello', buttons: [{ name: 'Who are you?', commands: [] }] }] } })));
+        const em = new MemFS(files);
+        const er = await NS.runWorldPipeline(em, {}, () => {});
+        const prefix = [...em.files.keys()].find(k => k.endsWith('behavior_packs/Lone/manifest.json')).replace('behavior_packs/Lone/manifest.json', '');
+        const dlg = em.files.get(prefix + 'behavior_packs/Lone/dialogue/raymond.json').toString();
+        const loneLang = em.files.get(prefix + 'resource_packs/Lone_texts/texts/en_US.lang');
+        const wrp = JSON.parse(em.files.get(prefix + 'world_resource_packs.json').toString());
+        const loneUuid = JSON.parse(em.files.get(prefix + 'resource_packs/Lone_texts/manifest.json').toString()).header.uuid;
+        check('存档自带的包：对话按附加包流程转换，新资源包放进 resource_packs/ 并登记；同名 BP/RP 正确配对',
+            /"translate"/.test(dlg) && loneLang && /Huh\? Hello/.test(loneLang.toString()) && wrp.some(p => p.pack_id === loneUuid)
+            && !em.files.has(prefix + 'resource_packs/Fx_BP_texts/manifest.json') && 'packs_strings.csv' in er.workbook);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
