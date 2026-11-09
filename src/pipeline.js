@@ -264,15 +264,16 @@
         // ---------------- 5. 缺失的默认名称 ----------------
         const placeholders = [];
         if (opt.placeholderNames) {
-            const addPh = (key, id, kind) => {
+            const addPh = (key, id, kind, file = '') => {
                 if (knownKeys.has(key) || ctx.entries.has(key)) return;
-                ctx.entries.set(key, { value: humanizeIdentifier(id), file: '', kind: 'placeholder' });
+                ctx.entries.set(key, { value: humanizeIdentifier(id), file, kind: 'placeholder' });
+                if (file) ctx.keyFiles.set(key, new Set([file]));
                 ctx.used.add(key);
                 placeholders.push(key);
             };
-            for (const b of info.defs.blocks) if (!b.hasName) addPh(`tile.${b.id}.name`, b.id, 'block');
-            for (const e of info.defs.entities) addPh(`entity.${e.id}.name`, e.id, 'entity');
-            for (const id of info.defs.spawnEggs) addPh(`item.spawn_egg.entity.${id}.name`, id, 'spawn_egg');
+            for (const b of info.defs.blocks) if (!b.hasName) addPh(`tile.${b.id}.name`, b.id, 'block', b.file);
+            for (const e of info.defs.entities) addPh(`entity.${e.id}.name`, e.id, 'entity', e.file);
+            for (const id of info.defs.spawnEggs) addPh(`item.spawn_egg.entity.${id}.name`, id, 'spawn_egg', (info.defs.entities.find(e => e.id === id) || {}).file);
             for (const it of info.defs.items) {
                 if (it.hasName || !it.isDataDriven) continue;
                 const cands = [`item.${it.id}.name`, `item.${it.id}`, `tile.${it.id}.name`];
@@ -280,7 +281,7 @@
                 const key = `item.${it.id}.name`;
                 it.data['minecraft:item'].components['minecraft:display_name'] = { value: key };
                 pending.set(it.file, JSON.stringify(it.data, null, 2));
-                addPh(key, it.id, 'item');
+                addPh(key, it.id, 'item', it.file);
             }
             if (placeholders.length) log(`为 ${placeholders.length} 个没有名称的物品/方块/实体生成了占位名称（按 ID 推测，建议人工确认）`, 'warn');
         }
@@ -295,12 +296,41 @@
         const sourceLang = opt.sourceLang === 'auto' ? detectSourceLang(values) : opt.sourceLang;
         log(`源语言：${sourceLang}${opt.sourceLang === 'auto' ? '（自动识别）' : ''}`);
 
-        // ---------------- 7. 没有资源包时新建一个 ----------------
+        // ---------------- 7. 行为包与资源包配对；没有资源包的行为包新建一个 ----------------
+        // 多个附加包放在一起时，每个包的文字写进它自己的资源包，互不混合
+        const uuidOf = (pk) => pk.manifest.header && String(pk.manifest.header.uuid || '').toLowerCase();
+        const depsOf = (pk) => (Array.isArray(pk.manifest.dependencies) ? pk.manifest.dependencies : []).map(d => String(d.uuid || '').toLowerCase()).filter(Boolean);
+        // 去掉 BP / RP 等后缀后的名字：Foo_BP ↔ Foo_RP、Foo/BP ↔ Foo/RP、Foo [BP] ↔ Foo [RP]
+        const stripKind = (t) => String(t || '').toLowerCase().replace(/[\[\]()]/g, ' ').trim()
+            .replace(/[\s_\-.\/]*(bp|rp|behaviou?r[\s_-]*packs?|resources?[\s_-]*packs?|behaviou?r|resources?|beh|res|b|r)$/i, '').replace(/[\s_\-.\/]+$/, '');
+        const baseName = (pk) => stripKind(pk.root) || stripKind(pk.manifest.header && pk.manifest.header.name);
+        const pairOf = new Map();   // BP.root → RP
+        {
+            const bpsAll = packs.filter(p => p.type === 'BP'), rpsAll = packs.filter(p => p.type === 'RP');
+            for (const bp of bpsAll) {
+                let rp = rpsAll.find(r => depsOf(bp).includes(uuidOf(r))) || rpsAll.find(r => depsOf(r).includes(uuidOf(bp)));
+                if (!rp) { const n = baseName(bp); if (n) rp = rpsAll.find(r => baseName(r) === n); }
+                if (!rp && bpsAll.length === 1 && rpsAll.length === 1) rp = rpsAll[0];
+                if (rp) pairOf.set(bp.root, rp);
+            }
+            if (packs.length > 2) for (const bp of bpsAll) log(`[配对] ${bp.root || '(根目录)'} → ${pairOf.has(bp.root) ? (pairOf.get(bp.root).root || '(根目录)') : '无资源包'}`);
+        }
+        // 每个新键属于哪些包
+        const keyPacks = (k) => {
+            const files = ctx.keyFiles.get(k) || new Set([ctx.entries.get(k) && ctx.entries.get(k).file].filter(Boolean));
+            const set = new Set();
+            for (const f of files) { const pk = packOf(f); if (pk) set.add(pk); }
+            return set;
+        };
+        const unpairedBpsWithText = new Set();
+        for (const k of ctx.entries.keys()) for (const pk of keyPacks(k)) if (pk.type === 'BP' && !pairOf.has(pk.root)) unpairedBpsWithText.add(pk);
+
         let rps = packs.filter(p => p.type === 'RP');
         let createdRP = null;
+        const createdRPs = [];
         let restructured = false;
-        if (!rps.length && ctx.entries.size > 0) {
-            const bps = packs.filter(p => p.type === 'BP');
+        for (const bpNeedingRp of (ctx.entries.size > 0 ? [...unpairedBpsWithText] : [])) {
+            const bps = [bpNeedingRp];
             // 包在压缩包根目录（单个 .mcpack）→ 挪进子文件夹，才能和新资源包一起打成 .mcaddon
             const rootPack = packs.find(p => p.root === '');
             if (rootPack) {
@@ -321,7 +351,9 @@
             }
             const bpName = (bps[0] && bps[0].manifest.header.name) || opt.baseName;
             const realBpName = ctx.packEntries.get(bps[0] && bps[0].root)?.get('pack.name') || bpName;
-            const rpRoot = `${NS.sanitizeKeyPart(opt.baseName)}_texts_RP`;
+            const rpRoot = packs.filter(p => p.type === 'BP').length > 1
+                ? `${NS.sanitizeKeyPart(bpNeedingRp.root.split('/').pop() || opt.baseName)}_texts_RP`
+                : `${NS.sanitizeKeyPart(opt.baseName)}_texts_RP`;
             const uuid = () => (root.crypto && root.crypto.randomUUID) ? root.crypto.randomUUID()
                 : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
                     const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
@@ -345,15 +377,30 @@
                 m.dependencies.push({ uuid: manifest.header.uuid, version: [1, 0, 0] });
                 pending.set(bp.manifestPath, JSON.stringify(m, null, 2));
             }
-            rps = [createdRP];
-            log(`[新建] 附加包没有资源包，翻译只能放在资源包里 → 已新建 ${rpRoot}/ 并让行为包依赖它`, 'warn');
+            createdRPs.push(createdRP);
+            pairOf.set(bpNeedingRp.root, createdRP);
+            rps = packs.filter(p => p.type === 'RP');
+            log(`[新建] ${bpNeedingRp.root || '行为包'} 没有资源包，翻译只能放在资源包里 → 已新建 ${rpRoot}/ 并让行为包依赖它`, 'warn');
         }
+        // 键 → 要写入的资源包
+        const rpTargets = (k) => {
+            const out = new Set();
+            for (const pk of keyPacks(k)) {
+                if (pk.type === 'RP') out.add(pk);
+                else if (pairOf.has(pk.root)) out.add(pairOf.get(pk.root));
+            }
+            if (!out.size && rps.length) out.add(rps[0]);   // 找不到来源时退回第一个资源包
+            return out;
+        };
 
         // ---------------- 8. 写 lang ----------------
         const writeLangs = (pk, entries, isRP) => {
             const langs = packLangs.get(pk.root) || new Map();
             const texts = pk.root ? `${pk.root}/texts` : 'texts';
-            const langSet = new Set([...langs.keys(), ...opt.targetLangs, sourceLang, 'en_US', ...(isRP ? tableLangs : [])]);
+            // 脚本多语言表里的语言：只算写进这个包的键
+            const ownTableLangs = new Set();
+            if (isRP) for (const k of entries.keys()) { const t = ctx.translations.get(k); if (t) for (const l of t.keys()) ownTableLangs.add(l); }
+            const langSet = new Set([...langs.keys(), ...opt.targetLangs, sourceLang, 'en_US', ...ownTableLangs]);
             // 补全用：本包已有的所有键
             const fillFrom = (key) => {
                 for (const l of [sourceLang, 'en_US', ...langs.keys()]) {
@@ -421,10 +468,15 @@
         for (const m of ctx.translations.values()) for (const l of m.keys()) tableLangs.add(l);
         if (tableLangs.size) log(`脚本自带的多语言表包含：${[...tableLangs].join(', ')}，已写入对应语言文件`);
         const newEntries = new Map([...ctx.entries].map(([k, e]) => [k, e.value]));
+        const entriesByRp = new Map();
+        for (const [k, v] of newEntries) for (const rp of rpTargets(k)) {
+            if (!entriesByRp.has(rp.root)) entriesByRp.set(rp.root, new Map());
+            entriesByRp.get(rp.root).set(k, v);
+        }
         for (const pk of packs) {
             const own = ctx.packEntries.get(pk.root) || new Map();
             let entries;
-            if (pk.type === 'RP') entries = new Map([...newEntries, ...own]);
+            if (pk.type === 'RP') entries = new Map([...(entriesByRp.get(pk.root) || []), ...own]);
             else entries = own;
             if (!entries.size && !(pk.type === 'RP' && opt.fillMissing)) continue;
             // 已存在但值不同的 pack.name：保留原值并提示

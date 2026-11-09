@@ -32,6 +32,7 @@
             this.existingValues = options.existingValues || new Map(); // 源语言 lang 中已有的 键→值
             this.splitNewlines = options.splitNewlines !== false;
             this.entries = new Map();      // 新键 → { value, file, kind }
+            this.keyFiles = new Map();     // 键 → Set(用到它的文件)
             this.used = new Set(this.knownKeys);
             this.dedupe = new Map();
             this.referenced = new Map();   // 引用到的已有键 → 文件
@@ -48,7 +49,17 @@
          * baseKey : 期望的键名
          * scope   : 去重范围；同一 scope 下相同文本复用同一个键。null = 不去重
          */
-        alloc(baseKey, text, { file = '', kind = '', scope = null } = {}) {
+        alloc(baseKey, text, opts = {}) {
+            const key = this._alloc(baseKey, text, opts);
+            // 记录每个键被哪些文件用到（多个包放在一起时，按文件所在的包分别写 lang）
+            if (opts.file) {
+                if (!this.keyFiles.has(key)) this.keyFiles.set(key, new Set());
+                this.keyFiles.get(key).add(opts.file);
+            }
+            return key;
+        }
+
+        _alloc(baseKey, text, { file = '', kind = '', scope = null } = {}) {
             text = dedentCode(text);
             const base = sanitizeKey(baseKey);
             if (scope) {
