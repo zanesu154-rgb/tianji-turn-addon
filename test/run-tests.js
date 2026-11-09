@@ -522,7 +522,7 @@ console.log(JSON.stringify(calls));`;
     console.log('\n[6] 世界存档（test/world-fixture，含个人 Xbox ID，不提交到仓库；不存在时跳过）');
     if (fs.existsSync(path.join(__dirname, 'world-fixture', 'db', 'CURRENT'))) {
         const wm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
-        const wr = await NS.runWorldPipeline(wm, { baseName: 'test' }, () => {});
+        const wr = await NS.runWorldPipeline(wm, { baseName: 'test', listCommandBlockNames: true }, () => {});
         const dbf = new Map([...wm.files].filter(([p]) => p.startsWith('db/')).map(([p, v]) => [p.slice(3), new Uint8Array(v)]));
         const db = await NS.LevelDB.openDb(dbf);
         const tags = db.entries().flatMap(e => {
@@ -546,7 +546,9 @@ console.log(JSON.stringify(calls));`;
         check('NPC 名字、正文、按钮 → 翻译键', rr(G(npc, 'RawtextName')) === '你好,claude' && rr(G(npc, 'InterativeText')) === '这是一条测试文本' && rr(acts[0].button_name) === '这是一条测试文本');
         check('NPC 按钮命令保持不变', acts[0].data[0].cmd_line === '/give @a command_block');
         {
-            const sx = await NS.openWorld(new MemFS(readDir(path.join(__dirname, 'world-fixture'))), {}, () => {});
+            const sx = await NS.openWorld(new MemFS(readDir(path.join(__dirname, 'world-fixture'))), { listCommandBlockNames: true }, () => {});
+            const sd = await NS.openWorld(new MemFS(readDir(path.join(__dirname, 'world-fixture'))), {}, () => {});
+            check('默认不列出命令方块名称（转换前选项可开启）', !sd.ctx.untranslatable.some(u => u.where === '命令方块名称') && sd.ctx.untranslatable.filter(u => u.where === '方块名称').length === sx.ctx.untranslatable.filter(u => u.where === '方块名称').length && sx.ctx.untranslatable.some(u => u.where === '命令方块名称'));
             const n0 = sx.workbook()['untranslatable.csv'].split('\n').filter(l => l.includes('命令方块名称')).length;
             sx.hiddenCats.add('命令方块名称');
             const csv1 = sx.workbook()['untranslatable.csv'];
@@ -562,7 +564,7 @@ console.log(JSON.stringify(calls));`;
 
         // NBT 编辑器：人工修改 + 导入翻译表 + 改世界名 + 类型校验
         const em = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
-        const ss = await NS.openWorld(em, {}, () => {});
+        const ss = await NS.openWorld(em, { listCommandBlockNames: true }, () => {});
         const refOf = (where) => ss.ctx.untranslatable.find(u => u.where === where).ref;
         ss.setValue(refOf('方块名称'), 'Mystery Chest');
         const rows = NS.worldParseCsv(ss.workbook()['untranslatable.csv'].slice(1));

@@ -162,6 +162,7 @@ function readOptions() {
         injectRuntime: $('opt-runtime').checked,
         splitNewlines: $('opt-split').checked,
         sayMode: $('opt-say').value,
+        listCommandBlockNames: $('opt-cbname').checked,
         fillMissing: $('opt-fill').checked,
         placeholderNames: $('opt-placeholder').checked,
         scriptLangFields: $('opt-langfields').value,
