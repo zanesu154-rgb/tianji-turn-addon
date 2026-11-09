@@ -308,6 +308,22 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
             ot.includes('Hello from the other pack!') && !fx.includes('Hello from the other pack!') && !ot.includes('Lonely message here!')
             && lv.includes('Lonely message here!') && !fx.includes('Lonely message here!') && fx.length > 10 && ot.length < 5);
     }
+    {
+        // 附加包里的 .mcstructure：需人工翻译的条目可用翻译表导入并写回
+        const sm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const res = await NS.runPipeline(sm, { baseName: 'fixture' }, () => {});
+        const ss = res.structureSession;
+        const csv = res.workbook['untranslatable.csv'];
+        const rows = NS.worldParseCsv(csv.replace(/^\ufeff/, ''));
+        const h = rows[0];
+        const sRows = rows.slice(1).filter(r => r[h.indexOf('ref')]);
+        for (const r of sRows) r[h.indexOf('translation')] = '已翻译：' + r[h.indexOf('text')];
+        const imp = ss ? ss.importCsv(rows.map(r => r.map(x => /[",\n;]/.test(x) ? `"${String(x).replace(/"/g, '""')}"` : x).join(',')).join('\n')) : { applied: 0 };
+        const n = ss ? ss.applyTo(sm) : 0;
+        const st = await NS.openStructure('village.mcstructure', sm.files.get('BP/structures/village.mcstructure'), {}, () => {});
+        const hits = st.search('已翻译：');
+        check('附加包内结构：翻译表带 ref，可导入并写回 .mcstructure', !!ss && sRows.length > 0 && h.includes('translation') && imp.applied >= sRows.length && n === 1 && hits.length >= sRows.length, JSON.stringify({ rows: sRows.length, imp, n, hits: hits.length }));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

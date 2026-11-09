@@ -473,12 +473,14 @@
                 if (iRef < 0 || iTr < 0) throw new Error('表格缺少 ref 或 translation 列');
                 let applied = 0, skipped = 0;
                 for (const r of rows) {
-                    const ref = r[iRef], tr = r[iTr];
-                    if (!ref || tr == null || tr === '') { skipped++; continue; }
-                    const cur = this.getText(ref);
-                    if (cur == null) { skipped++; continue; }
-                    // 原文已被改动过（与表中不一致）时仍以表为准，但记录下来
-                    try { this.setValue(ref, tr); applied++; } catch (e) { skipped++; }
+                    const tr = r[iTr];
+                    if (!r[iRef] || tr == null || tr === '') { skipped++; continue; }
+                    // 合并过的行：多个位置用 ; 连接，一起写回
+                    for (const ref of String(r[iRef]).split(';').map(x => x.trim()).filter(Boolean)) {
+                        const cur = this.getText(ref);
+                        if (cur == null) { skipped++; continue; }
+                        try { this.setValue(ref, tr); applied++; } catch (e) { skipped++; }
+                    }
                     void iText;
                 }
                 return { applied, skipped };
@@ -711,10 +713,35 @@
      */
     function convertStructureBytes(bytes, file, ctx) {
         const rec = structureRecord(file.replace(/^.*\//, '').replace(/\.mcstructure$/i, ''), bytes);
+        // 记下来，转换完后可在编辑器里手动修改 / 用翻译表导入（ref = 记录号|路径）
+        if (!ctx.structureRecords) ctx.structureRecords = [];
+        rec.id = ctx.structureRecords.length;
+        rec.file = file;
+        ctx.structureRecords.push(rec);
         rec.units = unitsOf(rec);
         let changed = false;
         for (const u of rec.units) if (convertCompound(ctx, rec, u.base, u.kind)) changed = true;
+        rec.dirty = false;   // 自动转换已由流水线写出；之后的手动修改才算 dirty
         return { bytes: changed ? NBT.writeAll(rec.tags) : bytes, changed, units: rec.units.length };
+    }
+
+    /**
+     * 附加包里的结构文件：转换后的编辑会话（需人工翻译只含结构里的条目）
+     * session.applyTo(fs) 把手动修改过的结构写回附加包
+     */
+    function makeAddonStructureSession(ctx, opt = {}) {
+        const records = ctx.structureRecords || [];
+        if (!records.length) return null;
+        const sub = Object.create(ctx);
+        sub.untranslatable = ctx.untranslatable.filter(u => u.ref);
+        if (!sub.untranslatable.length) return null;
+        const session = makeSession(records, sub, opt, { structureName: '附加包内的结构', levelName: '附加包内的结构', addonStructures: true });
+        session.applyTo = function (fs) {
+            let n = 0;
+            for (const rec of records) if (rec.dirty) { fs.writeBytes(rec.file, NBT.writeAll(rec.tags)); n++; }
+            return n;
+        };
+        return session;
     }
 
     /** 一步完成（测试与非交互使用） */
@@ -727,6 +754,7 @@
     NS.openWorld = openWorld;
     NS.openStructure = openStructure;
     NS.convertStructureBytes = convertStructureBytes;
+    NS.makeAddonStructureSession = makeAddonStructureSession;
     NS.runWorldPipeline = runWorldPipeline;
     NS.worldNodeAt = nodeAt;
     NS.worldCategoryOf = categoryOf;

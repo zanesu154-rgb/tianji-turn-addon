@@ -503,17 +503,22 @@
         }
         for (const [rootDir, m] of ctx.packEntries) for (const [k, v] of m) rows.push([k, v, rootDir + '/manifest.json', 'manifest']);
         const stringsCsv = '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
-        // 同一文件、同一位置、同一文字只列一次（结构里堆叠的实体、交易表里重复的物品等），记录出现次数
+        // 附加包里的结构：转换后可在编辑器里手动修改（用合并前的逐条列表）
+        const structureSession = NS.makeAddonStructureSession ? NS.makeAddonStructureSession(ctx, opt) : null;
+        // 同一文件、同一位置、同一文字只列一次（结构里堆叠的实体、交易表里重复的物品等），记录出现次数；
+        // 带 ref 的合并后所有 ref 用 ; 连接，导入时一起写回
         {
             const seen = new Map();
+            const merged = [];
             for (const u of ctx.untranslatable) {
                 const k = `${u.file}\u0000${u.where}\u0000${u.text}`;
-                if (seen.has(k)) seen.get(k).count++;
-                else seen.set(k, Object.assign(u, { count: 1 }));
+                if (seen.has(k)) { const f = seen.get(k); f.count++; if (u.ref) f.refs.push(u.ref); }
+                else { const f = { ...u, count: 1, refs: u.ref ? [u.ref] : [] }; seen.set(k, f); merged.push(f); }
             }
-            ctx.untranslatable = [...seen.values()];
+            ctx.untranslatable = merged;
         }
-        const untrRows = [['file', 'where', 'text', 'reason', 'count'], ...ctx.untranslatable.map(u => [u.file, u.where, u.text, u.reason, u.count])];
+        // 结构里的条目带 ref：在 translation 列填译文后可在编辑器里“导入翻译表”写回结构
+        const untrRows = [['ref', 'file', 'where', 'text', 'reason', 'count', 'translation'], ...ctx.untranslatable.map(u => [u.refs.join(';'), u.file, u.where, u.text, u.reason, u.count, ''])];
         const untranslatableCsv = '﻿' + untrRows.map(r => r.map(csvCell).join(',')).join('\r\n');
         // 玩家输入匹配表：按内部标记 / 回答汇总，列出已支持的语言，留空列给要补充的语言
         let inputCsv = null;
@@ -557,7 +562,7 @@
             restructured,
         };
         return {
-            ctx, summary,
+            ctx, summary, structureSession,
             workbook: {
                 'strings.csv': stringsCsv,
                 'untranslatable.csv': untranslatableCsv,
