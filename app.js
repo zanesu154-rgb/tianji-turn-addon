@@ -347,6 +347,7 @@ async function processFile(file) {
         if (isWorld && mode !== 'world') { setMode('world'); log('检测到世界存档，已切换到“世界存档”模式'); }
         if (!isWorld && mode === 'world') { setMode('addon'); log('这不是世界存档，已切换到“附加包”模式'); }
         state.session = null;
+        state.addonSession = null; state.addonFs = null;
         state.fs = fs;
         state.ext = ext;
         $('nbt-editor').hidden = true;
@@ -372,6 +373,19 @@ async function processFile(file) {
         for (const w of s.warnings) log(`⚠ ${w}`, 'warn');
         logMany(res.ctx.untranslatable, u => `[无法本地化] ${u.file} ${u.where}: ${u.text}（${u.reason}）`);
         log(`新增翻译键 ${s.newKeys} 条，包名/描述 ${s.packKeys} 条，修改文件 ${s.processedFiles} 个`);
+
+        // 附加包里的结构有需人工翻译的文字：显示编辑器，可手动改或导入填好的翻译表，下载时写回
+        if (res.structureSession) {
+            state.addonSession = res.structureSession;
+            state.addonFs = fs;
+            state.addonWorkbook = res.workbook;
+            NS.mountWorldEditor($('nbt-editor'), res.structureSession, {
+                onChange: () => { state.resultBlob = null; },
+                downloadCsv: (text, name) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_${name || 'structures'}.csv`),
+            });
+            $('nbt-editor').hidden = false;
+            log(`附加包里的结构有 ${res.structureSession.ctx.untranslatable.length} 处需人工翻译，可在下方编辑器修改，或在 untranslatable.csv 的 translation 列填写后导入`);
+        }
 
         setProgress(85, '打包中...');
         const outZip = await fs.toZip();
@@ -411,8 +425,20 @@ function downloadBlob(blob, filename) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** 附加包：结构被手动修改后重新打包 */
+async function rebuildAddonIfEdited() {
+    if (!state.addonSession || state.resultBlob) return;
+    setProgress(90, '写入修改...');
+    const n = state.addonSession.applyTo(state.addonFs);
+    const outZip = await state.addonFs.toZip();
+    state.resultBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    log(`✅ 已重新打包（结构手动修改 ${state.addonSession.edits} 处，写回 ${n} 个结构文件）`);
+    setProgress(100, '完成！');
+}
+
 downloadResultBtn.addEventListener('click', async () => {
     try {
+        await rebuildAddonIfEdited();
         if (state.session) await buildWorldOutputs();
         if (state.resultBlob) downloadBlob(state.resultBlob, state.resultName);
     } catch (e) { log(`❌ 生成失败: ${e.message}`, 'error'); }
