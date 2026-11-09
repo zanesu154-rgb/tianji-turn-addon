@@ -347,6 +347,12 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const changed = [...rm.files].filter(([k, v]) => snap.get(k) !== Buffer.from(v).toString('base64'));
         check('再次转换已转换的附加包：脚本跳过、不产生新键、文件不变', r2.ctx.entries.size === 0 && changed.length === 0 && r2.ctx.warnings.some(w => /已经转换过/.test(w)) && (rm.files.get('BP/scripts/main.js').toString().match(/end i18n runtime/g) || []).length === 1);
     }
+    {
+        const lv = 'tellraw @a {"rawtext": [{"selector":"@s"}, {"text":"§cWarning: §bBoth Levers were detected being used, the map may or may not have broken due to this. If the map fails to function, restart with a new copy."}]}';
+        const cl = new NS.ExtractContext({});
+        check('英文里的 function / return 不当成代码（“fails to function”、“[Info] … [x]”）', NS.translateCommand(lv, cl, 'k', 'f').changed && NS.looksLikeText('Press to return to the lobby.') && NS.looksLikeText('[Info] Welcome back [VIP]')
+            && !NS.looksLikeText('function f() { return 1 }') && !NS.looksLikeText('{"a":1}') && !NS.looksLikeText('x => x + 1'));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
