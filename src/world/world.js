@@ -531,7 +531,28 @@
             records.push(rec);
         }
 
-        const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines });
+        // 之前转换生成的翻译资源包：保留其中的键和译文，新键接在后面，不覆盖
+        const packFolder = /^[\x20-\x7e]+$/.test(levelName) ? `${NS.sanitizeKeyPart(levelName)}_texts` : 'world_texts';
+        const packDir = `${rootDir}resource_packs/${packFolder}/`;
+        let existingPack = null;
+        if (all.includes(packDir + 'manifest.json')) {
+            const man = NS.parseJsonLenient(await fs.readText(packDir + 'manifest.json'));
+            const langs = new Map();
+            for (const f of all) {
+                const m = f.startsWith(packDir + 'texts/') && /\/([A-Za-z]{2}_[A-Za-z]{2})\.lang$/.exec(f);
+                if (m) { const raw = await fs.readText(f); langs.set(m[1], { path: f, raw, map: NS.parseLang(raw) }); }
+            }
+            existingPack = { dir: packDir, uuid: man && man.header && man.header.uuid, langs };
+            log(`[资源包] 发现之前生成的 ${packDir}（${langs.size} 种语言），新提取的键会追加进去，已有译文保留`);
+        }
+        const knownKeys = new Set(), existingValues = new Map();
+        if (existingPack) for (const [, e] of existingPack.langs) for (const [k, v] of e.map) {
+            knownKeys.add(k);
+            if (!existingValues.has(k)) existingValues.set(k, new Set());
+            existingValues.get(k).add(v);
+        }
+
+        const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines, knownKeys, existingValues });
         ctx.sayMode = opt.sayMode;
         ctx.listCommandBlockNames = !!opt.listCommandBlockNames;
         convertRecords(ctx, records, log);
@@ -540,7 +561,7 @@
         const wrpPath = rootDir + 'world_resource_packs.json';
         let wrpOriginal = [];
         if (all.includes(wrpPath)) { const d = NS.parseJsonLenient(await fs.readText(wrpPath)); if (Array.isArray(d)) wrpOriginal = d; }
-        const session = makeSession(records, ctx, opt, { levelName, rootDir, levelDatPath: levelDat, wrpOriginal });
+        const session = makeSession(records, ctx, opt, { levelName, rootDir, levelDatPath: levelDat, wrpOriginal, existingPack, packDir });
         session.build = async function (outFs, buildLog = log) { return buildWorld(this, outFs, dbFiles, db, buildLog); };
         return session;
     }
@@ -628,9 +649,23 @@
         // ---- 资源包 ----
         const sourceLang = detectLang(session);
         let packDir = null;
-        if (ctx.entries.size) {
-            const folder = /^[\x20-\x7e]+$/.test(levelName) ? `${NS.sanitizeKeyPart(levelName)}_texts` : 'world_texts';
-            packDir = `${rootDir}resource_packs/${folder}/`;
+        const ex = session.existingPack;
+        if (ctx.entries.size && ex) {
+            // 追加到之前生成的资源包：已有内容（含译文）原样保留
+            packDir = ex.dir;
+            const langs = [...new Set([...ex.langs.keys(), ...opt.targetLangs, sourceLang, 'en_US'])];
+            const body = [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n');
+            for (const l of langs) {
+                const e = ex.langs.get(l);
+                const head = e ? e.raw.replace(/\s*$/, '\n') : `pack.name=${levelName} - Texts\npack.description=Translations for ${levelName}\n`;
+                fs.writeText(e ? e.path : `${packDir}texts/${l}.lang`, `${head}\n## ==== addon-i18n 再次提取新增（源语言 ${sourceLang}${l === sourceLang ? '' : '，待翻译'}） ====\n${body}\n`);
+            }
+            fs.writeText(`${packDir}texts/languages.json`, JSON.stringify(langs, null, 2));
+            const wrp = rootDir + 'world_resource_packs.json';
+            if (ex.uuid && !session.wrpOriginal.some(p => p && p.pack_id === ex.uuid)) fs.writeText(wrp, JSON.stringify([...session.wrpOriginal, { pack_id: ex.uuid, version: [1, 0, 0] }], null, 2));
+            log(`[资源包] 追加 ${ctx.entries.size} 个新键到 ${packDir}（已有内容保留）`);
+        } else if (ctx.entries.size) {
+            packDir = session.packDir;
             const pack = textsPackFiles(ctx, opt, levelName, sourceLang);
             for (const [p, text] of pack.files) fs.writeText(packDir + p, text);
             const wrp = rootDir + 'world_resource_packs.json';
