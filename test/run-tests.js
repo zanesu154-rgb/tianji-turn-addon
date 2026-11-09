@@ -338,6 +338,15 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const st = moved && await NS.openStructure('v.mcstructure', moved, {}, () => {});
         check('根目录结构包：移入子文件夹后，手动修改写回新位置（不在根目录多出文件）', n === 1 && !rm.files.has('structures/village.mcstructure') && st && st.search('根目录改名').length === 1);
     }
+    {
+        // 把已经转换过的附加包再转换一次：脚本不能重复注入，不应产生新键
+        const rm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        await NS.runPipeline(rm, { baseName: 'fixture' }, () => {});
+        const snap = new Map([...rm.files].map(([k, v]) => [k, Buffer.from(v).toString('base64')]));
+        const r2 = await NS.runPipeline(rm, { baseName: 'fixture' }, () => {});
+        const changed = [...rm.files].filter(([k, v]) => snap.get(k) !== Buffer.from(v).toString('base64'));
+        check('再次转换已转换的附加包：脚本跳过、不产生新键、文件不变', r2.ctx.entries.size === 0 && changed.length === 0 && r2.ctx.warnings.some(w => /已经转换过/.test(w)) && (rm.files.get('BP/scripts/main.js').toString().match(/end i18n runtime/g) || []).length === 1);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
