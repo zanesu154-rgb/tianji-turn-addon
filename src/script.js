@@ -820,13 +820,19 @@
   const F2 = (t) => t.replace(/\u00a7./g, "");
   let cf = null;
   // 用逗号 / 分号 / 竖线等拼起来的列表（如 names.join(", ")）：每一项都认识时逐项翻译
+  // join("§7 or §f") 这类带文字的分隔符（静态扫描时登记）
+  const seps = [];
   const list = (s) => {
-    const parts = s.split(/((?:\\s|\\u00a7.)*[,;|\\u00b7\\u2022\\/\\uff0c\\u3001](?:\\s|\\u00a7.)*)/);
+    const alt = seps.filter((x) => s.indexOf(x) >= 0).map(esc);
+    const parts = s.split(new RegExp("(" + (alt.length ? alt.join("|") + "|" : "") + "(?:\\\\s|\\u00a7.)*[,;|\\u00b7\\u2022\\\\/\\uff0c\\u3001](?:\\\\s|\\u00a7.)*)"));
     if (parts.length < 3) return null;
     const els = [];
     for (let i = 0; i < parts.length; i++) {
       const x = parts[i];
-      if (i % 2) { els.push({ text: x }); continue; }
+      if (i % 2) {
+        if (/[A-Za-z\\u00c0-\\uffff]{2,}/.test(x.replace(/\\u00a7./g, ""))) { const t = one(x); if (t) { els.push(...t); continue; } }
+        els.push({ text: x }); continue;
+      }
       if (!x) continue;
       let k = m.get(x), y = null;
       if (k) y = [{ translate: k }];
@@ -877,8 +883,9 @@
     }
     return cmd;
   };
-  const reg = (exact, pats) => {
+  const reg = (exact, pats, sp) => {
     cf = null;
+    if (sp) for (const x of sp) if (seps.indexOf(x) < 0) seps.push(x);
     for (const [s, k] of exact) {
       if (!m.has(s)) m.set(s, k);
       if (s.indexOf("\\n") >= 0 && !m.has(N(s))) m.set(N(s), k);
@@ -1539,6 +1546,16 @@
                 for (const e of c) { forceText(e.value); handled.add(e); }
             }
         });
+        // names.join("§7 or §f")：带文字的分隔符登记翻译，运行时据此拆分列表
+        const joinSeps = [];
+        walk(ast, (n) => {
+            if (n.type !== 'CallExpression' || propName(n.callee) !== 'join' || n.arguments.length !== 1 || !isStr(n.arguments[0])) return;
+            const v = n.arguments[0].value, core = NS.stripFormatting(v).trim();
+            if (!/^[A-Za-z][A-Za-z ]{0,15}$/.test(core) || core.length < 2) return;
+            forceText(core);
+            handled.add(n.arguments[0]);
+            if (!joinSeps.includes(v)) joinSeps.push(v);
+        });
         // 大写常量里的显示用标签：const FLAT = "§8[flat]";
         walk(ast, (n) => {
             if (n.type !== 'VariableDeclarator' || n.id.type !== 'Identifier' || !/^[A-Z][A-Z0-9_]+$/.test(n.id.name) || !isStr(n.init)) return;
@@ -1567,7 +1584,7 @@
                 const ex = [];
                 const seen = new Set();
                 for (const [s, k] of exact) { if (!seen.has(s)) { seen.add(s); ex.push([s, k]); } }
-                prelude += `${RT}.reg(${JSON.stringify(ex)}, ${JSON.stringify(patterns)});\n`;
+                prelude += `${RT}.reg(${JSON.stringify(ex)}, ${JSON.stringify(patterns)}${joinSeps.length ? ', ' + JSON.stringify(joinSeps) : ''});\n`;
             }
         } else if (usesRuntime) {
             // 不注入运行时却用到了 → 不应发生，保险起见放弃改写
