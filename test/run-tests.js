@@ -282,6 +282,12 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const js = JSON.stringify(out[0]);
         check('join("§7 or §f") 拼接的列表：分隔词 or 登记，运行时逐项翻译', [...cj.entries.values()].some(e => e.value === 'or') && (js.match(/"translate"/g) || []).length === 4, js);
     }
+    {
+        const ck = new NS.ExtractContext({});
+        NS.processScript('export function f(p,id,ns){ const a=`potion.${id}.splash.name`; const b=`item.${ns}:${id}.name`; const c=`textures/items/${id}`; const d=`${ns}:${id}`; return [a,b,c,d,`Potion of ${id}`]; }', 'scripts/potions.js', ck, {});
+        const kv = [...ck.entries.values()].map(e => e.value);
+        check('拼出翻译键 / ID / 路径的模板（potion.${id}.splash.name）不提取', kv.length === 1 && kv[0] === 'Potion of %1$s');
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

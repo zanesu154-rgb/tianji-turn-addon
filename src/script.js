@@ -1445,7 +1445,13 @@
             }, []));
         };
 
+        // `potion.${id}.splash.name`、`item.${ns}:${id}.name`：拼出来的是翻译键 / ID，不是文字
+        const isKeyTemplate = (parts) => {
+            const t = parts.map(p => ('lit' in p) ? p.lit : 'x').join('');
+            return /^[\w:-]+(\.[\w:-]+)+$/.test(t) || /^[a-z0-9_]+:[\w./-]+$/.test(t) || /^[\w-]+(\/[\w.-]+)+$/.test(t);
+        };
         const registerPattern = (parts, relaxed = false) => {
+            if (isKeyTemplate(parts)) return;
             if (!relaxed) {
                 const vs = expandChoices(parts);
                 if (vs) {
