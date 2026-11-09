@@ -353,6 +353,20 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('英文里的 function / return 不当成代码（“fails to function”、“[Info] … [x]”）', NS.translateCommand(lv, cl, 'k', 'f').changed && NS.looksLikeText('Press to return to the lobby.') && NS.looksLikeText('[Info] Welcome back [VIP]')
             && !NS.looksLikeText('function f() { return 1 }') && !NS.looksLikeText('{"a":1}') && !NS.looksLikeText('x => x + 1'));
     }
+    {
+        // 存档再次转换：之前生成的翻译资源包保留（含已填译文），新键追加，不重复登记
+        const wm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
+        await NS.runWorldPipeline(wm, { sayMode: 'keep' }, () => {});
+        const packZh = [...wm.files.keys()].find(p => /resource_packs\/[^/]+_texts\/texts\/zh_CN\.lang$/.test(p));
+        const zh0 = NS.parseLang(wm.files.get(packZh).toString());
+        const k0 = [...zh0.keys()].find(k => k.startsWith('world.'));
+        wm.files.set(packZh, Buffer.from(wm.files.get(packZh).toString().replace(new RegExp('^' + k0.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=.*$', 'm'), k0 + '=【已翻译】')));
+        const r2 = await NS.runWorldPipeline(wm, { sayMode: 'tellraw' }, () => {});
+        const zh1 = NS.parseLang(wm.files.get(packZh).toString());
+        const packs = [...wm.files.keys()].filter(p => /resource_packs\/[^/]+\/manifest\.json$/.test(p));
+        const wrp = JSON.parse(wm.files.get([...wm.files.keys()].find(p => p.endsWith('world_resource_packs.json'))).toString());
+        check('存档再次转换：已有翻译资源包保留译文，新键追加，不重复登记', zh1.get(k0) === '【已翻译】' && r2.ctx.entries.size > 0 && [...r2.ctx.entries.keys()].every(k => zh1.has(k) && !zh0.has(k)) && packs.length === 1 && wrp.length === new Set(wrp.map(p => p.pack_id)).size);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
