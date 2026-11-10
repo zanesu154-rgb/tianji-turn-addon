@@ -54,7 +54,18 @@
     ]);
 
     // 这些属性名对应的值是技术数据
-    const TECH_PROPS = /^(patterns?|keywords?|triggers?|aliases|synonyms|regex(es)?|regexp|match(es)?|intent|intents|id|typeId|identifier|type|icon|iconPath|texture|image|path|sound|event|tag|tags|objective|permission|defaultValue|key|namespace|entity|item|block|dimension|mode|command|cmd|url|uuid|color|font)$/i;
+    const TECH_PROPS = /^(patterns?|keywords?|triggers?|aliases|synonyms|regex(es)?|regexp|match(es)?|intent|intents|id|typeId|identifier|type|icon|iconPath|texture|image|path|sound|event|tag|tags|objective|permission|defaultValue|key|namespace|entity|item|block|dimension|mode|command|cmd|url|uuid|color|font|username|userName|playerName|gamertag|xuid)$/i;
+    // 这些字段的值不带空格时（"Ready"、"melee"）是内部取值；带空格的（role: "Arcane caster"）照常当文字
+    const TECH_PROPS_WORD = /^(kind|phase|clip|role|playback|policy|stat)$/i;
+    // retailId、skillKey、hitSound、trailParticle 这类驼峰后缀：内部标识，不是显示文本
+    const TECH_SUFFIX = /[a-z0-9](Id|ID|Ids|IDs|Key|Keys|Type|Types|Path|File|Files|Sound|Sounds|Particle|Particles|Texture|Geometry|Clip|Locator|Locators|Tag|Tags|Event|Events|Identifier)$/;
+    // 开发备注字段：adaptation / notes / timingBasis: {…} 等（字段本身或所在对象的字段名命中都算）
+    const DEV_NOTE_KEY = /^(todo|fixme|adaptation|evidence|rationale|provenance|basis|changelog)$|^(debug|dev|internal|meta)([A-Z_]|$)|[a-z](Basis|Evidence|Debug|Timing)$/;
+    // 调试相关：字符串（如标签 "dungeons:debug_damage"）、变量 / 函数名（DEBUG、isDebug、debugLog、devMode）
+    const DEBUG_STR = /(^|[^a-z])(debug|dbg)/i;
+    const DEBUG_ID = /debug|dbg|^dev(_?mode)?$|devMode|^is_?dev$/i;
+    // 整个文件都是调试用（debug.js、dev-tools.js、test/…）
+    const DEBUG_FILE = /(^|\/)(debug|dbg|devtools?|dev[-_]tools?|tests?)(\/|[._-][^\/]*$|\.[cm]?js$)/i;
 
     // 这些位置的文本玩家能看到但游戏不支持翻译键 —— 记录到报告
     const UNTRANSLATABLE_ASSIGN = new Set(['nameTag']);
@@ -1059,6 +1070,83 @@
         const colliding = opts.collidingMethods || new Set();
         const formEnabled = opts.formSinksEnabled !== false;
 
+        // ---- 调试输出：只在调试开关 / 调试标签 / 调试函数下执行的代码，文本不提取 ----
+        const debugFile = DEBUG_FILE.test(file);
+        const debugMemo = new Map();
+        const mentionsDebug = (e) => {
+            // 不进函数体：foo(() => {…debug…}).then(cb) 不算
+            const stack = [e];
+            while (stack.length) {
+                const x = stack.pop();
+                if (x.type === 'Literal' && typeof x.value === 'string' && DEBUG_STR.test(x.value)) return true;
+                if (x.type === 'Identifier' && DEBUG_ID.test(x.name)) return true;
+                if (/Function/.test(x.type)) continue;
+                stack.push(...childrenOf(x));
+            }
+            return false;
+        };
+        const fnName = (f) => {
+            if (f.id && f.id.name) return f.id.name;
+            const q = f.parent;
+            if (!q) return '';
+            if (q.type === 'VariableDeclarator' && q.id.type === 'Identifier') return q.id.name;
+            if ((q.type === 'Property' || q.type === 'MethodDefinition') && q.key) return q.key.name || q.key.value || '';
+            if (q.type === 'AssignmentExpression') return q.left.type === 'Identifier' ? q.left.name : (propName(q.left) || '');
+            return '';
+        };
+        const isNeg = (t) => t.type === 'UnaryExpression' && t.operator === '!';
+        const isExit = (st) => {
+            if (st && st.type === 'BlockStatement' && st.body.length === 1) st = st.body[0];
+            return !!st && /^(ContinueStatement|ReturnStatement|BreakStatement)$/.test(st.type);
+        };
+        // 父节点 p 让子节点 c 处在调试分支里吗
+        const debugEdge = (p, c) => {
+            switch (p.type) {
+                case 'IfStatement': case 'ConditionalExpression':
+                    if (c === p.test || !mentionsDebug(p.test)) return false;
+                    return c === p.consequent ? !isNeg(p.test) : isNeg(p.test);
+                case 'LogicalExpression':
+                    return p.operator === '&&' && c === p.right && !isNeg(p.left) && mentionsDebug(p.left);
+                case 'ForOfStatement': case 'ForInStatement':
+                    return c === p.body && mentionsDebug(p.right);
+                case 'ForStatement': case 'WhileStatement': case 'DoWhileStatement':
+                    return c === p.body && !!p.test && mentionsDebug(p.test);
+                case 'CallExpression':
+                    // world.getPlayers({tags:["debug"]}).forEach(p => …)、debugLog("…")
+                    return c !== p.callee && mentionsDebug(p.callee);
+                case 'FunctionDeclaration': case 'FunctionExpression': case 'ArrowFunctionExpression':
+                    return DEBUG_ID.test(fnName(p));
+                case 'BlockStatement': case 'Program': case 'SwitchCase': {
+                    // if (!player.hasTag("debug_x")) continue; 之后的语句
+                    const list = p.type === 'SwitchCase' ? p.consequent : p.body;
+                    const i = list.indexOf(c);
+                    for (let j = 0; j < i; j++) {
+                        const st = list[j];
+                        if (st.type === 'IfStatement' && !st.alternate && isNeg(st.test) && isExit(st.consequent) && mentionsDebug(st.test)) return true;
+                    }
+                    return false;
+                }
+                default: return false;
+            }
+        };
+        const inDebug = (node) => {
+            if (debugFile) return true;
+            const path = [];
+            let c = node, res = false;
+            while (c) {
+                if (debugMemo.has(c)) { res = debugMemo.get(c); break; }
+                path.push(c);
+                const p = c.parent;
+                if (!p) break;
+                if (debugEdge(p, c)) { res = true; break; }
+                c = p;
+            }
+            for (const x of path) debugMemo.set(x, res);
+            return res;
+        };
+        let debugSkipped = 0;
+        const skipDebug = (node) => { walk(node, (x) => { if (isStr(x) && !handled.has(x) && looksLikeText(x.value, 'loose')) debugSkipped++; handled.add(x); }); };
+
         // 选一个文件中没出现过的运行时变量名
         let RT = '__i18n';
         while (source.includes(RT)) RT += '_';
@@ -1205,6 +1293,7 @@
         /** 处理一个“显示参数”表达式 */
         function transformSinkExpr(e, hint) {
             if (!e || e.type === 'SpreadElement') return;
+            if (inDebug(e)) { skipDebug(e); return; }   // p.sendMessage(DEBUG ? "…" : "…") 的调试分支
             if (isStr(e) || e.type === 'TemplateLiteral' || (e.type === 'BinaryExpression' && e.operator === '+')) {
                 const parts = isStr(e) ? [{ lit: e.value }] : flattenConcat(e);
                 if (parts) {
@@ -1278,6 +1367,7 @@
             if (n.type === 'CallExpression') {
                 const name = calleeName(n);
                 const spec = name && Object.prototype.hasOwnProperty.call(SINKS, name) ? SINKS[name] : null;
+                if (spec && inDebug(n)) { n.arguments.forEach(skipDebug); return; }
                 if (spec && n.callee.type === 'MemberExpression') {
                     const definitelyForm = spec.kind === 'form' && rootIsForm(n.callee.object);
                     if (spec.kind === 'form' && !definitelyForm && !formEnabled) return;
@@ -1335,6 +1425,7 @@
             const k = n.key.name || n.key.value;
             if (k === 'translate' && isStr(n.value)) { ctx.ref(n.value.value, file); markHandled(n.value); return; }
             if (k !== 'rawtext' || n.value.type !== 'ArrayExpression') return;
+            if (inDebug(n)) { skipDebug(n.value); return; }
             for (const el of n.value.elements) {
                 if (!el || el.type !== 'ObjectExpression' || el.properties.length !== 1) continue;
                 const p = el.properties[0];
@@ -1467,7 +1558,19 @@
                 case 'Property': case 'PropertyDefinition': case 'MethodDefinition': {
                     if (p.key === node) return true;
                     const k = p.key && (p.key.name || p.key.value);
-                    return typeof k === 'string' && TECH_PROPS.test(k);
+                    if (typeof k === 'string' && TECH_PROPS.test(k)) return true;
+                    // 后缀只管不带空格的值：语言表里 noMatchingTags: "§cThese blocks cannot be connected" 照常提取
+                    if (typeof k === 'string' && (TECH_SUFFIX.test(k) || TECH_PROPS_WORD.test(k)) && isStr(node) && !/\s/.test(node.value.trim())) return true;
+                    // { username: "Steve", printName: "§dSteve" }：玩家名单，同一对象里的文字都是名字
+                    if (p.parent && p.parent.type === 'ObjectExpression' && p.parent.properties.some(x => x.type === 'Property' && !x.computed && /^(username|userName|playerName|gamertag|xuid)$/i.test(x.key.name || x.key.value || ''))) return true;
+                    // 字段本身或外层对象的字段名是开发备注
+                    for (let q = p, d = 0; q && d < 6; q = q.parent, d++) {
+                        if (q.type === 'Property' && !q.computed) {
+                            const qk = q.key.name || q.key.value;
+                            if (typeof qk === 'string' && DEV_NOTE_KEY.test(qk)) return true;
+                        } else if (q.type !== 'ObjectExpression' && q.type !== 'ArrayExpression') break;
+                    }
+                    return false;
                 }
                 case 'SwitchCase':
                     return p.test === node;
@@ -1499,6 +1602,8 @@
             for (const line of lines) {
                 if (!looksLikeText(line, 'strict')) continue;
                 if (ctx.isKey(line)) continue;
+                // WaterGun、MeleeAttack 这种没有空格的驼峰词：代码里的标识符
+                if (/^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+$/.test(line.trim())) continue;
                 // 拆行时每行去掉代码缩进；原样和去空白后的写法都登记
                 const multi = lines.length > 1 || fromSplit || line.indexOf('\n') >= 0;
                 const t = (lines.length > 1 || fromSplit || !multi) ? line.trim() : line;
@@ -1602,6 +1707,10 @@
         const isPlusOperand = (n) => n.parent && n.parent.type === 'BinaryExpression' && n.parent.operator === '+';
         walk(ast, (n) => {
             if (handled.has(n)) return;
+            if ((isStr(n) || n.type === 'TemplateLiteral' || (n.type === 'BinaryExpression' && n.operator === '+')) && inDebug(n)) {
+                if (isStr(n) && looksLikeText(n.value, 'strict')) debugSkipped++;
+                return;
+            }
             if (isStr(n)) {
                 if (isPlusOperand(n)) return;   // 属于某个拼接句式，由拼接根节点统一登记
                 if (isTechPosition(n)) return;
@@ -1638,7 +1747,7 @@
         // 数据表里的名称列：{ mel: ["melee damage", "flat", 3, "added to every melee hit"], … }
         // 同一列全是互不相同的短词组、且表里另有一列是说明文字时，这列名称也是显示用的
         walk(ast, (n) => {
-            if (n.type !== 'ObjectExpression' || n.properties.length < 3) return;
+            if (n.type !== 'ObjectExpression' || n.properties.length < 3 || inDebug(n)) return;
             const rows = n.properties.map(p => p.value);
             if (!rows.every(r => r && r.type === 'ArrayExpression')) return;
             const len = rows[0].elements.length;
@@ -1665,7 +1774,7 @@
         });
         // 大写常量里的显示用标签：const FLAT = "§8[flat]";
         walk(ast, (n) => {
-            if (n.type !== 'VariableDeclarator' || n.id.type !== 'Identifier' || !/^[A-Z][A-Z0-9_]+$/.test(n.id.name) || !isStr(n.init)) return;
+            if (n.type !== 'VariableDeclarator' || n.id.type !== 'Identifier' || !/^[A-Z][A-Z0-9_]+$/.test(n.id.name) || !isStr(n.init) || inDebug(n)) return;
             const v = n.init.value, plain = NS.stripFormatting(v).trim();
             if (!/[A-Za-z]{2,}/.test(plain) || plain.length > 40 || /^[\w.:\/-]+$/.test(plain) || looksLikeCommand(v) || ctx.isKey(v)) return;
             if (!/\u00a7|[\[\](){}<>]/.test(v)) return;
@@ -1678,6 +1787,8 @@
             if (ctx.isKey(t) || exact.some(([x]) => x === t)) continue;
             exact.push([t, ctx.alloc(keyBase('word'), t, meta('word'))]);
         }
+
+        if (debugSkipped) ctx.warn(`${file}: ${debugFile ? '调试脚本' : '调试分支'}里的 ${debugSkipped} 处文本未提取`);
 
         // ---- 生成输出 ----
         const hasRegistrations = exact.length > 0 || patterns.length > 0;

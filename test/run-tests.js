@@ -212,6 +212,46 @@ function extra(p, lang){ p.sendMessage(u(lang,"ui.extra")); }`;
             && sent[1].rawtext[0].translate === lang[0] && sent[3].rawtext[0].translate === lang[0] && sent[1].rawtext[0].with.rawtext.length === 1);
     }
     {
+        // 调试输出不提取（Alylica's Dungeon 的 debug 标签、DEBUG 开关、调试函数）
+        const src = [
+            'import { world, system } from "@minecraft/server";',
+            'world.afterEvents.entityHurt.subscribe((e) => {',
+            '  const hurt = e.hurtEntity, d = 1;',
+            '  if (hurt.hasTag("dungeons:debug_damage")) hurt.sendMessage(`§eYou§7 took: ${d}§7 Damage`);',
+            '  for (const p of world.getPlayers({ tags: ["dungeons:debug_damage"] })) p.sendMessage(`Dealt: ${d} Damage`);',
+            '  hurt.sendMessage("You were hurt badly");',
+            '});',
+            'system.runInterval(() => { for (const p of world.getAllPlayers()) {',
+            '  if (!p.hasTag("dungeons:debug_showstates")) continue;',
+            '  p.onScreenDisplay.setActionBar(`Block: ${p.name}, Face: up`);',
+            '} });',
+            'const DEBUG = false;',
+            'function debugLog(p, m) { p.sendMessage("Debug note: " + m); }',
+            'export function f(p) {',
+            '  if (DEBUG) p.sendMessage("Cooldown state dump");',
+            '  if (!DEBUG) p.sendMessage("Welcome to the dungeon");',
+            '  debugLog(p, "Spawner tick happened");',
+            '  p.sendMessage(DEBUG ? "debug mode text" : "Normal mode text");',
+            '}',
+            'const names = [{ username: "Alylicara", printName: "§dAlylicara" }];',
+        ].join('\n');
+        const cd = new NS.ExtractContext({});
+        NS.processScript(src, 'scripts/combat.js', cd, { injectRuntime: true });
+        const vals = [...cd.entries.values()].map(e => e.value).sort();
+        check('调试输出：调试标签 / 开关 / 调试函数里的文本、玩家名单不提取，正常文本照常', JSON.stringify(vals) === JSON.stringify(['Normal mode text', 'Welcome to the dungeon', 'You were hurt badly']), JSON.stringify(vals));
+        const cf = new NS.ExtractContext({});
+        NS.processScript('export function f(p){ p.sendMessage("Took some damage now"); }', 'scripts/utils/debug.js', cf, { injectRuntime: true });
+        check('调试输出：debug.js 整个文件不提取', cf.entries.size === 0);
+        // PalCraft 生成的数据表：开发备注、内部标识不提取，显示名照常
+        const data = 'export const A = {"x":{"label":"Punch Flurry","stat":"MeleeAttack","retailId":"WaterGun","partnerKey":"Toboggan","phase":"Ready",' +
+            '"adaptation":"Existing reviewed Bedrock signature retained; power added.","nativePresentation":{"timingBasis":{"releaseGesture":"reviewed own-Pal Action pose +0.2 source seconds"},"pulseTiming":"bounded dispatch inside Process"},' +
+            '"preview":{"displayName":"Fuack · Aqua Gun","chargeLabel":"High pressure water"}}};';
+        const cp = new NS.ExtractContext({});
+        NS.processScript(data, 'scripts/data.js', cp, { injectRuntime: true });
+        const pv = [...cp.entries.values()].map(e => e.value).sort();
+        check('数据表：开发备注字段、*Id / *Key / 驼峰标识符不提取', JSON.stringify(pv) === JSON.stringify(['Fuack · Aqua Gun', 'High pressure water', 'Punch Flurry']), JSON.stringify(pv));
+    }
+    {
         const cr = new NS.ExtractContext({});
         NS.processScript('const o = {}; o.hasOwnProperty("Rotation"); o.toString("Hello there"); item.setLore(["Sharp blade"]);', 'scripts/x.js', cr, {});
         check('报告：hasOwnProperty / toString 等原型方法名不误报', !cr.untranslatable.some(u => /hasOwnProperty|toString|native/.test(u.where + u.reason)) && cr.untranslatable.some(u => u.text === 'Sharp blade'));
