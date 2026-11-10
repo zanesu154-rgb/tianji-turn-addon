@@ -15,6 +15,18 @@
      * 只接受“纯键名字符串”的字段（物品名、方块名、交互文字、交易界面名、UI 文本……）
      * 支持 "xxx" 和 {"value":"xxx"} 两种写法
      */
+    /** 不提取、不补全的键（创造栏隐藏的物品 / 方块、不显示的刷怪蛋） */
+    function hideKeys(ctx, keys) {
+        if (!ctx.hiddenKeys) ctx.hiddenKeys = new Set();
+        for (const k of keys) if (k) ctx.hiddenKeys.add(k);
+    }
+    /** 字段里已经是翻译键时返回这个键 */
+    function keyOfField(container, field) {
+        const v = container && container[field];
+        const t = typeof v === 'string' ? v : (v && typeof v.value === 'string' ? v.value : '');
+        return t && /^[\w.:\-]+$/.test(t.trim()) && /[.:]/.test(t) ? t.trim() : '';
+    }
+
     function replaceKeyField(container, field, baseKey, ctx, meta) {
         if (!container || typeof container !== 'object') return false;
         const v = container[field];
@@ -91,15 +103,19 @@
         const comps = item.components || {};
         const meta = { file, kind: 'item' };
         let changed = false;
+        const hidden = isHiddenFromCreative(item.description);
+        // 创造物品栏里不显示的物品（技术物品、进度图标等）：默认不提取名称，已有键也不补全
+        const skipName = hidden && !ctx.includeHiddenItems;
+        if (skipName) hideKeys(ctx, [`item.${id}.name`, `item.${id}`, `tile.${id}.name`, keyOfField(comps, 'minecraft:display_name')]);
 
-        if (replaceKeyField(comps, 'minecraft:display_name', `item.${id}.name`, ctx, meta)) changed = true;
+        if (!skipName && replaceKeyField(comps, 'minecraft:display_name', `item.${id}.name`, ctx, meta)) changed = true;
         const ib = comps['minecraft:interact_button'];
         if (typeof ib === 'string' && ib !== 'true' && ib !== 'false') {
             if (replaceKeyField(comps, 'minecraft:interact_button', `item.${id}.interact_button`, ctx, meta)) changed = true;
         }
         if (scanCommandFields(item.events, `item.${id}.message`, ctx, file)) changed = true;
 
-        info.defs.items.push({ id, file, data, hasName: comps['minecraft:display_name'] != null, isDataDriven: !!item.components, hidden: isHiddenFromCreative(item.description) });
+        info.defs.items.push({ id, file, data, hasName: comps['minecraft:display_name'] != null, isDataDriven: !!item.components, hidden });
         return changed;
     }
 
@@ -116,9 +132,13 @@
         let changed = false;
         const base = `tile.${id}.name`;
 
+        const hidden = isHiddenFromCreative(block.description);
+        const skipName = hidden && !ctx.includeHiddenItems;
+        if (skipName) hideKeys(ctx, [base, `item.${id}.name`, `item.${id}`]);
         const handleComps = (comps, suffix) => {
             if (!comps || typeof comps !== 'object') return;
-            if (replaceKeyField(comps, 'minecraft:display_name', base + suffix, ctx, meta)) changed = true;
+            if (skipName) hideKeys(ctx, [base + suffix, keyOfField(comps, 'minecraft:display_name')]);
+            else if (replaceKeyField(comps, 'minecraft:display_name', base + suffix, ctx, meta)) changed = true;
             const ct = comps['minecraft:crafting_table'];
             if (ct && typeof ct === 'object') {
                 if (replaceKeyField(ct, 'table_name', `tile.${id}.table_name${suffix}`, ctx, meta)) changed = true;
@@ -131,7 +151,7 @@
         if (scanCommandFields(block.events, `tile.${id}.message`, ctx, file)) changed = true;
 
         const hasName = !!(block.components && block.components['minecraft:display_name']);
-        info.defs.blocks.push({ id, file, hasName, hidden: isHiddenFromCreative(block.description) });
+        info.defs.blocks.push({ id, file, hasName, hidden });
         return changed;
     }
 
@@ -179,7 +199,10 @@
         for (const [g, comps] of Object.entries(entity.component_groups || {})) handleComps(comps, `component_groups.${g}`);
         if (scanCommandFields(entity, `entity.${id}.message`, ctx, file)) changed = true;
 
-        info.defs.entities.push({ id, file });
+        // 刷怪蛋只有 is_spawnable 为 true 时才出现在创造物品栏
+        const spawnable = entity.description.is_spawnable === true;
+        if (!spawnable && !ctx.includeHiddenItems) hideKeys(ctx, [`item.spawn_egg.entity.${id}.name`]);
+        info.defs.entities.push({ id, file, spawnable });
         return changed;
     }
 
