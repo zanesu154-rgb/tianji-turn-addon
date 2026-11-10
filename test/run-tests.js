@@ -399,6 +399,40 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const vals = [...st.ctx.entries.values()].map(e => e.value);
         check('自定义 NPC 实体（low:npc）的对话和名字也提取，CustomName 不误报', vals.includes('Huh? Hello') && vals.includes('Raymond') && !st.ctx.untranslatable.some(u => u.text === 'NPC'), JSON.stringify(vals));
     }
+    {
+        // Myths and Magic：手写 rawtext 里 { text: 变量 }（聊天消息做的弹出提示）
+        const src = 'const spells=[{id:"a",lore:"Summon a wall of fire."}];\nfunction getLore(id){ return spells.find(s=>s.id===id).lore; }\nfunction notify(player, message, image){ player.sendMessage({ rawtext: [ { text: `toast.${image}` }, { text: message } ] }); }\nexport function f(p){ notify(p, `§dNew Recipe\\n§r${getLore("a")}`, "textures/ui/x"); }';
+        const cm = new NS.ExtractContext({ splitNewlines: false });
+        const r = NS.processScript(src, 'scripts/main.js', cm, { injectRuntime: true });
+        const out = [];
+        require('vm').runInNewContext(r.content.replace(/export /g, '') + '\nf(p);', { globalThis: {}, p: { sendMessage: (x) => out.push(x) } });
+        const js = JSON.stringify(out[0]);
+        check('手写 rawtext 里的 { text: 变量 } 运行时翻译（New Recipe 提示）', (js.match(/"translate"/g) || []).length === 2 && js.includes('toast.textures/ui/x'), js);
+
+        // 创造栏隐藏的物品不生成占位名
+        const hm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const mk = (id, cat) => Buffer.from(JSON.stringify({ format_version: '1.20.80', 'minecraft:item': { description: { identifier: id, menu_category: cat }, components: { 'minecraft:icon': 'x' } } }));
+        hm.files.set('BP/items/hidden_icon.json', mk('tianji:hidden_icon', { category: 'none' }));
+        hm.files.set('BP/items/shown_thing.json', mk('tianji:shown_thing', { category: 'items' }));
+        const hr = await NS.runPipeline(hm, { baseName: 'fixture' }, () => {});
+        check('创造物品栏隐藏的物品（category: none）不生成占位名', !hr.ctx.entries.has('item.tianji:hidden_icon.name') && hr.ctx.entries.has('item.tianji:shown_thing.name'));
+        const cr2 = new NS.ExtractContext({});
+        cr2.report('f', 'set_name', 'PONDERING_BOOK_tether', 'x'); cr2.report('f', 'set_name', 'Pondering Book', 'x');
+        check('带下划线的标识符（PONDERING_BOOK_tether）不列入报告', cr2.untranslatable.length === 1);
+    }
+    {
+        // 存档：作者已写成 rawtext 的物品描述不列入需人工翻译；自带资源包里已有的键不再提取
+        const { T, NbtString, writeAll } = NS.NBT;
+        const S = (n, v) => ({ t: T.STRING, n, v: new NbtString(v, null) });
+        const L = (n, et, items) => ({ t: T.LIST, n, v: { et, items } });
+        const C = (n, v) => ({ t: T.COMPOUND, n, v });
+        const chest = [S('id', 'Chest'), { t: T.INT, n: 'x', v: 0 }, { t: T.INT, n: 'y', v: 0 }, { t: T.INT, n: 'z', v: 0 },
+            L('Items', T.COMPOUND, [[{ t: T.BYTE, n: 'Count', v: 1 }, S('Name', 'mm:ancient_texts'), { t: T.BYTE, n: 'Slot', v: 0 }, C('tag', [C('display', [L('Lore', T.STRING, [new NbtString('{"rawtext":[{"translate":"desc.ancient_texts"}]}', null), new NbtString('Plain old lore', null)])])])]])];
+        const root = [{ t: T.INT, n: 'format_version', v: 1 }, L('size', T.INT, [1, 1, 1]), C('structure', [L('block_indices', T.LIST, [{ et: T.INT, items: [0] }, { et: T.INT, items: [-1] }]), L('entities', T.COMPOUND, []), C('palette', [C('default', [L('block_palette', T.COMPOUND, [[S('name', 'minecraft:chest'), C('states', []), { t: T.INT, n: 'version', v: 1 }]]), C('block_position_data', [C('0', [C('block_entity_data', chest)])])])])]), L('structure_world_origin', T.INT, [0, 0, 0])];
+        const st = await NS.openStructure('b.mcstructure', writeAll([{ t: T.COMPOUND, n: '', v: root }]), {}, () => {});
+        const texts = st.ctx.untranslatable.map(u => u.text);
+        check('存档 / 结构：已是 rawtext 翻译键的物品描述不列入需人工翻译', texts.includes('Plain old lore') && !texts.some(t => /rawtext/.test(t)), JSON.stringify(texts));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

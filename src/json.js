@@ -99,7 +99,7 @@
         }
         if (scanCommandFields(item.events, `item.${id}.message`, ctx, file)) changed = true;
 
-        info.defs.items.push({ id, file, data, hasName: comps['minecraft:display_name'] != null, isDataDriven: !!item.components });
+        info.defs.items.push({ id, file, data, hasName: comps['minecraft:display_name'] != null, isDataDriven: !!item.components, hidden: isHiddenFromCreative(item.description) });
         return changed;
     }
 
@@ -131,7 +131,7 @@
         if (scanCommandFields(block.events, `tile.${id}.message`, ctx, file)) changed = true;
 
         const hasName = !!(block.components && block.components['minecraft:display_name']);
-        info.defs.blocks.push({ id, file, hasName });
+        info.defs.blocks.push({ id, file, hasName, hidden: isHiddenFromCreative(block.description) });
         return changed;
     }
 
@@ -415,6 +415,13 @@
         if (visit(obj, ns)) return true;
         const base = tplOf(key, ns);
         return !!(base && varMisused(base.obj, base.key, base.ns, name, elements, seen));
+    }
+
+    /** 创造物品栏里隐藏的物品 / 方块（menu_category.category 为 none，或标了 is_hidden_in_commands）：多为技术用途 */
+    function isHiddenFromCreative(desc) {
+        const mc = desc && desc.menu_category;
+        if (!mc || typeof mc !== 'object') return false;
+        return String(mc.category || '').toLowerCase() === 'none' || mc.is_hidden_in_commands === true;
     }
 
     /** 沿 "名字@命名空间.模板" 继承链查找 localize；未设置返回 undefined */

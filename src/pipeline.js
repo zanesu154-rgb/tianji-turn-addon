@@ -281,11 +281,11 @@
                 ctx.used.add(key);
                 placeholders.push(key);
             };
-            for (const b of info.defs.blocks) if (!b.hasName) addPh(`tile.${b.id}.name`, b.id, 'block', b.file);
+            for (const b of info.defs.blocks) if (!b.hasName && !b.hidden) addPh(`tile.${b.id}.name`, b.id, 'block', b.file);
             for (const e of info.defs.entities) addPh(`entity.${e.id}.name`, e.id, 'entity', e.file);
             for (const id of info.defs.spawnEggs) addPh(`item.spawn_egg.entity.${id}.name`, id, 'spawn_egg', (info.defs.entities.find(e => e.id === id) || {}).file);
             for (const it of info.defs.items) {
-                if (it.hasName || !it.isDataDriven) continue;
+                if (it.hasName || !it.isDataDriven || it.hidden) continue;   // 创造栏隐藏的物品多为技术用途，不生成占位名
                 const cands = [`item.${it.id}.name`, `item.${it.id}`, `tile.${it.id}.name`];
                 if (cands.some(k => knownKeys.has(k))) continue;
                 const key = `item.${it.id}.name`;

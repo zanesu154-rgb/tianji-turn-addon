@@ -65,6 +65,7 @@
         if (/\.(png|jpe?g|tga|json|js|mjs|ogg|wav|fsb|mcfunction|lang)$/i.test(t)) return true;
         if (/^[a-z0-9_]+$/.test(t)) return true;                       // snake_case / 单个小写词
         if (/^[A-Z0-9_]+$/.test(t) && t.length > 1 && t.includes('_')) return true; // CONST_CASE
+        if (/^[A-Za-z0-9]+(_[A-Za-z0-9]+)+$/.test(t)) return true;     // 带下划线的标识符（PONDERING_BOOK_tether）
         if (/^[a-z]+[A-Z][A-Za-z0-9]*$/.test(t)) return true;          // camelCase
         if (/^[a-z0-9_]+(\.[a-z0-9_]+)+$/i.test(t)) return true;       // a.b.c
         if (/^[#$]/.test(t)) return true;                              // UI 绑定 / 变量
