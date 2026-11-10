@@ -530,18 +530,17 @@ dropZone.addEventListener('drop', async (e) => {
         const on = SEG[d] || '0000000';
         return `<svg class="led-digit" viewBox="0 0 20 34" aria-hidden="true">${POLY.map((p, i) => `<polygon points="${p}" class="${on[i] === '1' ? 'on' : 'off'}"/>`).join('')}</svg>`;
     };
-    const draw = (el, text, min) => {
-        const n = String(text).replace(/\D/g, '');
-        const s = n.padStart(Math.max(min, n.length), ' ');
-        el.innerHTML = [...s].map(ch => digitSvg(ch === ' ' ? null : +ch)).join('');
+    // 只画实际位数，数字在各自区域里居中（位数变化时自动居中）
+    const draw = (el, text) => {
+        const n = String(text).replace(/\D/g, '') || '0';
+        el.innerHTML = [...n].map(ch => digitSvg(+ch)).join('');
         el.setAttribute('aria-label', n);
     };
     let tries = 0;
     const timer = setInterval(() => {
         if (/\d/.test(pv.textContent)) {
-            const w = Math.max(6, pv.textContent.trim().length);
-            draw($('led-pv'), pv.textContent, w);
-            draw($('led-uv'), uv.textContent, w);
+            draw($('led-pv'), pv.textContent);
+            draw($('led-uv'), uv.textContent);
             box.hidden = false;
             clearInterval(timer);
         } else if (++tries > 30) clearInterval(timer);

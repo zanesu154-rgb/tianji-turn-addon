@@ -13,7 +13,7 @@
 (function (root) {
     'use strict';
     const NS = root.AddonI18n;
-    const { looksLikeText, fileBaseOf, translateCommand, looksLikeCommand } = NS;
+    const { looksLikeText, fileBaseOf, translateCommand, looksLikeCommand, sanitizeKeyPart, hasCJK } = NS;
 
     const FORM_CLASSES = new Set(['ActionFormData', 'ModalFormData', 'MessageFormData']);
 
@@ -200,7 +200,7 @@
         ko: 'ko_KR', kr: 'ko_KR', ko_kr: 'ko_KR', ru: 'ru_RU', ru_ru: 'ru_RU',
         es: 'es_ES', es_es: 'es_ES', es_mx: 'es_MX', de: 'de_DE', de_de: 'de_DE', fr: 'fr_FR', fr_fr: 'fr_FR', fr_ca: 'fr_CA',
         pt: 'pt_BR', pt_br: 'pt_BR', pt_pt: 'pt_PT', it_it: 'it_IT', th: 'th_TH', th_th: 'th_TH',
-        tr: 'tr_TR', tr_tr: 'tr_TR', pl: 'pl_PL', pl_pl: 'pl_PL', uk_ua: 'uk_UA', nl: 'nl_NL', nl_nl: 'nl_NL', id_id: 'id_ID',
+        tr: 'tr_TR', tr_tr: 'tr_TR', pl: 'pl_PL', pl_pl: 'pl_PL', uk: 'uk_UA', uk_ua: 'uk_UA', nl: 'nl_NL', nl_nl: 'nl_NL', id_id: 'id_ID',
     };
     const localeOfKey = (k) => LOCALE_ALIASES[String(k).toLowerCase().replace(/-/g, '_')] ||
         (/^[a-z]{2}_[A-Z]{2}$/.test(String(k)) ? String(k) : null);
@@ -963,6 +963,90 @@
         return new Map([...out].map(([f, set]) => [f, [...set]]));
     }
 
+    /**
+     * 跨文件的语言字典：同一目录下按语言命名的脚本（en.js / es.js / ru.js / uk.js / zh_cn.js…），
+     * 各自导出一个大对象（同样的键路径，不同语言的文字）。同一路径的各语言版本共用一个翻译键：
+     * 原文用英文写进源语言 lang，其他语言写进对应 lang；运行时任何一种语言的文字都对应到这个键。
+     * 返回 Map(文件 → { exact, patterns, nodes })，由 processScript 登记。
+     */
+    function collectCrossFileDicts(infos, ctx) {
+        const out = new Map();
+        const FILE_LANG = { it: 'it_IT' };
+        const byDir = new Map();
+        for (const [file, info] of infos) {
+            if (!info || !info.ok) continue;
+            const m = /^(.*\/)?([^/]+)\.(m?js)$/.exec(file);
+            if (!m) continue;
+            const lang = localeOfKey(m[2]) || FILE_LANG[m[2].toLowerCase()];
+            if (!lang) continue;
+            const dir = m[1] || '';
+            if (!byDir.has(dir)) byDir.set(dir, []);
+            byDir.get(dir).push({ file, lang, info });
+        }
+        for (const [dir, files] of byDir) {
+            if (files.length < 2 || new Set(files.map(f => f.lang)).size < 2) continue;
+            // 每个文件里最大的对象字面量（字符串叶子最多）
+            const countLeaves = (o) => { let n = 0; walk(o, (x) => { if (isStr(x)) n++; }); return n; };
+            const dicts = [];
+            for (const f of files) {
+                let best = null, bestN = 0;
+                walk(f.info.ast, (n) => {
+                    if (n.type !== 'VariableDeclarator' || !n.init || n.init.type !== 'ObjectExpression') return;
+                    if (n.parent && n.parent.parent && !/Program|ExportNamedDeclaration/.test(n.parent.parent.type)) return;
+                    const c = countLeaves(n.init);
+                    if (c > bestN) { best = n.init; bestN = c; }
+                });
+                if (best && bestN >= 5) dicts.push({ ...f, obj: best, n: bestN });
+            }
+            if (dicts.length < 2) continue;
+            const byPath = new Map();
+            const collect = (node, d, path) => {
+                if (isStr(node)) {
+                    if (!byPath.has(path)) byPath.set(path, new Map());
+                    byPath.get(path).set(d.lang, { node, file: d.file });
+                } else if (node && node.type === 'ObjectExpression') {
+                    for (const p of node.properties) { const k = p.type === 'Property' && !p.computed ? (p.key.name != null ? p.key.name : p.key.value) : null; if (k != null) collect(p.value, d, path ? `${path}.${k}` : String(k)); }
+                } else if (node && node.type === 'ArrayExpression') node.elements.forEach((e, i) => collect(e, d, `${path}[${i}]`));
+            };
+            for (const d of dicts) collect(d.obj, d, '');
+            const prefix = 'script.' + sanitizeKeyPart(dir.replace(/\/$/, '').split('/').pop() || 'langs');
+            const add = (file, kind, v) => {
+                if (!out.has(file)) out.set(file, { exact: [], patterns: [], nodes: new Set() });
+                out.get(file)[kind].push(v);
+            };
+            const PH = /%(\d+)\$[sd]|%[sd]/g;
+            let groups = 0;
+            for (const [path, m] of byPath) {
+                const src = m.get('en_US') || m.get('en_GB') || [...m.values()].find(x => !/[^\u0000-ɏ\s\p{P}\p{S}\p{N}]/u.test(x.node.value)) || [...m.values()][0];
+                const value = src.node.value;
+                for (const x of m.values()) out.has(x.file) || add(x.file, 'exact', null), out.get(x.file).nodes.add(x.node);
+                if (!looksLikeText(value, 'loose') && ![...m.values()].some(x => hasCJK(x.node.value))) continue;
+                const key = ctx.alloc(`${prefix}.${path.replace(/[^A-Za-z0-9_.:\-]/g, '_')}`, value, { file: src.file, kind: 'script', scope: 'xdict:' + prefix + ':' + path });
+                groups++;
+                for (const [lang, x] of m) {
+                    ctx.addTranslation(key, lang, x.node.value);
+                    if (PH.test(x.node.value)) {
+                        PH.lastIndex = 0;
+                        const lits = [''], order = [];
+                        let last = 0, seq = 0;
+                        for (const mm of x.node.value.matchAll(PH)) {
+                            lits[lits.length - 1] += x.node.value.slice(last, mm.index);
+                            order.push(mm[1] ? +mm[1] : ++seq);
+                            lits.push('');
+                            last = mm.index + mm[0].length;
+                        }
+                        lits[lits.length - 1] += x.node.value.slice(last);
+                        add(x.file, 'patterns', [key, lits, order]);
+                    } else add(x.file, 'exact', [x.node.value, key]);
+                    PH.lastIndex = 0;
+                }
+            }
+            for (const v of out.values()) v.exact = v.exact.filter(Boolean);
+            ctx.warn(`${dir || '(根目录)'}：识别到按语言分文件的翻译字典（${dicts.map(d => d.file.split('/').pop() + '=' + d.lang).join('、')}），合并 ${groups} 组`);
+        }
+        return out;
+    }
+
     function processScript(source, file, ctx, opts = {}) {
         const info = opts.info || collectScriptInfo(source);
         if (!info.ok) {
@@ -1276,6 +1360,12 @@
         const fileMap = new Map(lf.map);
         for (const [pat, m] of lf.fileMaps || []) {
             if (file.endsWith('/' + pat) || file === pat || file.split('/').pop() === pat) for (const [k, v] of m) fileMap.set(k, v);
+        }
+        // 跨文件语言字典（en.js / es.js…）：预先合并好的键
+        if (opts.crossDict) {
+            for (const nd of opts.crossDict.nodes) handled.add(nd);
+            exact.push(...opts.crossDict.exact);
+            patterns.push(...opts.crossDict.patterns);
         }
         const tables = collectTranslationGroups(ast, { mode: lf.mode === 'manual' && !fileMap.size ? 'auto' : lf.mode, map: fileMap, fileHint: langHintFromFile(file) });
         let tableEntries = 0;
@@ -1628,5 +1718,6 @@
     NS.collectTranslationGroups = collectTranslationGroups;
     NS.processScript = processScript;
     NS.collectParamTexts = collectParamTexts;
+    NS.collectCrossFileDicts = collectCrossFileDicts;
     NS.SCRIPT_SINKS = SINKS;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
