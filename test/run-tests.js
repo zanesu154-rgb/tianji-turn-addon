@@ -446,6 +446,22 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const va = [...ca.entries.values()].map(e => e.value);
         check('拼出键引用的模板（@attributes.${id}.name: ${v}%）不提取', !va.some(v => /@attributes/.test(v)) && va.some(v => /Mana boost/.test(v)), JSON.stringify(va));
     }
+    {
+        // RPG：content/langs/en.js / ru.js 各导出一个字典，同路径共用键；%1$s 句式
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const dict = (o) => Buffer.from('export { Dictionary };\nconst Dictionary = ' + JSON.stringify(o, null, 2) + ';\n');
+        xm.files.set('BP/scripts/langs/en.js', dict({ items: { apple: 'Apple', axo: 'Adult %1$s Axolotl', blue: 'Blue', bread: 'Bread', bow: 'Bow' }, ui: { open: 'Open the menu' } }));
+        xm.files.set('BP/scripts/langs/ru.js', dict({ items: { apple: 'Яблоко', axo: '%1$s взрослого аксолотля', blue: 'Синий', bread: 'Хлеб', bow: 'Лук' }, ui: { open: 'Открыть меню' } }));
+        xm.files.set('BP/scripts/langs/uk.js', dict({ items: { apple: 'Яблуко', axo: 'Доросла %1$s аксолотль', blue: 'Синя', bread: 'Хліб', bow: 'Лук' }, ui: { open: 'Відкрити меню' } }));
+        const xr = await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
+        const en = NS.parseLang(xm.files.get('RP/texts/en_US.lang').toString());
+        const ru = NS.parseLang(xm.files.get('RP/texts/ru_RU.lang').toString());
+        const uk = xm.files.get('RP/texts/uk_UA.lang') && NS.parseLang(xm.files.get('RP/texts/uk_UA.lang').toString());
+        const k = [...en.keys()].find(x => /langs\.items\.apple$/.test(x));
+        const ka = [...en.keys()].find(x => /langs\.items\.axo$/.test(x));
+        check('按语言分文件的字典（langs/en.js、ru.js、uk.js）：同路径共用一个键，各语言写进各自 lang', k && en.get(k) === 'Apple' && ru.get(k) === 'Яблоко' && uk && uk.get(k) === 'Яблуко' && en.get(ka) === 'Adult %1$s Axolotl' && ru.get(ka) === '%1$s взрослого аксолотля'
+            && ![...xr.ctx.entries.values()].some(e => /[\u0400-\u04ff]/.test(e.value)));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
