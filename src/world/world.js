@@ -144,6 +144,10 @@
         const report = (path, where, text, reason) => {
             // 格式码标记（§u§a§p）、技术 ID、数字、已是翻译键的名字不需要人工翻译
             if (typeof text !== 'string' || ctx.isKey(text)) return;
+            // 作者已经写成翻译键的（{"rawtext":[{"translate":…}]}）不需要再处理
+            if (/^\s*\{[\s\S]*"(rawtext|translate)"[\s\S]*\}\s*$/.test(text)) {
+                try { const j = JSON.parse(text); if (j && (Array.isArray(j.rawtext) || typeof j.translate === 'string')) return; } catch (e) { /* 不是 JSON，照常列出 */ }
+            }
             const plain = NS.stripFormatting(text).trim();
             if (!NS.hasLetters(plain) || (/^[\w.:-]+$/.test(plain) && /[_:]/.test(plain))) return;
             ctx.untranslatable.push({ file: label, where, text, reason, ref: `${rec.id}|${JSON.stringify(path)}` });
@@ -548,6 +552,11 @@
             log(`[资源包] 发现之前生成的 ${packDir}（${langs.size} 种语言），新提取的键会追加进去，已有译文保留`);
         }
         const knownKeys = new Set(), existingValues = new Map();
+        // 存档自带资源包 / 行为包里已有的翻译键：文字本身就是这些键时不再提取
+        for (const f of all) {
+            if (!f.startsWith(rootDir) || f.startsWith(packDir) || !/^(resource_packs|behavior_packs)\/[^/]+\/texts\/[^/]+\.lang$/.test(f.slice(rootDir.length))) continue;
+            for (const k of NS.parseLang(await fs.readText(f)).keys()) knownKeys.add(k);
+        }
         if (existingPack) for (const [, e] of existingPack.langs) for (const [k, v] of e.map) {
             knownKeys.add(k);
             if (!existingValues.has(k)) existingValues.set(k, new Set());

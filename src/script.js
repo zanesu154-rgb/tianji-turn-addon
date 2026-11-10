@@ -1245,7 +1245,14 @@
             for (const el of n.value.elements) {
                 if (!el || el.type !== 'ObjectExpression' || el.properties.length !== 1) continue;
                 const p = el.properties[0];
-                if (p.type !== 'Property' || p.computed || (p.key.name || p.key.value) !== 'text' || !isStr(p.value)) continue;
+                if (p.type !== 'Property' || p.computed || (p.key.name || p.key.value) !== 'text') continue;
+                if (!isStr(p.value)) {
+                    // { text: message }：文字来自变量 / 表达式 → 运行时翻译（查不到时原样显示）
+                    if (!injectRuntime || p.value.type === 'Literal' || handled.has(el) || overrides.has(el) || overrides.has(p.value)) continue;
+                    usesRuntime = true;
+                    overrides.set(el, () => `${RT}.T(${renderOrig(p.value)})`);
+                    continue;
+                }
                 const parts = ctx.rawParts(p.value.value, keyBase('rawtext'), meta('rawtext'));
                 if (!parts) continue;
                 markHandled(el);
