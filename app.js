@@ -67,16 +67,23 @@ function log(msg, type = 'info') {
     state.logContent += line + '\n';
     if (!logAutoExpanded) {
         logEl.classList.remove('collapsed');
-        toggleLogBtn.textContent = '收起';
+        toggleLogBtn.textContent = t('collapse');
         logAutoExpanded = true;
     }
     logQueue.push([line, type]);
     if (!logFlushScheduled) { logFlushScheduled = true; requestAnimationFrame(flushLog); }
 }
 
-function setProgress(percent, text) {
+let progressKey = ['waiting'];
+function setProgress(percent, key, ...args) {
     progressFill.style.width = `${percent}%`;
-    if (text) progressText.textContent = text;
+    if (key) { progressKey = [key, ...args]; progressText.textContent = NS.UI.t(key, ...args); }
+}
+
+/** 挂载编辑器并记住参数，切换界面语言时重新渲染（编辑内容保存在会话里，不会丢） */
+function mountEditor(...args) {
+    state.editorArgs = args;
+    NS.mountWorldEditor(...args);
 }
 
 function escapeHtml(s) {
@@ -162,16 +169,13 @@ async function extractInnerPacks(zip) {
 // ================================================================
 
 let mode = 'addon';
-const MODE_TEXT = {
-    addon: { title: '点击上传 .mcaddon / .mcpack / .zip', hint: '处理 .mcaddon / .mcpack：物品、方块、实体、对话、UI、脚本等文本' },
-    world: { title: '点击上传 .mcworld / .mctemplate / .mcstructure', hint: '处理世界存档或结构文件：告示牌、命令方块、NPC → 翻译键，并生成对应的资源包；无法翻译的文本可在 NBT 编辑器中修改。处理前请备份' },
-};
+const t = (...a) => NS.UI.t(...a);
 function setMode(m) {
     mode = m;
     document.body.classList.toggle('mode-world', m === 'world');
     document.querySelectorAll('.mode-tab').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
-    $('drop-title').textContent = MODE_TEXT[m].title;
-    $('mode-hint').textContent = MODE_TEXT[m].hint;
+    $('drop-title').textContent = t(m === 'world' ? 'drop_world' : 'drop_addon');
+    $('mode-hint').textContent = t(m === 'world' ? 'hint_world' : 'hint_addon');
 }
 document.querySelectorAll('.mode-tab').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 
@@ -203,33 +207,34 @@ function readOptions() {
 function renderSummary(res) {
     const s = res.summary;
     const untr = res.ctx.untranslatable;
-    const list = (items, fmt) => `<ul>${items.slice(0, 200).map(x => `<li>${fmt(x)}</li>`).join('')}${items.length > 200 ? `<li>…共 ${items.length} 条</li>` : ''}</ul>`;
+    const list = (items, fmt) => `<ul>${items.slice(0, 200).map(x => `<li>${fmt(x)}</li>`).join('')}${items.length > 200 ? `<li>${t('more', items.length)}</li>` : ''}</ul>`;
     let html = `<div class="summary-stats">
-        <div class="stat"><b>${s.newKeys}</b><span>提取的文本</span></div>
-        <div class="stat"><b>${s.processedFiles}</b><span>${s.world ? '自动修改的记录' : '修改的文件'}</span></div>
-        <div class="stat"><b>${s.untranslatable}</b><span>${s.world ? '需人工处理' : '无法本地化'}</span></div>
-        <div class="stat"><b>${escapeHtml(s.sourceLang)}</b><span>原文语言</span></div>
+        <div class="stat"><b>${s.newKeys}</b><span>${t('s_extracted')}</span></div>
+        <div class="stat"><b>${s.processedFiles}</b><span>${t(s.world ? 's_mod_records' : 's_mod_files')}</span></div>
+        <div class="stat"><b>${s.untranslatable}</b><span>${t(s.world ? 's_manual' : 's_untr')}</span></div>
+        <div class="stat"><b>${escapeHtml(s.sourceLang)}</b><span>${t('s_source')}</span></div>
     </div>`;
     if (s.structure) {
-        if (s.createdRP) html += `<p class="summary-note">下载的 zip 里包含改好的结构文件和翻译资源包 <code>${escapeHtml(s.createdRP)}</code>，使用该结构的世界需启用这个资源包。</p>`;
-        if (s.untranslatable) html += `<p class="summary-note">有 ${s.untranslatable} 处文本游戏不支持翻译键，可在下方 NBT 编辑器中直接修改。</p>`;
+        if (s.createdRP) html += `<p class="summary-note">${t('n_struct_rp', `<code>${escapeHtml(s.createdRP)}</code>`)}</p>`;
+        if (s.untranslatable) html += `<p class="summary-note">${t('n_untr_editor', s.untranslatable)}</p>`;
     } else if (s.world) {
-        if (s.createdRP) html += `<p class="summary-note">下载时会在存档内新建资源包 <code>${escapeHtml(s.createdRP)}</code> 并登记到 world_resource_packs.json，打开存档自动加载。</p>`;
-        if (s.untranslatable) html += `<p class="summary-note">有 ${s.untranslatable} 处文本游戏不支持翻译键，可在下方 NBT 编辑器中直接修改。</p>`;
-    } else if (s.createdRP) html += `<p class="summary-note">附加包没有资源包，已新建 <code>${escapeHtml(s.createdRP)}/</code> 存放翻译，并让行为包依赖它。</p>`;
-    if (s.placeholders) html += `<p class="summary-note">${s.placeholders} 个物品/方块/实体原本没有名称，已按 ID 生成英文占位名，请在 lang 中确认。</p>`;
-    if (s.inputGroups) html += `<p class="summary-note">脚本里有 ${s.inputGroups} 处匹配玩家聊天输入的关键词/正则。游戏不会翻译玩家输入，已列在翻译表的 <code>input_aliases.csv</code> 中，可按语言补充说法后交给作者加进正则。</p>`;
+        if (s.createdRP) html += `<p class="summary-note">${t('n_world_rp', `<code>${escapeHtml(s.createdRP)}</code>`)}</p>`;
+        if (s.untranslatable) html += `<p class="summary-note">${t('n_untr_editor', s.untranslatable)}</p>`;
+    } else if (s.createdRP) html += `<p class="summary-note">${t('n_created_rp', `<code>${escapeHtml(s.createdRP)}/</code>`)}</p>`;
+    if (s.placeholders) html += `<p class="summary-note">${t('n_placeholders', s.placeholders)}</p>`;
+    if (s.inputGroups) html += `<p class="summary-note">${t('n_input', s.inputGroups)}</p>`;
     if (untr.length && !s.world) {
-        html += `<details><summary>无法本地化的文本（${untr.length}）—— 游戏不支持翻译键，需要手动处理</summary>${list(untr, u =>
+        html += `<details><summary>${t('d_untr', untr.length)}</summary>${list(untr, u =>
             `<code>${escapeHtml(u.text)}</code> — ${escapeHtml(u.reason)}<br><small>${escapeHtml(u.file)} · ${escapeHtml(u.where)}</small>`)}</details>`;
     }
     if (s.warnings.length) {
-        html += `<details><summary>注意事项（${s.warnings.length}）</summary>${list(s.warnings, w => escapeHtml(w))}</details>`;
+        html += `<details><summary>${t('d_warn', s.warnings.length)}</summary>${list(s.warnings, w => escapeHtml(w))}</details>`;
     }
     if (s.missingRefs.length) {
-        html += `<details><summary>引用了但没有定义的键（${s.missingRefs.length}）</summary>${list(s.missingRefs, ([k, f]) =>
+        html += `<details><summary>${t('d_missing', s.missingRefs.length)}</summary>${list(s.missingRefs, ([k, f]) =>
             `<code>${escapeHtml(k)}</code><br><small>${escapeHtml(f)}</small>`)}</details>`;
     }
+    state.lastSummaryRes = res;
     summaryEl.innerHTML = html;
     summaryEl.hidden = false;
 }
@@ -252,11 +257,11 @@ async function processStructure(file) {
     state.resultName = `${state.originalName}_i18n.zip`;
     logMany(session.ctx.untranslatable, u => `[需人工处理] ${u.file} ${u.where}: ${u.text}`);
     renderSummary({ ctx: session.ctx, summary: { ...worldSummary(session), createdRP: session.ctx.entries.size ? `${state.originalName}_texts.mcpack` : null, structure: true } });
-    NS.mountWorldEditor($('nbt-editor'), session, {
+    mountEditor($('nbt-editor'), session, {
         onChange: () => { state.resultBlob = null; state.workbookBlob = null; },
         downloadCsv: (text, name) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_${name || 'untranslatable'}.csv`),
     });
-    setProgress(100, '完成！可在下方编辑后下载');
+    setProgress(100, 'done_edit');
     log(`✅ 分析完成：自动转换 ${session.ctx.entries.size} 条，需人工处理 ${session.ctx.untranslatable.length} 处`);
     downloadLogBtn.disabled = downloadResultBtn.disabled = downloadWorkbookBtn.disabled = false;
 }
@@ -266,7 +271,7 @@ async function buildWorldOutputs() {
     if (state.resultBlob && state.workbookBlob) return;
     if (!state.fs) {
         // 结构文件：输出 zip = 改好的 .mcstructure + 翻译资源包 .mcpack
-        setProgress(90, '生成中...');
+        setProgress(90, 'generating');
         const res = await state.session.build();
         const out = new JSZip();
         out.file(`${state.originalName}.mcstructure`, res.structure);
@@ -282,10 +287,10 @@ async function buildWorldOutputs() {
         wb.file('process.log', state.logContent);
         state.workbookBlob = await wb.generateAsync({ type: 'blob' });
         log(`✅ 已生成 ${state.resultName}（手动修改 ${state.session.edits} 处）`);
-        setProgress(100, '完成！');
+        setProgress(100, 'done');
         return;
     }
-    setProgress(90, '写入存档...');
+    setProgress(90, 'writing_world');
     const res = await state.session.build(state.fs, (m, t) => log(m, t || 'info'));
     const outZip = await state.fs.toZip();
     state.resultBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
@@ -294,7 +299,7 @@ async function buildWorldOutputs() {
     wb.file('process.log', state.logContent);
     state.workbookBlob = await wb.generateAsync({ type: 'blob' });
     log(`✅ 已生成 ${state.resultName}（手动修改 ${state.session.edits} 处）`);
-    setProgress(100, '完成！');
+    setProgress(100, 'done');
 }
 
 // ================================================================
@@ -322,10 +327,12 @@ async function processFile(file) {
     logAutoExpanded = false;
     summaryEl.hidden = true;
     downloadLogBtn.disabled = downloadResultBtn.disabled = downloadWorkbookBtn.disabled = true;
-    setProgress(0, '加载中...');
+    setProgress(0, 'loading');
+    // 窄屏是单栏：上传后滚到进度区，免得用户以为没反应
+    if (window.innerWidth < 960) document.querySelector('.col-output').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     log(`开始处理: ${file.name}（${(file.size / 1024).toFixed(1)} KB）  工具版本 ${($('app-version') || {}).textContent || ''}`);
-    if (!checkVersion()) { setProgress(0, '请刷新页面'); downloadLogBtn.disabled = false; return; }
+    if (!checkVersion()) { setProgress(0, 'refresh'); downloadLogBtn.disabled = false; return; }
 
     try {
         if (ext === 'mcstructure') { await processStructure(file); return; }
@@ -335,19 +342,19 @@ async function processFile(file) {
 
         const fs = new ZipFS(zip);
         log(`共 ${fs.list().length} 个文件`);
-        setProgress(5, '分析中...');
+        setProgress(5, 'analyzing');
 
         const options = {
             ...readOptions(),
             baseName: state.originalName,
-            onProgress: (r, p) => setProgress(5 + Math.floor(r * 75), `处理: ${p.split('/').pop()}`),
+            onProgress: (r, p) => setProgress(5 + Math.floor(r * 75), 'processing', p.split('/').pop()),
         };
         // 压缩包里有 level.dat + db/ → 世界存档
         const isWorld = fs.list().some(p => /(^|\/)level\.dat$/.test(p)) && fs.list().some(p => /(^|\/)db\/CURRENT$/.test(p));
         if (isWorld && mode !== 'world') { setMode('world'); log('检测到世界存档，已切换到“世界存档”模式'); }
         if (!isWorld && mode === 'world') { setMode('addon'); log('这不是世界存档，已切换到“附加包”模式'); }
         state.session = null;
-        state.addonSession = null; state.addonFs = null;
+        state.addonSession = null; state.addonFs = null; state.editorArgs = null; state.lastSummaryRes = null;
         state.fs = fs;
         state.ext = ext;
         $('nbt-editor').hidden = true;
@@ -358,11 +365,11 @@ async function processFile(file) {
             logMany(session.ctx.untranslatable, u => `[需人工处理] ${u.file} ${u.where}: ${u.text}`);
             state.resultName = `${state.originalName}_i18n.${ext === 'mctemplate' ? 'mctemplate' : 'mcworld'}`;
             renderSummary({ ctx: session.ctx, summary: worldSummary(session) });
-            NS.mountWorldEditor($('nbt-editor'), session, {
+            mountEditor($('nbt-editor'), session, {
                 onChange: () => { state.resultBlob = null; state.workbookBlob = null; },
                 downloadCsv: (text, name) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_${name || 'untranslatable'}.csv`),
             });
-            setProgress(100, '完成！可在下方编辑后下载');
+            setProgress(100, 'done_edit');
             log(`✅ 分析完成：自动转换 ${session.ctx.entries.size} 条，需人工处理 ${session.ctx.untranslatable.length} 处`);
             downloadLogBtn.disabled = downloadResultBtn.disabled = downloadWorkbookBtn.disabled = false;
             return;
@@ -378,7 +385,7 @@ async function processFile(file) {
         if (res.manualSession && res.manualSession.ctx.untranslatable.length) {
             state.addonSession = res.manualSession;
             state.addonFs = fs;
-            NS.mountWorldEditor($('nbt-editor'), res.manualSession, {
+            mountEditor($('nbt-editor'), res.manualSession, {
                 onChange: () => { state.resultBlob = null; },
                 downloadCsv: (text, name) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_${name || 'untranslatable'}.csv`),
             });
@@ -386,7 +393,7 @@ async function processFile(file) {
             log(`有 ${res.ctx.untranslatable.length} 处需人工翻译：可在下方编辑器修改，或导出待翻译表，在 translation 列填好后导入；下载时写回附加包`);
         }
 
-        setProgress(85, '打包中...');
+        setProgress(85, 'packing');
         const outZip = await fs.toZip();
         state.resultBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
         const multiPack = s.packs.length > 1 || s.restructured;
@@ -400,12 +407,12 @@ async function processFile(file) {
         state.workbookBlob = await wb.generateAsync({ type: 'blob' });
 
         renderSummary(res);
-        setProgress(100, '完成！');
+        setProgress(100, 'done');
         log(`✅ 处理完成: ${state.resultName}`);
         downloadLogBtn.disabled = downloadResultBtn.disabled = downloadWorkbookBtn.disabled = false;
     } catch (e) {
         log(`❌ 错误: ${e.message}`, 'error');
-        setProgress(0, '处理失败');
+        setProgress(0, 'failed');
         console.error(e);
         downloadLogBtn.disabled = false;
     }
@@ -427,13 +434,13 @@ function downloadBlob(blob, filename) {
 /** 附加包：结构被手动修改后重新打包 */
 async function rebuildAddonIfEdited() {
     if (!state.addonSession || state.resultBlob) return;
-    setProgress(90, '写入修改...');
+    setProgress(90, 'writing_edits');
     const r = await state.addonSession.applyTo(state.addonFs);
     const outZip = await state.addonFs.toZip();
     state.resultBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
     log(`✅ 已重新打包（手动修改 ${state.addonSession.edits} 处，写回结构 ${r.structures} 个、文件 ${r.files} 个）`);
     if (r.missed) log(`⚠ 有 ${r.missed} 条没有在文件里找到原文（可能已被转换改写），未写回`, 'warn');
-    setProgress(100, '完成！');
+    setProgress(100, 'done');
 }
 
 downloadResultBtn.addEventListener('click', async () => {
@@ -463,7 +470,7 @@ downloadLogBtn.addEventListener('click', () => {
 
 toggleLogBtn.addEventListener('click', () => {
     logEl.classList.toggle('collapsed');
-    toggleLogBtn.textContent = logEl.classList.contains('collapsed') ? '展开' : '收起';
+    toggleLogBtn.textContent = t(logEl.classList.contains('collapsed') ? 'expand' : 'collapse');
 });
 
 dropZone.addEventListener('click', () => fileInput.click());
@@ -487,3 +494,35 @@ dropZone.addEventListener('drop', async (e) => {
     const file = e.dataTransfer.files[0];
     if (file) await processFile(file);
 });
+
+// ================================================================
+//  界面语言 · 访问计数
+// ================================================================
+
+(function initUiLang() {
+    const sel = $('ui-lang');
+    for (const [code, name] of NS.UI.LANGS) sel.append(new Option(name, code));
+    sel.value = NS.UI.lang;
+    sel.addEventListener('change', () => NS.UI.set(sel.value));
+    const refresh = () => {
+        $('footer-by').innerHTML = escapeHtml(NS.UI.t('footer_by', '\u0000')).replace('\u0000', '<a href="https://github.com/zanesu154-rgb" target="_blank" rel="noopener">栈主</a>');
+        setMode(mode);
+        progressText.textContent = NS.UI.t(...progressKey);
+        toggleLogBtn.textContent = NS.UI.t(logEl.classList.contains('collapsed') ? 'expand' : 'collapse');
+        if (state.lastSummaryRes) renderSummary(state.lastSummaryRes);
+        if (state.editorArgs) NS.mountWorldEditor(...state.editorArgs);
+    };
+    NS.UI.onChange(refresh);
+    NS.UI.apply();
+    refresh();
+})();
+
+(function initCounter() {
+    // 不蒜子填好数字后再显示；加载失败（被拦截、离线）时保持隐藏
+    const box = $('visit-counter'), pv = $('busuanzi_value_page_pv');
+    let tries = 0;
+    const timer = setInterval(() => {
+        if (/\d/.test(pv.textContent)) { box.hidden = false; clearInterval(timer); }
+        else if (++tries > 30) clearInterval(timer);
+    }, 500);
+})();

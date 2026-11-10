@@ -8,6 +8,7 @@
     'use strict';
     const NS = root.AddonI18n;
     const { T } = NS.NBT;
+    const L = (...a) => (NS.UI ? NS.UI.t(...a) : a[0]);   // 界面文字（t 在本文件里是 NBT 类型）
     const TYPE_NAME = { 1: 'byte', 2: 'short', 3: 'int', 4: 'long', 5: 'float', 6: 'double', 7: 'byte[]', 8: 'string', 9: 'list', 10: 'compound', 11: 'int[]', 12: 'long[]' };
     const EDITABLE = new Set([T.BYTE, T.SHORT, T.INT, T.LONG, T.FLOAT, T.DOUBLE, T.STRING]);
     const PAGE = 200;
@@ -42,7 +43,7 @@
             if (!counter) return;
             const n = input.value.length, lines = input.value.split('\n').length;
             const over = n > limit.max || Boolean(limit.lines && lines > limit.lines);
-            counter.textContent = `${n} / ${limit.max} 字${limit.lines ? `，${lines} / ${limit.lines} 行` : ''}${over ? (limit.auto ? '（超出部分会自动分页）' : '（超出游戏限制）') : ''}`;
+            counter.textContent = L('c_chars', n, limit.max) + (limit.lines ? L('c_lines', lines, limit.lines) : '') + (over ? t(limit.auto ? 'c_autopage' : 'c_over') : '');
             counter.classList.toggle('over', over);
         };
         updateCount();
@@ -82,7 +83,7 @@
         container.innerHTML = '';
         container.hidden = false;
         const editsBadge = el('span', { class: 'nbt-badge' });
-        const updateBadge = () => { editsBadge.textContent = session.edits ? `已手动修改 ${session.edits} 处` : '尚未手动修改'; };
+        const updateBadge = () => { editsBadge.textContent = session.edits ? L('e_edits', session.edits) : L('e_no_edits'); };
         const noticeEl = el('p', { class: 'nbt-notice' });
         const changed = () => {
             updateBadge();
@@ -101,9 +102,9 @@
 
         const untr = session.ctx.untranslatable.filter(u => u.ref);
         const tabs = [
-            { id: 'manual', name: `需人工翻译（${untr.length}）` },
-            { id: 'search', name: '搜索' },
-            { id: 'browse', name: '浏览全部' },
+            { id: 'manual', name: L('e_tab_manual', untr.length) },
+            { id: 'search', name: L('e_tab_search') },
+            { id: 'browse', name: L('e_tab_browse') },
         ];
         const panes = {};
         const tabBar = el('div', { class: 'nbt-tabs' });
@@ -114,9 +115,9 @@
         for (const t of tabs) tabBar.append(el('button', { 'data-id': t.id, text: t.name, onclick: () => show(t.id) }));
 
         container.append(
-            el('div', { class: 'nbt-head' }, el('span', { class: 'nbt-title', text: 'NBT 编辑器' }), editsBadge),
+            el('div', { class: 'nbt-head' }, el('span', { class: 'nbt-title', text: L('e_title') }), editsBadge),
             noticeEl,
-            el('p', { class: 'nbt-hint', text: '这些文本游戏只按纯文本显示，无法用翻译键。可以直接在这里改成目标语言；所有修改会在“下载转换后文件”时写回存档。' }),
+            el('p', { class: 'nbt-hint', text: L('e_hint') }),
             tabBar,
         );
 
@@ -131,12 +132,12 @@
             if (!f) return;
             try {
                 const r = session.importCsv(await f.text());
-                importMsg.textContent = `已导入 ${r.applied} 条，跳过 ${r.skipped} 条（translation 为空或位置不存在）`;
+                importMsg.textContent = L('e_imported', r.applied, r.skipped);
                 renderManual();
                 if (q.value.trim()) doSearch();
-                alertMsg(`已导入 ${r.applied} 条，跳过 ${r.skipped} 条`);
+                alertMsg(L('e_imported', r.applied, r.skipped));
                 changed();
-            } catch (e) { importMsg.textContent = `导入失败：${e.message}`; }
+            } catch (e) { importMsg.textContent = L('e_import_fail', e.message); }
             fileIn.value = '';
         });
         const list = el('div', { class: 'nbt-list' });
@@ -147,7 +148,7 @@
         const HKEY = 'addon-i18n.hiddenCats';
         try { for (const c of JSON.parse(localStorage.getItem(HKEY) || '[]')) if (cats.includes(c)) session.hiddenCats.add(c); } catch (e) { /* 无存储 */ }
         const saveHidden = () => { try { localStorage.setItem(HKEY, JSON.stringify([...session.hiddenCats])); } catch (e) { /* 无存储 */ } };
-        const catBox = el('div', { class: 'nbt-cats' }, el('span', { class: 'nbt-cats-title', text: '提取类别：' }),
+        const catBox = el('div', { class: 'nbt-cats' }, el('span', { class: 'nbt-cats-title', text: L('e_cats') }),
             ...cats.map(c => {
                 const cb = el('input', { type: 'checkbox' });
                 cb.checked = !session.hiddenCats.has(c);
@@ -157,7 +158,7 @@
                 });
                 return el('label', { class: 'opt-check nbt-cat' }, cb, ` ${c}（${untr.filter(u => catOf(u) === c).length}）`);
             }));
-        const kw = el('input', { class: 'nbt-filter', type: 'search', placeholder: '筛选原文 / 位置', spellcheck: 'false' });
+        const kw = el('input', { class: 'nbt-filter', type: 'search', placeholder: L('e_filter_ph'), spellcheck: 'false' });
         const onlyTodo = el('input', { type: 'checkbox' });
         const pager = el('div', { class: 'nbt-pager' });
         const MPAGE = 50;
@@ -174,7 +175,7 @@
         const renderManual = () => {
             list.innerHTML = '';
             pager.innerHTML = '';
-            if (!untr.length) { list.append(el('p', { class: 'nbt-empty', text: '没有需要人工处理的文本。' })); return; }
+            if (!untr.length) { list.append(el('p', { class: 'nbt-empty', text: L('e_none') })); return; }
             const items = filtered();
             const pages = Math.max(1, Math.ceil(items.length / MPAGE));
             page = Math.min(page, pages - 1);
@@ -184,15 +185,15 @@
                 const r = session.resolve(u.ref);
                 list.append(el('div', { class: 'nbt-row' },
                     el('div', { class: 'nbt-loc' }, el('b', { text: u.where }), el('span', { text: ` · ${u.file}` })),
-                    el('div', { class: 'nbt-orig', text: `原文：${u.text}` }),
+                    el('div', { class: 'nbt-orig', text: L('e_orig', u.text) }),
                     valueEditor(session, u.ref, r.node.t, cur, changed),
                 ));
             }
-            if (!items.length) list.append(el('p', { class: 'nbt-empty', text: '没有符合条件的条目。' }));
+            if (!items.length) list.append(el('p', { class: 'nbt-empty', text: L('e_no_match') }));
             pager.append(
-                el('button', { class: 'btn btn-secondary btn-sm', text: '上一页', disabled: page === 0, onclick: () => { page--; renderManual(); list.scrollTop = 0; } }),
-                el('span', { text: `第 ${page + 1} / ${pages} 页 · 共 ${items.length} 条` }),
-                el('button', { class: 'btn btn-secondary btn-sm', text: '下一页', disabled: page >= pages - 1, onclick: () => { page++; renderManual(); list.scrollTop = 0; } }),
+                el('button', { class: 'btn btn-secondary btn-sm', text: L('e_prev'), disabled: page === 0, onclick: () => { page--; renderManual(); list.scrollTop = 0; } }),
+                el('span', { text: L('e_page', page + 1, pages, items.length) }),
+                el('button', { class: 'btn btn-secondary btn-sm', text: L('e_next'), disabled: page >= pages - 1, onclick: () => { page++; renderManual(); list.scrollTop = 0; } }),
             );
         };
         let ft;
@@ -200,12 +201,12 @@
         kw.addEventListener('input', () => { clearTimeout(ft); ft = setTimeout(() => { page = 0; renderManual(); }, 200); });
         manual.append(
             el('div', { class: 'nbt-tools' },
-                el('button', { class: 'btn btn-secondary btn-sm', text: '导出待翻译表', onclick: () => downloadCsv && downloadCsv(session.workbook()['untranslatable.csv']) }),
-                el('button', { class: 'btn btn-secondary btn-sm', text: '导入翻译表', onclick: () => fileIn.click() }),
+                el('button', { class: 'btn btn-secondary btn-sm', text: L('e_export'), onclick: () => downloadCsv && downloadCsv(session.workbook()['untranslatable.csv']) }),
+                el('button', { class: 'btn btn-secondary btn-sm', text: L('e_import'), onclick: () => fileIn.click() }),
                 fileIn, importMsg),
-            el('p', { class: 'nbt-hint', text: '内容很多时建议导出表格，在 Excel 等软件里填写 translation 列后导入，批量写回；ref 列是该文本在存档中的位置，请勿修改。' }),
+            el('p', { class: 'nbt-hint', text: L('e_csv_hint') }),
             catBox,
-            el('div', { class: 'nbt-filters' }, kw, el('label', { class: 'opt-check' }, onlyTodo, ' 只看未修改')),
+            el('div', { class: 'nbt-filters' }, kw, el('label', { class: 'opt-check' }, onlyTodo, L('e_only_todo'))),
             list,
             pager,
         );
@@ -214,21 +215,21 @@
 
         // ---------- 搜索 ----------
         const search = el('div', { class: 'nbt-pane' });
-        const q = el('input', { class: 'nbt-search nbt-grow', type: 'search', placeholder: '搜索键名或内容，如 CustomName、Text、钻石…', spellcheck: 'false' });
+        const q = el('input', { class: 'nbt-search nbt-grow', type: 'search', placeholder: L('e_search_ph'), spellcheck: 'false' });
         const results = el('div', { class: 'nbt-list' });
         let timer;
         const doSearch = () => {
             results.innerHTML = '';
             const hits = session.search(q.value, 301);
             if (!q.value.trim()) return;
-            if (!hits.length) { results.append(el('p', { class: 'nbt-empty', text: '没有找到。' })); return; }
+            if (!hits.length) { results.append(el('p', { class: 'nbt-empty', text: L('e_not_found') })); return; }
             for (const h of hits.slice(0, 300)) {
                 results.append(el('div', { class: 'nbt-row' },
-                    el('div', { class: 'nbt-loc' }, el('b', { text: h.pathText || '(根)' }), el('span', { class: 'nbt-type', text: TYPE_NAME[h.type] }), el('span', { text: ` · ${h.label}` })),
+                    el('div', { class: 'nbt-loc' }, el('b', { text: h.pathText || L('e_root') }), el('span', { class: 'nbt-type', text: TYPE_NAME[h.type] }), el('span', { text: ` · ${h.label}` })),
                     valueEditor(session, h.ref, h.type, h.value, changed),
                 ));
             }
-            if (hits.length > 300) results.append(el('p', { class: 'nbt-empty', text: '只显示前 300 条，请输入更具体的关键词。' }));
+            if (hits.length > 300) results.append(el('p', { class: 'nbt-empty', text: L('e_only300') }));
         };
         q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(doSearch, 200); });
         const exportSearch = () => {
@@ -240,9 +241,9 @@
         };
         search.append(
             el('div', { class: 'nbt-tools' }, q,
-                el('button', { class: 'btn btn-secondary btn-sm', text: '导出搜索结果', onclick: exportSearch }),
-                el('button', { class: 'btn btn-secondary btn-sm', text: '导入翻译表', onclick: () => fileIn.click() })),
-            el('p', { class: 'nbt-hint', text: '可以把搜索结果（全部，不限 300 条）导出成表格，在 translation 列填写新值后导入，一次改完同类内容，例如搜索 CustomName 批量改所有名字。' }),
+                el('button', { class: 'btn btn-secondary btn-sm', text: L('e_export_search'), onclick: exportSearch }),
+                el('button', { class: 'btn btn-secondary btn-sm', text: L('e_import'), onclick: () => fileIn.click() })),
+            el('p', { class: 'nbt-hint', text: L('e_search_hint') }),
             searchMsg,
             results);
         panes.search = search;
@@ -266,7 +267,7 @@
                     const more = () => {
                         const end = Math.min(items.length, shown + PAGE);
                         for (; shown < end; shown++) renderNode(kids, rec, [...path, seg(shown)], items[shown][1], items[shown][2], items[shown][0]);
-                        if (shown < items.length) kids.append(el('button', { class: 'btn btn-secondary btn-sm', text: `显示更多（剩 ${items.length - shown}）`, onclick: (e) => { e.target.remove(); more(); } }));
+                        if (shown < items.length) kids.append(el('button', { class: 'btn btn-secondary btn-sm', text: L('e_more', items.length - shown), onclick: (e) => { e.target.remove(); more(); } }));
                     };
                     more();
                 });
@@ -276,15 +277,15 @@
                     valueEditor(session, ref, t, NS.worldDisplayValue(t, v), changed)));
             } else {
                 const len = v && v.length != null ? v.length : '';
-                parent.append(el('div', { class: 'nbt-leaf' }, el('span', { class: 'nbt-key', text: name }), el('span', { class: 'nbt-type', text: `${TYPE_NAME[t]} · ${len}（不可编辑）` })));
+                parent.append(el('div', { class: 'nbt-leaf' }, el('span', { class: 'nbt-key', text: name }), el('span', { class: 'nbt-type', text: L('e_readonly', `${TYPE_NAME[t]} · ${len}`) })));
             }
         };
         const groups = [
-            ['世界设置', session.records.filter(r => r.kind === 'level')],
-            ['方块实体', session.records.filter(r => r.kind === 'block')],
-            ['玩家', session.records.filter(r => r.kind === 'player')],
-            ['实体', session.records.filter(r => r.kind === 'actor')],
-            ['结构', session.records.filter(r => r.kind === 'structure')],
+            [L('b_level'), session.records.filter(r => r.kind === 'level')],
+            [L('b_block'), session.records.filter(r => r.kind === 'block')],
+            [L('b_player'), session.records.filter(r => r.kind === 'player')],
+            [L('b_actor'), session.records.filter(r => r.kind === 'actor')],
+            [L('b_structure'), session.records.filter(r => r.kind === 'structure')],
         ].filter(([, recs]) => recs.length);
         for (const [gname, recs] of groups) {
             const roots = recs.flatMap(rec => rec.tags.map((tg, ri) => ({ rec, ri, tg })));
@@ -298,7 +299,7 @@
                     const { rec, ri, tg } = roots[shown];
                     renderNode(kids, rec, [ri], tg.t, tg.v, NS.worldRootLabel(rec, ri));
                 }
-                if (shown < roots.length) kids.append(el('button', { class: 'btn btn-secondary btn-sm', text: `显示更多（剩 ${roots.length - shown}）`, onclick: (e) => { e.target.remove(); more(); } }));
+                if (shown < roots.length) kids.append(el('button', { class: 'btn btn-secondary btn-sm', text: L('e_more', roots.length - shown), onclick: (e) => { e.target.remove(); more(); } }));
             };
             let done = false;
             g.addEventListener('toggle', () => { if (g.open && !done) { done = true; more(); } });
