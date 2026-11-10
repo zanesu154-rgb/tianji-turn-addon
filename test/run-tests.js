@@ -196,6 +196,38 @@ function renderCommand(cmd, lang) {
         const zh2 = m2.files.get('RP/texts/zh_CN.lang').toString();
         check('  └ 勾选后照常提取和补全', v2.includes('Technical Marker') && v2.includes('Hidden Block') && /item\.mm:alyadvancement_big_shot\.name=Big Shot/.test(zh2) && /spawn_egg\.entity\.mm:dummy/.test(zh2));
     }
+    {
+        // PalCraft 小地图：每 tick 把字形画传给 setActionBar，运行时模糊匹配不能回溯卡死（Watchdog hang）
+        const cx = new NS.ExtractContext({});
+        const out = NS.processScript('import { world } from "@minecraft/server";\nexport function f(p, a) { p.onScreenDisplay.setActionBar(a); }\n', 'scripts/x.js', cx, { injectRuntime: true }).content;
+        const rt = new Function(out.slice(0, out.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const pats = [];
+        for (let i = 0; i < 300; i++) pats.push(['k.p' + i, ['Player ', ' dealt ', ' damage number ' + i + ' to ', ''], null]);
+        pats.push(['k.adj', ['', '', '', ' took damage'], null], ['k.sp', ['', ' ', ' ', ''], null]);
+        rt.reg([['Hello there friend', 'k.hello']], pats, []);
+        const t0 = Date.now();
+        for (let f = 0; f < 20; f++) {
+            const rows = [];
+            for (let r = 0; r < 12; r++) { let l = ''; for (let c = 0; c < 60; c++) l += (c % 5 ? '' : '§' + 'abcdef'[c % 6]) + String.fromCharCode(0xe000 + ((f * 7 + r * 13 + c) % 200)); rows.push(l); }
+            rt.M(rows.join('\n'));
+        }
+        rt.M('§a' + 'x'.repeat(3000) + ' took damage');
+        const dt = Date.now() - t0;
+        const hit = JSON.stringify(rt.M('Player Steve dealt 5 damage number 7 to Zombie'));
+        check('运行时：字形画 / 超长字符串不做模糊匹配，不会卡死；句式照常匹配', dt < 300 && /"k\.p7"/.test(hit) && /k\.hello/.test(JSON.stringify(rt.M('§aHello there friend§r'))), dt + 'ms');
+    }
+    {
+        // 已转换的附加包再转换：脚本不重复处理，但运行时换成当前版本
+        const conv = NS.processScript('import { world } from "@minecraft/server";\nconst NAMES = { a: "Punch Flurry" };\nexport function f(p, k) { p.sendMessage(NAMES[k]); }\n', 'scripts/old.js', new NS.ExtractContext({}), { injectRuntime: true, runtimeKey: '__ADDON_I18N_old' }).content;
+        const old = conv.replace(', FUZZY_MAX = 600', '');   // 模拟旧版运行时
+        if (old === conv) throw new Error('测试数据没有构造出旧运行时');
+        const pm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        pm.files.set('BP/scripts/old.js', Buffer.from(old));
+        const pr = await NS.runPipeline(pm, { baseName: 'fixture' }, () => {});
+        const now = pm.files.get('BP/scripts/old.js').toString();
+        check('已转换脚本：运行时更新到当前版本，登记和代码不变', now.includes('FUZZY_MAX') && now.split('// ---- end i18n runtime ----')[1] === old.split('// ---- end i18n runtime ----')[1]
+            && (now.match(/__i18n\.reg\(/g) || []).length === 1 && pr.ctx.warnings.some(w => /运行时已更新/.test(w)));
+    }
     check('只有 %键名 引用的文本不提取（JSON UI 常见）', !NS.looksLikeText('§z(%deesse.caseSensitive)') && !NS.looksLikeText('<%menu.serverGenericName> %progressScreen.saving')
         && NS.looksLikeText('欢迎 %1$s') && NS.looksLikeText('Saving %menu.world now') && NS.looksLikeText('打开 %gui.done'));
     check('带重音字母的键名（déesse.extPacks.title）视为已有键', NS.isLikelyKey('déesse.extPacks.title') && NS.isLikelyKey('déesse.compability.gamepad.desc_1') && !NS.isLikelyKey('Déesse CORE (core)') && !NS.isLikelyKey('é.1'));

@@ -131,6 +131,7 @@
         const uiData = [];
         const scriptInfos = new Map();
         const convertedScripts = new Set();
+        let upgradedRuntimes = 0;
         for (const p of allFiles) {
             const pk = packOf(p);
             if (!pk) continue;
@@ -142,12 +143,18 @@
             if (opt.processScripts && pk.type === 'BP' && /^scripts\/.*\.(js|mjs)$/i.test(rel)) {
                 const txt = await fs.readText(p);
                 // 已经转换过的脚本（带运行时）：再处理会重复注入、把已登记的文字再提取一遍 → 跳过
-                if (txt.includes('// ---- end i18n runtime ----')) { convertedScripts.add(p); continue; }
+                if (txt.includes('// ---- end i18n runtime ----')) {
+                    convertedScripts.add(p);
+                    // 运行时换成当前版本（修复旧版本的问题，如小地图字形画卡死）
+                    const up = NS.upgradeRuntime ? NS.upgradeRuntime(txt) : null;
+                    if (up) { pending.set(p, up); upgradedRuntimes++; }
+                    continue;
+                }
                 scriptInfos.set(p, NS.collectScriptInfo(txt));
             }
         }
         if (convertedScripts.size) {
-            const msg = `有 ${convertedScripts.size} 个脚本已经转换过（含 i18n 运行时），已原样保留不再处理。这像是转换后的附加包：想修正提取结果，请用原始附加包重新转换`;
+            const msg = `有 ${convertedScripts.size} 个脚本已经转换过（含 i18n 运行时），已原样保留不再处理${upgradedRuntimes ? `（其中 ${upgradedRuntimes} 个的运行时已更新到当前版本）` : ''}。这像是转换后的附加包：想修正提取结果，请用原始附加包重新转换`;
             log(msg, 'warn');
             ctx.warn(msg);
         }

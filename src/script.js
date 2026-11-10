@@ -747,7 +747,7 @@
         return `const ${rtName} = (() => {
   const g = globalThis, K = ${JSON.stringify(globalKey)};
   if (g[K]) return g[K];
-  const m = new Map(), p = [], cache = new Map();
+  const m = new Map(), p = [], cache = new Map(), FUZZY_MAX = 600;
   const esc = (s) => s.replace(/[.*+?^\${}()|[\\]\\\\]/g, "\\\\$&");
   const T = (v) => {
     if (v !== null && typeof v === "object") return v;
@@ -767,8 +767,17 @@
       if (mm[3]) r.push({ text: mm[3] });
       return r;
     }
+    // 下面是模糊匹配：太长、或去掉颜色码和图标字形后没有字母的（小地图、进度条这类字形画）直接放弃，
+    // 否则每 tick 刷新的长字符串会让正则回溯卡死脚本（Watchdog hang）
+    if (s.length > FUZZY_MAX || !/\\p{L}/u.test(s.replace(/\\u00a7./g, "").replace(/[\\ue000-\\uf8ff]/g, ""))) return null;
     const pat = (t) => {
-      for (const [pk, re, , ord] of p) {
+      for (const [pk, re, , ord, lits] of p) {
+        // 先用字面量片段快速排除：开头、结尾、中间片段按顺序都得出现
+        const last = lits[lits.length - 1];
+        if (!t.startsWith(lits[0]) || !t.endsWith(last)) continue;
+        let at = lits[0].length, ok = true;
+        for (let i = 1; i < lits.length - 1; i++) { if (!lits[i]) continue; const j = t.indexOf(lits[i], at); if (j < 0) { ok = false; break; } at = j + lits[i].length; }
+        if (!ok || at > t.length - last.length) continue;
         const x = re.exec(t);
         if (!x) continue;
         let caps = x.slice(1);
@@ -870,7 +879,8 @@
       if (hit) r = els;
     }
     r = r ? { rawtext: r } : null;
-    if (cache.size > 2000) cache.clear();
+    // 满了只丢最早的一批，不整个清空（每帧都变的字符串不会把常用文本挤掉）
+    if (cache.size >= 2000) { let n = 0; for (const x of cache.keys()) { cache.delete(x); if (++n >= 500) break; } }
     cache.set(s, r);
     return r;
   };
@@ -903,7 +913,7 @@
     }
     for (const [k, lits, ord] of pats) {
       const len = lits.join("").length;
-      p.push([k, new RegExp("^" + lits.map(esc).join("([\\\\s\\\\S]*?)") + "$"), len, ord]);
+      p.push([k, new RegExp("^" + lits.map(esc).join("([\\\\s\\\\S]*?)") + "$"), len, ord, lits]);
     }
     p.sort((a, b) => b[2] - a[2]);
     cache.clear();
@@ -1822,6 +1832,29 @@
         return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length, tables: tableEntries } };
     }
 
+    /**
+     * 已转换脚本：把注入的运行时换成当前版本（修复旧运行时的问题），登记的文字和改写过的代码不动。
+     * 返回新内容；不是转换过的脚本或已是最新时返回 null。
+     */
+    function upgradeRuntime(txt) {
+        const START = '// ---- i18n runtime (auto-generated) ----\n';
+        const i = txt.indexOf(START);
+        if (i < 0) return null;
+        const from = i + START.length;
+        const head = /^const ([A-Za-z_$][\w$]*) = \(\(\) => \{\n  const g = globalThis, K = ("(?:[^"\\]|\\.)*");/.exec(txt.slice(from, from + 400));
+        if (!head) return null;
+        const rt = head[1];
+        let key;
+        try { key = JSON.parse(head[2]); } catch (e) { return null; }
+        const endMark = txt.indexOf('// ---- end i18n runtime ----', from);
+        if (endMark < 0) return null;
+        let to = txt.indexOf(`\n${rt}.reg(`, from);
+        to = to >= 0 && to < endMark ? to + 1 : endMark;
+        const fresh = buildRuntime(rt, key);
+        if (txt.slice(from, to) === fresh) return null;
+        return txt.slice(0, from) + fresh + txt.slice(to);
+    }
+    NS.upgradeRuntime = upgradeRuntime;
     NS.collectScriptInfo = collectScriptInfo;
     NS.guessLang = guessLang;
     NS.regexPhrases = regexPhrases;
