@@ -518,11 +518,32 @@ dropZone.addEventListener('drop', async (e) => {
 })();
 
 (function initCounter() {
-    // 不蒜子填好数字后再显示；加载失败（被拦截、离线）时保持隐藏
-    const box = $('visit-counter'), pv = $('busuanzi_value_page_pv');
+    // 不蒜子填好数字后，画成七段数码管；加载失败（被拦截、离线）时保持隐藏
+    const box = $('visit-counter'), pv = $('busuanzi_value_page_pv'), uv = $('busuanzi_value_site_uv');
+    //            a  b  c  d  e  f  g
+    const SEG = { 0: '1111110', 1: '0110000', 2: '1101101', 3: '1111001', 4: '0110011', 5: '1011011', 6: '1011111', 7: '1110000', 8: '1111111', 9: '1111011' };
+    const POLY = [
+        '3,1 17,1 14,4 6,4', '18,2 18,16 15,14 15,5', '18,18 18,32 15,29 15,20', '3,33 17,33 14,30 6,30',
+        '2,18 5,20 5,29 2,32', '2,2 5,5 5,14 2,16', '3,17 6,15 14,15 17,17 14,19 6,19',
+    ];
+    const digitSvg = (d) => {
+        const on = SEG[d] || '0000000';
+        return `<svg class="led-digit" viewBox="0 0 20 34" aria-hidden="true">${POLY.map((p, i) => `<polygon points="${p}" class="${on[i] === '1' ? 'on' : 'off'}"/>`).join('')}</svg>`;
+    };
+    const draw = (el, text, min) => {
+        const n = String(text).replace(/\D/g, '');
+        const s = n.padStart(Math.max(min, n.length), ' ');
+        el.innerHTML = [...s].map(ch => digitSvg(ch === ' ' ? null : +ch)).join('');
+        el.setAttribute('aria-label', n);
+    };
     let tries = 0;
     const timer = setInterval(() => {
-        if (/\d/.test(pv.textContent)) { box.hidden = false; clearInterval(timer); }
-        else if (++tries > 30) clearInterval(timer);
+        if (/\d/.test(pv.textContent)) {
+            const w = Math.max(6, pv.textContent.trim().length);
+            draw($('led-pv'), pv.textContent, w);
+            draw($('led-uv'), uv.textContent, w);
+            box.hidden = false;
+            clearInterval(timer);
+        } else if (++tries > 30) clearInterval(timer);
     }, 500);
 })();
