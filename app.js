@@ -302,7 +302,7 @@ async function buildWorldOutputs() {
 // ================================================================
 
 // 页面各脚本文件版本不一致（通常是浏览器缓存）时，提示强制刷新
-const REQUIRED = ['ExtractContext', 'runPipeline', 'processScript', 'collectTranslationGroups', 'collectUiVarUsage', 'translateCommand', 'regexPhrases', 'runWorldPipeline', 'openStructure', 'convertStructureBytes', 'makeAddonStructureSession', 'mountWorldEditor', 'collectParamTexts'];
+const REQUIRED = ['ExtractContext', 'runPipeline', 'processScript', 'collectTranslationGroups', 'collectUiVarUsage', 'translateCommand', 'regexPhrases', 'runWorldPipeline', 'openStructure', 'convertStructureBytes', 'makeAddonStructureSession', 'makeAddonManualSession', 'mountWorldEditor', 'collectParamTexts'];
 function checkVersion() {
     const missing = REQUIRED.filter(n => typeof NS[n] !== 'function');
     if (missing.length) {
@@ -374,17 +374,16 @@ async function processFile(file) {
         logMany(res.ctx.untranslatable, u => `[无法本地化] ${u.file} ${u.where}: ${u.text}（${u.reason}）`);
         log(`新增翻译键 ${s.newKeys} 条，包名/描述 ${s.packKeys} 条，修改文件 ${s.processedFiles} 个`);
 
-        // 附加包里的结构有需人工翻译的文字：显示编辑器，可手动改或导入填好的翻译表，下载时写回
-        if (res.structureSession) {
-            state.addonSession = res.structureSession;
+        // 需人工翻译的文字（结构里的名字、战利品表 set_name、脚本 nameTag……）：显示编辑器，可直接改或导入填好的翻译表，下载时写回
+        if (res.manualSession && res.manualSession.ctx.untranslatable.length) {
+            state.addonSession = res.manualSession;
             state.addonFs = fs;
-            state.addonWorkbook = res.workbook;
-            NS.mountWorldEditor($('nbt-editor'), res.structureSession, {
+            NS.mountWorldEditor($('nbt-editor'), res.manualSession, {
                 onChange: () => { state.resultBlob = null; },
-                downloadCsv: (text, name) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_${name || 'structures'}.csv`),
+                downloadCsv: (text, name) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_${name || 'untranslatable'}.csv`),
             });
             $('nbt-editor').hidden = false;
-            log(`附加包里的结构有 ${res.structureSession.ctx.untranslatable.length} 处需人工翻译，可在下方编辑器修改，或在 untranslatable.csv 的 translation 列填写后导入`);
+            log(`有 ${res.ctx.untranslatable.length} 处需人工翻译：可在下方编辑器修改，或导出待翻译表，在 translation 列填好后导入；下载时写回附加包`);
         }
 
         setProgress(85, '打包中...');
@@ -429,10 +428,11 @@ function downloadBlob(blob, filename) {
 async function rebuildAddonIfEdited() {
     if (!state.addonSession || state.resultBlob) return;
     setProgress(90, '写入修改...');
-    const n = state.addonSession.applyTo(state.addonFs);
+    const r = await state.addonSession.applyTo(state.addonFs);
     const outZip = await state.addonFs.toZip();
     state.resultBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
-    log(`✅ 已重新打包（结构手动修改 ${state.addonSession.edits} 处，写回 ${n} 个结构文件）`);
+    log(`✅ 已重新打包（手动修改 ${state.addonSession.edits} 处，写回结构 ${r.structures} 个、文件 ${r.files} 个）`);
+    if (r.missed) log(`⚠ 有 ${r.missed} 条没有在文件里找到原文（可能已被转换改写），未写回`, 'warn');
     setProgress(100, '完成！');
 }
 

@@ -529,6 +529,9 @@
             }
             ctx.untranslatable = merged;
         }
+        // 文件里的条目（战利品表 set_name、脚本 nameTag、say 命令……）：ref = F|序号，可在编辑器里改或导入翻译表写回
+        ctx.untranslatable.forEach((u, i) => { if (!u.refs.length) u.refs.push(`F|${i}`); });
+        const manualSession = makeAddonManualSession(ctx.untranslatable, structureSession);
         // 结构里的条目带 ref：在 translation 列填译文后可在编辑器里“导入翻译表”写回结构
         const untrRows = [['ref', 'file', 'where', 'text', 'reason', 'count', 'translation'], ...ctx.untranslatable.map(u => [u.refs.join(';'), u.file, u.where, u.text, u.reason, u.count, ''])];
         const untranslatableCsv = '﻿' + untrRows.map(r => r.map(csvCell).join(',')).join('\r\n');
@@ -575,7 +578,7 @@
             restructured,
         };
         return {
-            ctx, summary, structureSession,
+            ctx, summary, structureSession, manualSession,
             workbook: {
                 'strings.csv': stringsCsv,
                 'untranslatable.csv': untranslatableCsv,
@@ -585,7 +588,159 @@
         };
     }
 
+
+    /**
+     * 附加包的“需人工翻译”编辑会话：结构条目交给结构会话；文件里的条目（F|序号）
+     * 在下载时按文件类型写回：JSON 按值替换、脚本按字符串字面量替换、其他文本按子串替换。
+     */
+    function makeAddonManualSession(list, structureSession) {
+        const fileItems = list.filter(u => u.refs[0] && u.refs[0].startsWith('F|'));
+        if (!fileItems.length && !structureSession) return null;
+        const byRef = new Map(fileItems.map(u => [u.refs[0], u]));
+        const values = new Map();      // F 引用 → 新文字
+        const S = structureSession;
+        const T = NS.NBT && NS.NBT.T;
+        const editorList = [...(S ? S.ctx.untranslatable : []), ...fileItems.map(u => ({ ...u, ref: u.refs[0] }))];
+        const ctxView = Object.create(S ? S.ctx : {});
+        ctxView.untranslatable = editorList;
+        const session = {
+            records: S ? S.records : [], ctx: ctxView, hiddenCats: S ? S.hiddenCats : new Set(),
+            get edits() { return (S ? S.edits : 0) + values.size; },
+            set edits(v) { /* 由各自会话计数 */ },
+            resolve(ref) {
+                if (byRef.has(ref)) return { node: { t: T ? T.STRING : 8 }, path: [], rec: null };
+                return S ? S.resolve(ref) : null;
+            },
+            getText(ref) {
+                if (byRef.has(ref)) return values.has(ref) ? values.get(ref) : byRef.get(ref).text;
+                return S ? S.getText(ref) : null;
+            },
+            setValue(ref, v) {
+                if (byRef.has(ref)) { if (v === byRef.get(ref).text) values.delete(ref); else values.set(ref, v); return v; }
+                return S.setValue(ref, v);
+            },
+            limitOf(ref) { return byRef.has(ref) ? null : (S && S.limitOf ? S.limitOf(ref) : null); },
+            search(q, max) { return S ? S.search(q, max) : []; },
+            get notice() { return S ? S.notice : null; },
+            get structureChanged() { return S ? S.structureChanged : false; },
+            workbook() {
+                const rows = [['ref', 'file', 'where', 'text', 'reason', 'count', 'translation'],
+                    ...list.filter(u => !session.hiddenCats.has(NS.worldCategoryOf ? NS.worldCategoryOf(u) : u.where))
+                        .map(u => [u.refs.join(';'), u.file, u.where, u.text, u.reason, u.count, ''])];
+                return { 'untranslatable.csv': '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n') };
+            },
+            importCsv(text) {
+                const rows = NS.worldParseCsv(String(text).replace(/^﻿/, ''));
+                const head = rows[0] || [];
+                const iRef = head.indexOf('ref'), iTr = head.indexOf('translation');
+                if (iRef < 0 || iTr < 0) throw new Error('表格缺少 ref 或 translation 列');
+                let applied = 0, skipped = 0;
+                const rest = [head];
+                for (const r of rows.slice(1)) {
+                    const tr = r[iTr];
+                    if (!r[iRef] || tr == null || tr === '') { skipped++; continue; }
+                    const refs = String(r[iRef]).split(';').map(x => x.trim()).filter(Boolean);
+                    const sRefs = [];
+                    for (const ref of refs) {
+                        if (byRef.has(ref)) { session.setValue(ref, tr); applied++; } else sRefs.push(ref);
+                    }
+                    if (sRefs.length) { const c = r.slice(); c[iRef] = sRefs.join(';'); rest.push(c); }
+                }
+                if (S && rest.length > 1) {
+                    const res = S.importCsv(rest.map(r => r.map(csvCell).join(',')).join('\n'));
+                    applied += res.applied; skipped += res.skipped;
+                }
+                return { applied, skipped };
+            },
+            /** 下载前写回：返回 { structures, files } */
+            async applyTo(fs) {
+                const structures = S ? S.applyTo(fs) : 0;
+                const byFile = new Map();
+                for (const [ref, v] of values) {
+                    const u = byRef.get(ref);
+                    if (!byFile.has(u.file)) byFile.set(u.file, []);
+                    byFile.get(u.file).push({ from: u.text, to: v, sub: u.where.startsWith('/') });
+                }
+                let files = 0, missed = 0;
+                for (const [file, reps] of byFile) {
+                    let src;
+                    try { src = await fs.readText(file); } catch (e) { missed += reps.length; continue; }
+                    const r = replaceInFile(file, src, reps);
+                    missed += r.missed;
+                    if (r.text !== src) { fs.writeText(file, r.text); files++; }
+                }
+                return { structures, files, missed };
+            },
+        };
+        return session;
+    }
+
+    function replaceInFile(file, src, reps) {
+        let missed = 0;
+        const sub = (str) => {
+            let out = str;
+            for (const r of reps) {
+                if (out === r.from) out = r.to;
+                else if (r.sub && out.includes(r.from)) out = out.split(r.from).join(r.to);
+            }
+            return out;
+        };
+        const hit = new Set();
+        const mark = (before, after) => { for (const r of reps) if (before !== after && (before === r.from || (r.sub && before.includes(r.from)))) hit.add(r); };
+        if (/\.json$/i.test(file)) {
+            const data = parseJsonLenient(src);
+            if (data === undefined) return { text: src, missed: reps.length };
+            const walkJ = (v) => {
+                if (typeof v === 'string') { const n = sub(v); mark(v, n); return n; }
+                if (Array.isArray(v)) return v.map(walkJ);
+                if (v && typeof v === 'object') { for (const k of Object.keys(v)) v[k] = walkJ(v[k]); return v; }
+                return v;
+            };
+            const out = walkJ(data);
+            for (const r of reps) if (!hit.has(r)) missed++;
+            return { text: hit.size ? JSON.stringify(out, null, 2) : src, missed };
+        }
+        if (/\.(m?js)$/i.test(file) && root.acorn) {
+            let ast;
+            try { ast = root.acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true }); }
+            catch (e) { return { text: src, missed: reps.length }; }
+            const edits = [];
+            const visit = (n, inReg) => {
+                if (!n || typeof n.type !== 'string') return;
+                if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.object && n.callee.object.name === '__i18n') inReg = true;
+                if (!inReg && n.type === 'Literal' && typeof n.value === 'string') {
+                    const nv = sub(n.value);
+                    if (nv !== n.value) { mark(n.value, nv); edits.push([n.start, n.end, JSON.stringify(nv)]); }
+                } else if (!inReg && n.type === 'TemplateLiteral') {
+                    for (const q of n.quasis) {
+                        const v = q.value.cooked;
+                        if (typeof v !== 'string') continue;
+                        const nv = sub(v);
+                        if (nv !== v) { mark(v, nv); edits.push([q.start, q.end, nv.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${')]); }
+                    }
+                }
+                for (const k in n) {
+                    if (k === 'loc') continue;
+                    const c = n[k];
+                    if (Array.isArray(c)) c.forEach(x => visit(x, inReg));
+                    else if (c && typeof c.type === 'string') visit(c, inReg);
+                }
+            };
+            visit(ast, false);
+            edits.sort((a, b) => b[0] - a[0]);
+            let out = src;
+            for (const [a, b, t] of edits) out = out.slice(0, a) + t + out.slice(b);
+            for (const r of reps) if (!hit.has(r)) missed++;
+            return { text: out, missed };
+        }
+        // 其他文本（.mcfunction 等）：按行替换
+        const out = src.split('\n').map(line => { const n = sub(line); mark(line, n); return n; }).join('\n');
+        for (const r of reps) if (!hit.has(r)) missed++;
+        return { text: out, missed };
+    }
+
     NS.runPipeline = runPipeline;
+    NS.makeAddonManualSession = makeAddonManualSession;
     NS.DEFAULT_OPTIONS = DEFAULT_OPTIONS;
     NS.detectSourceLang = detectSourceLang;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
