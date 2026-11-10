@@ -21,6 +21,7 @@
         splitNewlines: false,          // lang 支持 \n 换行（游戏内实测），多行文本默认一个键
         sayMode: 'tellraw',            // say/tell 转换：keep | tellraw | titleraw | actionbar
         listCommandBlockNames: false,  // 命令方块名称多为作者工作用标记，默认不列入需人工翻译
+        includeHiddenItems: false,     // 创造物品栏里不显示的物品 / 方块、不显示的刷怪蛋：默认不提取
         processScripts: true,
         injectRuntime: true,
         fillMissing: true,
@@ -122,6 +123,8 @@
         const ctx = new NS.ExtractContext({ knownKeys, existingValues, splitNewlines: opt.splitNewlines });
         ctx.sayMode = opt.sayMode;
         ctx.listCommandBlockNames = !!opt.listCommandBlockNames;
+        ctx.includeHiddenItems = !!opt.includeHiddenItems;
+        ctx.hiddenKeys = new Set();
         const info = { defs: { items: [], blocks: [], entities: [], spawnEggs: [] }, packRoot: '' };
 
         // ---------------- 3. 预扫描 UI / 脚本 ----------------
@@ -284,7 +287,7 @@
             };
             for (const b of info.defs.blocks) if (!b.hasName && !b.hidden) addPh(`tile.${b.id}.name`, b.id, 'block', b.file);
             for (const e of info.defs.entities) addPh(`entity.${e.id}.name`, e.id, 'entity', e.file);
-            for (const id of info.defs.spawnEggs) addPh(`item.spawn_egg.entity.${id}.name`, id, 'spawn_egg', (info.defs.entities.find(e => e.id === id) || {}).file);
+            for (const id of info.defs.spawnEggs) if (!ctx.hiddenKeys.has(`item.spawn_egg.entity.${id}.name`)) addPh(`item.spawn_egg.entity.${id}.name`, id, 'spawn_egg', (info.defs.entities.find(e => e.id === id) || {}).file);
             for (const it of info.defs.items) {
                 if (it.hasName || !it.isDataDriven || it.hidden) continue;   // 创造栏隐藏的物品多为技术用途，不生成占位名
                 const cands = [`item.${it.id}.name`, `item.${it.id}`, `tile.${it.id}.name`];
@@ -438,7 +441,7 @@
                 const filled = [];
                 if (opt.fillMissing && isRP) {
                     for (const k of allExistingKeys) {
-                        if (map.has(k) || entries.has(k)) continue;
+                        if (map.has(k) || entries.has(k) || ctx.hiddenKeys.has(k)) continue;
                         const v = fillFrom(k);
                         if (v != null) filled.push(`${k}=${v}`);
                     }

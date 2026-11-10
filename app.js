@@ -194,6 +194,7 @@ function readOptions() {
         splitNewlines: $('opt-split').checked,
         sayMode: $('opt-say').value,
         listCommandBlockNames: $('opt-cbname').checked,
+        includeHiddenItems: $('opt-hidden').checked,
         fillMissing: $('opt-fill').checked,
         placeholderNames: $('opt-placeholder').checked,
         scriptLangFields: $('opt-langfields').value,

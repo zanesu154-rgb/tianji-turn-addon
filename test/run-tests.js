@@ -169,6 +169,33 @@ function renderCommand(cmd, lang) {
         const js = pm.files.get('BP/scripts/req_utils.js').toString();
         check('函数参数拼进提示文字：默认值 item 和调用处传入的 block 也登记翻译', vals.includes('item') && vals.includes('block') && !vals.includes('minecraft:stone') && /\["item","script\.req_utils\.word/.test(js));
     }
+    {
+        // 创造物品栏隐藏的物品 / 方块、不显示的刷怪蛋：默认不提取、不补全；勾选后照常
+        const mk = () => {
+            const m = new MemFS(readDir(path.join(__dirname, 'fixture')));
+            m.files.set('BP/items/adv.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:item': { description: { identifier: 'mm:alyadvancement_big_shot', menu_category: { category: 'none', is_hidden_in_commands: true } }, components: { 'minecraft:icon': 'stick', 'minecraft:display_name': { value: 'item.mm:alyadvancement_big_shot.name' } } } })));
+            m.files.set('BP/items/tech.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:item': { description: { identifier: 'mm:tech_marker', menu_category: { category: 'none' } }, components: { 'minecraft:display_name': { value: 'Technical Marker' } } } })));
+            m.files.set('BP/items/sword.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:item': { description: { identifier: 'mm:real_sword', menu_category: { category: 'equipment' } }, components: { 'minecraft:display_name': { value: 'Real Sword' } } } })));
+            m.files.set('BP/blocks/hb.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:block': { description: { identifier: 'mm:hidden_block', menu_category: { category: 'none' } }, components: { 'minecraft:display_name': 'Hidden Block' } } })));
+            m.files.set('BP/entities/dummy.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:entity': { description: { identifier: 'mm:dummy', is_spawnable: false }, components: {} } })));
+            m.files.set('RP/entity/dummy.json', Buffer.from(JSON.stringify({ format_version: '1.10.0', 'minecraft:client_entity': { description: { identifier: 'mm:dummy', spawn_egg: { base_color: '#ff0000', overlay_color: '#00ff00' } } } })));
+            const en = m.files.get('RP/texts/en_US.lang');
+            m.files.set('RP/texts/en_US.lang', Buffer.from((en ? en.toString() : '') + '\nitem.mm:alyadvancement_big_shot.name=Big Shot\nitem.spawn_egg.entity.mm:dummy.name=Spawn Dummy\n'));
+            return m;
+        };
+        const m1 = mk();
+        const r1 = await NS.runPipeline(m1, { baseName: 'fixture', targetLangs: ['en_US', 'zh_CN'] }, () => {});
+        const v1 = [...r1.ctx.entries.values()].map(e => e.value);
+        const zh1 = m1.files.get('RP/texts/zh_CN.lang').toString();
+        check('隐藏物品：默认不提取创造栏隐藏的物品 / 方块名，不补全它们和不显示刷怪蛋的已有键',
+            v1.includes('Real Sword') && !v1.includes('Technical Marker') && !v1.includes('Hidden Block') && !/alyadvancement_big_shot|spawn_egg\.entity\.mm:dummy/.test(zh1)
+            && /"Technical Marker"/.test(m1.files.get('BP/items/tech.json').toString()), JSON.stringify(v1));
+        const m2 = mk();
+        const r2 = await NS.runPipeline(m2, { baseName: 'fixture', targetLangs: ['en_US', 'zh_CN'], includeHiddenItems: true }, () => {});
+        const v2 = [...r2.ctx.entries.values()].map(e => e.value);
+        const zh2 = m2.files.get('RP/texts/zh_CN.lang').toString();
+        check('  └ 勾选后照常提取和补全', v2.includes('Technical Marker') && v2.includes('Hidden Block') && /item\.mm:alyadvancement_big_shot\.name=Big Shot/.test(zh2) && /spawn_egg\.entity\.mm:dummy/.test(zh2));
+    }
     check('只有 %键名 引用的文本不提取（JSON UI 常见）', !NS.looksLikeText('§z(%deesse.caseSensitive)') && !NS.looksLikeText('<%menu.serverGenericName> %progressScreen.saving')
         && NS.looksLikeText('欢迎 %1$s') && NS.looksLikeText('Saving %menu.world now') && NS.looksLikeText('打开 %gui.done'));
     check('带重音字母的键名（déesse.extPacks.title）视为已有键', NS.isLikelyKey('déesse.extPacks.title') && NS.isLikelyKey('déesse.compability.gamepad.desc_1') && !NS.isLikelyKey('Déesse CORE (core)') && !NS.isLikelyKey('é.1'));
