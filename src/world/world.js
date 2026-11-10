@@ -144,9 +144,9 @@
         const report = (path, where, text, reason) => {
             // 格式码标记（§u§a§p）、技术 ID、数字、已是翻译键的名字不需要人工翻译
             if (typeof text !== 'string' || ctx.isKey(text)) return;
-            // 作者已经写成翻译键的（{"rawtext":[{"translate":…}]}）不需要再处理
+            // 作者写成了翻译键（{"rawtext":[{"translate":…}]}）：游戏内实测物品描述 / 名称不认，显示键名或消失 → 照常列出并说明
             if (/^\s*\{[\s\S]*"(rawtext|translate)"[\s\S]*\}\s*$/.test(text)) {
-                try { const j = JSON.parse(text); if (j && (Array.isArray(j.rawtext) || typeof j.translate === 'string')) return; } catch (e) { /* 不是 JSON，照常列出 */ }
+                try { const j = JSON.parse(text); if (j && (Array.isArray(j.rawtext) || typeof j.translate === 'string')) reason = '作者写成了翻译键，但这里游戏不支持（会显示键名 / 拿进背包后消失），需要改成纯文字'; } catch (e) { /* 不是 JSON */ }
             }
             const plain = NS.stripFormatting(text).trim();
             if (!NS.hasLetters(plain) || (/^[\w.:-]+$/.test(plain) && /[_:]/.test(plain))) return;

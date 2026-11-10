@@ -431,7 +431,14 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const root = [{ t: T.INT, n: 'format_version', v: 1 }, L('size', T.INT, [1, 1, 1]), C('structure', [L('block_indices', T.LIST, [{ et: T.INT, items: [0] }, { et: T.INT, items: [-1] }]), L('entities', T.COMPOUND, []), C('palette', [C('default', [L('block_palette', T.COMPOUND, [[S('name', 'minecraft:chest'), C('states', []), { t: T.INT, n: 'version', v: 1 }]]), C('block_position_data', [C('0', [C('block_entity_data', chest)])])])])]), L('structure_world_origin', T.INT, [0, 0, 0])];
         const st = await NS.openStructure('b.mcstructure', writeAll([{ t: T.COMPOUND, n: '', v: root }]), {}, () => {});
         const texts = st.ctx.untranslatable.map(u => u.text);
-        check('存档 / 结构：已是 rawtext 翻译键的物品描述不列入需人工翻译', texts.includes('Plain old lore') && !texts.some(t => /rawtext/.test(t)), JSON.stringify(texts));
+        const ku = st.ctx.untranslatable.find(u => /rawtext/.test(u.text));
+        check('存档 / 结构：作者写成翻译键的物品描述仍列入（游戏实测不支持），并说明原因', texts.includes('Plain old lore') && ku && /不支持/.test(ku.reason), JSON.stringify(texts));
+    }
+    {
+        const ca = new NS.ExtractContext({});
+        NS.processScript('export function f(p,id,v){ p.sendMessage(`@attributes.${id}.name: ${v}%%`); p.sendMessage(`Mana boost: ${v}%`); }', 'scripts/magicOrbStand.js', ca, {});
+        const va = [...ca.entries.values()].map(e => e.value);
+        check('拼出键引用的模板（@attributes.${id}.name: ${v}%）不提取', !va.some(v => /@attributes/.test(v)) && va.some(v => /Mana boost/.test(v)), JSON.stringify(va));
     }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
