@@ -228,6 +228,20 @@ function renderCommand(cmd, lang) {
         check('已转换脚本：运行时更新到当前版本，登记和代码不变', now.includes('FUZZY_MAX') && now.split('// ---- end i18n runtime ----')[1] === old.split('// ---- end i18n runtime ----')[1]
             && (now.match(/__i18n\.reg\(/g) || []).length === 1 && pr.ctx.warnings.some(w => /运行时已更新/.test(w)));
     }
+    {
+        // PalCraft：HUD 字段拼成固定长度纯 ASCII 字符串，界面按位置截取 → 流进去的文字无法本地化
+        const pm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        pm.files.set('BP/scripts/hud/protocol.js', Buffer.from("export const FIELDS = [['name', 20], ['status', 18], ['hint', 28], ['baseTitle', 16], ['baseNeeds', 32]];\nexport function encode(values) { return FIELDS.map(([k, w]) => String(values[k] ?? '').replace(/[^\\x20-\\x7e]|[~|:]/g, '?').padEnd(w, '~')).join(''); }\n"));
+        pm.files.set('BP/scripts/hud/party.js', Buffer.from("import { translateText } from '../i18n.js';\nfunction nameOf(player, pal) { if (!pal) return translateText(player, 'Sin companero'); return pal.name; }\nexport function partyFields(player, pal) { return { name: nameOf(player, pal), status: translateText(player, 'EQUIPO 0/5'), hint: translateText(player, pal ? 'Listo para luchar' : 'BUSCA UN PAL SALVAJE') }; }\nexport function warn(player) { player.sendMessage('Your team is full right now'); }\n"));
+        pm.files.set('BP/scripts/hud/presentation.js', Buffer.from("import { translateText } from '../i18n.js';\nconst plain = (t, n) => String(t ?? '').replace(/[^\\x20-\\x7e]/g, ' ').slice(0, n);\nexport function baseFields(player) { return { baseAction: plain(translateText(player, 'Parcela lista'), 36) }; }\n"));
+        pm.files.set('BP/scripts/i18n/hud.js', Buffer.from("export default [\n ['Sin companero', 'No partner'],\n ['EQUIPO 0/5', 'TEAM 0/5'],\n ['BUSCA UN PAL SALVAJE', 'FIND A WILD PAL'],\n ['Parcela lista', 'Plot ready'],\n ['El equipo esta lleno ahora', 'Your team is full right now'],\n];\n"));
+        const pr = await NS.runPipeline(pm, { baseName: 'fixture' }, () => {});
+        const vals = [...pr.ctx.entries.values()].map(e => e.value);
+        const un = pr.ctx.untranslatable.filter(u => /ASCII/.test(u.reason)).map(u => u.text);
+        check('ASCII 数据包 HUD：流进字段的文字及对照表同一行不提取，列入无法本地化；聊天文字照常',
+            !['Sin companero', 'No partner', 'EQUIPO 0/5', 'TEAM 0/5', 'FIND A WILD PAL', 'Parcela lista', 'Plot ready', 'Listo para luchar'].some(t => vals.includes(t))
+            && vals.includes('Your team is full right now') && un.includes('No partner') && un.includes('Parcela lista'), JSON.stringify(vals.filter(v => /[A-Za-z]/.test(v)).slice(-12)));
+    }
     check('只有 %键名 引用的文本不提取（JSON UI 常见）', !NS.looksLikeText('§z(%deesse.caseSensitive)') && !NS.looksLikeText('<%menu.serverGenericName> %progressScreen.saving')
         && NS.looksLikeText('欢迎 %1$s') && NS.looksLikeText('Saving %menu.world now') && NS.looksLikeText('打开 %gui.done'));
     check('带重音字母的键名（déesse.extPacks.title）视为已有键', NS.isLikelyKey('déesse.extPacks.title') && NS.isLikelyKey('déesse.compability.gamepad.desc_1') && !NS.isLikelyKey('Déesse CORE (core)') && !NS.isLikelyKey('é.1'));

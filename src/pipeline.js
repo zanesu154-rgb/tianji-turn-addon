@@ -163,6 +163,8 @@
         let usesServerUi = false;
         const paramTexts = NS.collectParamTexts(scriptInfos);
         const crossDicts = NS.collectCrossFileDicts(scriptInfos, ctx);
+        const asciiTexts = NS.collectAsciiPacketTexts ? NS.collectAsciiPacketTexts(scriptInfos) : new Map();
+        if (asciiTexts.size) log(`[脚本] 发现固定长度 ASCII 的 HUD 数据包：${asciiTexts.size} 条流进它的文字无法本地化，已列入“无法本地化”`, 'warn');
         for (const si of scriptInfos.values()) {
             si.methods.forEach(m => userMethods.add(m));
             if (si.usesServerUi) usesServerUi = true;
@@ -223,7 +225,7 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p),
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts,
                 });
                 if (r.changed) {
                     pending.set(p, r.content);

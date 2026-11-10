@@ -939,6 +939,78 @@
      * 如 cancelEvent(source, player, e, sourceName = 'item') 里的 'item' / 'block'。
      * 返回 Map(定义所在文件 → [文字…])，在该文件里登记到运行时映射。
      */
+    /**
+     * 固定长度 ASCII 数据包式 HUD（PalCraft 等）：脚本把各字段拼成一串纯 ASCII 字符，
+     * 资源包界面按字符位置截取显示。非 ASCII 字符会被替换、长度被截断，翻译键（rawtext）也塞不进去，
+     * 所以流进这些字段的文字无法本地化。
+     * 识别：
+     *   ① 去掉非 ASCII 的函数（函数体里有 /[^\x20-\x7e]/ 这类正则）→ 调用它时参数里的文字；
+     *   ② 和这类函数在同一文件的字段宽度表 [['name', 20], ['hint', 28], …] → 所有文件里以这些字段名为键的对象属性值里的文字
+     *      （值里调用了同文件函数的，连同那个函数 return 的文字）。
+     * 返回 Map(文字 → Set(文件))
+     */
+    function collectAsciiPacketTexts(infos) {
+        const out = new Map();
+        const sanitizers = new Set();
+        const fields = new Set();
+        const ASCII_RE = /\[\^(?:\\x20-\\x7e|\\x00-\\x7f|\\x20-~| -~)/i;
+        const fnOf = (n) => /Function/.test(n.type) ? n : null;
+        const fnName = (f) => {
+            if (f.id && f.id.name) return f.id.name;
+            const q = f.parent;
+            if (q && q.type === 'VariableDeclarator' && q.id.type === 'Identifier') return q.id.name;
+            if (q && q.type === 'Property' && q.key) return q.key.name || q.key.value;
+            return '';
+        };
+        for (const [, info] of infos) {
+            if (!info.ok || !info.ast) continue;
+            let hasSan = false;
+            walk(info.ast, (n) => {
+                const f = fnOf(n);
+                if (!f) return;
+                let hit = false;
+                walk(f.body, (x) => { if (!hit && x.type === 'Literal' && x.regex && ASCII_RE.test(x.regex.pattern)) hit = true; });
+                if (hit) { const nm = fnName(f); if (nm) { sanitizers.add(nm); hasSan = true; } }
+            });
+            if (!hasSan) continue;
+            // 字段宽度表：至少 5 行 ['字段名', 数字]
+            walk(info.ast, (n) => {
+                if (n.type !== 'ArrayExpression') return;
+                const rows = n.elements.filter(e => e && e.type === 'ArrayExpression' && e.elements.length === 2 && isStr(e.elements[0]) && e.elements[1] && e.elements[1].type === 'Literal' && typeof e.elements[1].value === 'number');
+                if (rows.length >= 5) for (const r of rows) fields.add(r.elements[0].value);
+            });
+        }
+        if (!sanitizers.size) return out;
+        const gather = (expr, file, fns, depth) => {
+            const stack = [expr];
+            while (stack.length) {
+                const x = stack.pop();
+                if (!x) continue;
+                const v = isStr(x) ? x.value : (x.type === 'TemplateLiteral' && !x.expressions.length ? x.quasis[0].value.cooked : null);
+                if (v != null) { if (v.trim()) { if (!out.has(v)) out.set(v, new Set()); out.get(v).add(file); } continue; }
+                if (/Function/.test(x.type)) continue;
+                if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && depth < 1 && fns.has(x.callee.name)) {
+                    walk(fns.get(x.callee.name).body, (r) => { if (r.type === 'ReturnStatement' && r.argument) gather(r.argument, file, fns, depth + 1); });
+                }
+                stack.push(...childrenOf(x));
+            }
+        };
+        for (const [file, info] of infos) {
+            if (!info.ok || !info.ast) continue;
+            const fns = new Map();
+            walk(info.ast, (n) => { const f = fnOf(n); if (f) { const nm = fnName(f); if (nm && !fns.has(nm)) fns.set(nm, f); } });
+            walk(info.ast, (n) => {
+                if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && sanitizers.has(n.callee.name)) {
+                    for (const a of n.arguments) gather(a, file, fns, 0);
+                } else if (fields.size && n.type === 'Property' && !n.computed && n.parent && n.parent.type === 'ObjectExpression') {
+                    const k = n.key.name || n.key.value;
+                    if (typeof k === 'string' && fields.has(k) && !/Function/.test(n.value.type)) gather(n.value, file, fns, 0);
+                }
+            });
+        }
+        return out;
+    }
+
     function collectParamTexts(infos) {
         const defs = new Map();   // 函数名 → [{ file, index }]
         const out = new Map();
@@ -1198,6 +1270,28 @@
         const exact = [];              // [原文, 键]
         const patterns = [];           // [键, [字面量片段…]]
         let usesRuntime = false;
+
+        // 流进固定长度 ASCII HUD 数据包的文字（跨文件预扫描得到）：无法本地化，不提取；
+        // 对照表里的一行（如 ['Sin companero', 'No partner']）有一项命中就整行跳过
+        if (opts.asciiTexts && opts.asciiTexts.size) {
+            const reported = new Set();
+            const isPlain = (x) => !!x && (isStr(x) || (x.type === 'TemplateLiteral' && !x.expressions.length));
+            const valOf = (x) => isStr(x) ? x.value : x.quasis[0].value.cooked;
+            walk(ast, (n) => {
+                if (!isPlain(n)) return;
+                const from = opts.asciiTexts.get(valOf(n));
+                if (!from) return;
+                // 别的文件里只认对照表的一行（["Sin companero", "No partner"]），单独出现的同样文字可能用在聊天里
+                const inRow = n.parent && n.parent.type === 'ArrayExpression' && n.parent.elements.length >= 2 && n.parent.elements.length <= 4 && n.parent.elements.every(isPlain);
+                if (!from.has(file) && !inRow) return;
+                const row = inRow ? n.parent.elements : [n];
+                for (const e of row) {
+                    handled.add(e);
+                    const v = valOf(e);
+                    if (!reported.has(v)) { reported.add(v); ctx.report(file, 'HUD 数据包字段', v, '固定长度 ASCII 的 HUD 字段：界面按字符位置截取，非 ASCII 字符会被替换，翻译键放不进去'); }
+                }
+            });
+        }
         const warnedCollide = new Set();
         const src = source;
 
@@ -1862,6 +1956,7 @@
     NS.collectTranslationGroups = collectTranslationGroups;
     NS.processScript = processScript;
     NS.collectParamTexts = collectParamTexts;
+    NS.collectAsciiPacketTexts = collectAsciiPacketTexts;
     NS.collectCrossFileDicts = collectCrossFileDicts;
     NS.SCRIPT_SINKS = SINKS;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
