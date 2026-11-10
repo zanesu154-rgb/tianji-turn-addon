@@ -1059,6 +1059,14 @@
         const meta = (hint) => ({ file, kind: 'script', scope: 'script', hint });
         const keyBase = (hint) => `script.${fb}.${hint}`;
 
+        // `potion.${id}.splash.name`、`item.${ns}:${id}.name`：拼出来的是翻译键 / ID，不是文字
+        const isKeyTemplate = (parts) => {
+            const t = parts.map(p => ('lit' in p) ? p.lit : 'x').join('');
+            if (/^[\w:-]+(\.[\w:-]+)+$/.test(t) || /^[a-z0-9_]+:[\w./-]+$/.test(t) || /^[\w-]+(\/[\w.-]+)+$/.test(t)) return true;
+            // `@attributes.${id}.name: ${v}%`：去掉键名片段后没剩文字（只有标点、数字、占位）→ 是拼出来的引用，不是句子
+            const rest = t.replace(/[@%]?[A-Za-z_][\w:-]*(\.[\w:-]+)+/g, ' ').replace(/\bx\b/g, ' ');
+            return /[@%][A-Za-z_][\w:-]*\.[\w:-]/.test(t) && !/[A-Za-z]{2,}/.test(rest);
+        };
         /** 片段 → rawtext 元素代码数组；返回 null 表示没有可翻译文本且无动态部分 */
         function buildElements(parts, hint) {
             const lines = ctx.splitNewlines ? splitLines(parts) : [parts];
@@ -1069,6 +1077,7 @@
                 if (!line.length) return;
                 const lit = litText(line);
                 const dyn = line.some(p => !('lit' in p));
+                if (dyn && isKeyTemplate(line)) { els.push(...line.map(p => ('lit' in p) ? JSON.stringify({ text: p.lit }) : `${RT}.T(${renderPart(p)})`)); usesRuntime = true; return; }
                 if ((looksLikeText(lit, 'loose') || (dyn && wordy(lit))) && !(line.length === 1 && ctx.isKey(lit))) {
                     // 剥离首尾格式码
                     const first = line[0], last = line[line.length - 1];
@@ -1452,11 +1461,6 @@
             }, []));
         };
 
-        // `potion.${id}.splash.name`、`item.${ns}:${id}.name`：拼出来的是翻译键 / ID，不是文字
-        const isKeyTemplate = (parts) => {
-            const t = parts.map(p => ('lit' in p) ? p.lit : 'x').join('');
-            return /^[\w:-]+(\.[\w:-]+)+$/.test(t) || /^[a-z0-9_]+:[\w./-]+$/.test(t) || /^[\w-]+(\/[\w.-]+)+$/.test(t);
-        };
         const registerPattern = (parts, relaxed = false) => {
             if (isKeyTemplate(parts)) return;
             if (!relaxed) {
