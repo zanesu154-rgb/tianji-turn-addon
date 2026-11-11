@@ -942,11 +942,20 @@
     return els;
   };
   // 资源包界面拿来比较的文字（标题等于 'Magic' 时用自定义界面）：保持原文
-  const kept = new Set();
-  const keep = (a) => { for (const x of a || []) kept.add(x); cache.clear(); };
+  // 界面按前缀识别的数据（"inspecting:" + 方块名…）：前缀原样保留，后面的文字照常翻译
+  const kept = new Set(), prefixes = [];
+  const keep = (a, p) => { for (const x of a || []) kept.add(x); for (const x of p || []) if (prefixes.indexOf(x) < 0) prefixes.push(x); cache.clear(); };
   const lookup = (s) => {
     if (cache.has(s)) return cache.get(s);
     if (kept.size && kept.has(s.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ""))) { cache.set(s, null); return null; }
+    for (const p of prefixes) {
+      if (s.length > p.length && s.startsWith(p)) {
+        const tail = lookup(s.slice(p.length));
+        const r = tail ? { rawtext: [{ text: p }, ...tail.rawtext] } : null;
+        cache.set(s, r);
+        return r;
+      }
+    }
     // 按固定宽度排版的表单正文（"textures/...png" + 制表符补齐 + 进度 + 制表符补齐 + 描述）：只翻译最后一段，前面的位置不动
     let r = null;
     const tab = s.lastIndexOf("\\t");
@@ -1543,7 +1552,10 @@
         walk(ast, (n) => {
             if (!/Function/.test(n.type) || !n.params.length || n.params[0].type !== 'Identifier') return;
             const body = src.slice(n.body.start, n.body.end);
-            if (body.length > 600 || !/\.split\(\s*(?:"_"|'_'|\/_\/g?)\s*\)/.test(body) || !/toUpperCase\(\)/.test(body) || !/\.join\(\s*(?:" "|' ')\s*\)/.test(body)) return;
+            // 下划线 → 空格：split("_") 或 replace(/[._\-]+/g, " ") 这类；首字母大写：toUpperCase 或 .map(某个函数)
+            const underscore = /\.split\(\s*(?:"_"|'_'|\/_\/g?)\s*\)/.test(body) || /\.replace(?:All)?\(\s*\/[^/]*_[^/]*\/g?\s*,\s*(?:" "|' ')\s*\)/.test(body);
+            const capital = /toUpperCase\(\)/.test(body) || /\.map\(\s*[A-Za-z_$][\w$]*\s*\)/.test(body);
+            if (body.length > 600 || !underscore || !capital || !/\.join\(\s*(?:" "|' ')\s*\)/.test(body)) return;
             const pn = n.params[0].name;
             const wrap = (e) => { const prev = overrides.get(e); overrides.set(e, () => ` ${RT}.H(${pn}, (${prev ? prev() : renderOrig(e)}))`); };
             if (n.body.type !== 'BlockStatement') wrap(n.body);
@@ -2199,7 +2211,7 @@
                 for (const [s, k] of exact) { if (!seen.has(s)) { seen.add(s); ex.push([s, k]); } }
                 prelude += `${RT}.reg(${JSON.stringify(ex)}, ${JSON.stringify(patterns)}${joinSeps.length ? ', ' + JSON.stringify(joinSeps) : ''});\n`;
             }
-            if (opts.uiCompared && opts.uiCompared.size) prelude += `${RT}.keep(${JSON.stringify([...opts.uiCompared])});\n`;
+            if ((opts.uiCompared && opts.uiCompared.size) || (opts.uiPrefixes && opts.uiPrefixes.size)) prelude += `${RT}.keep(${JSON.stringify([...(opts.uiCompared || [])])}, ${JSON.stringify([...(opts.uiPrefixes || [])])});\n`;
             if (humanizers) {
                 // ID → 翻译键：包里自定义的 + 原版
                 const own = {};

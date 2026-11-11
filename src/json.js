@@ -527,6 +527,12 @@
             if (!node || typeof node !== 'object') return;
             for (const [k, v] of Object.entries(node)) {
                 if (typeof v === 'string') {
+                    // property_bag 里的 "#hover_text": "Upgrade Accessory Bag to Unlock"（悬停提示，标签会本地化）
+                    if (/^#\w*(hover_text|tooltip|tooltip_text)$/.test(k) && okText(v)) {
+                        node[k] = ctx.alloc(`ui.${fileBase}.${ctrl}.hover`, v, { file, kind: 'ui', scope: 'ui' });
+                        changed = true;
+                        continue;
+                    }
                     if (k === 'text' && okText(v)) {
                         node[k] = ctx.alloc(`ui.${fileBase}.${ctrl}`, v, { file, kind: 'ui', scope: 'ui' });
                         ensureLocalized(node, nodeKey, ns, file);
