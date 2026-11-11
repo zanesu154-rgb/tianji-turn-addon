@@ -195,6 +195,7 @@ function readOptions() {
         sayMode: $('opt-say').value,
         listCommandBlockNames: $('opt-cbname').checked,
         includeHiddenItems: $('opt-hidden').checked,
+        removeJunkLang: $('opt-junk').checked,
         fillMissing: $('opt-fill').checked,
         placeholderNames: $('opt-placeholder').checked,
         scriptLangFields: $('opt-langfields').value,
@@ -308,7 +309,7 @@ async function buildWorldOutputs() {
 // ================================================================
 
 // 页面各脚本文件版本不一致（通常是浏览器缓存）时，提示强制刷新
-const REQUIRED = ['ExtractContext', 'runPipeline', 'processScript', 'collectTranslationGroups', 'collectUiVarUsage', 'translateCommand', 'regexPhrases', 'runWorldPipeline', 'openStructure', 'convertStructureBytes', 'makeAddonStructureSession', 'makeAddonManualSession', 'mountWorldEditor', 'collectParamTexts'];
+const REQUIRED = ['ExtractContext', 'runPipeline', 'processScript', 'collectTranslationGroups', 'collectUiVarUsage', 'translateCommand', 'regexPhrases', 'runWorldPipeline', 'openStructure', 'convertStructureBytes', 'makeAddonStructureSession', 'makeAddonManualSession', 'mountWorldEditor', 'collectParamTexts', 'getLangBlacklist'];
 function checkVersion() {
     const missing = REQUIRED.filter(n => typeof NS[n] !== 'function');
     if (missing.length) {

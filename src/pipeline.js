@@ -21,7 +21,8 @@
         splitNewlines: false,          // lang 支持 \n 换行（游戏内实测），多行文本默认一个键
         sayMode: 'tellraw',            // say/tell 转换：keep | tellraw | titleraw | actionbar
         listCommandBlockNames: false,  // 命令方块名称多为作者工作用标记，默认不列入需人工翻译
-        includeHiddenItems: false,     // 创造物品栏里不显示的物品 / 方块、不显示的刷怪蛋：默认不提取
+        includeHiddenItems: false,
+        removeJunkLang: true,          // 删除语言文件里模板残留的无效条目（见 lang-blacklist.js）     // 创造物品栏里不显示的物品 / 方块、不显示的刷怪蛋：默认不提取
         processScripts: true,
         injectRuntime: true,
         fillMissing: true,
@@ -419,7 +420,41 @@
         };
 
         // ---------------- 8. 写 lang ----------------
+        // ---- 语言文件黑名单：模板残留的无效条目 ----
+        // 键和值都与黑名单相同，且包里没有对应实体 / 没有引用这个键 → 从所有语言里删除
+        const junkByPack = new Map();
+        if (opt.removeJunkLang && NS.getLangBlacklist) {
+            const bl = NS.getLangBlacklist();
+            const definedIds = new Set([...info.defs.entities.map(e => e.id), ...info.defs.spawnEggs, ...info.defs.items.map(e => e.id), ...info.defs.blocks.map(e => e.id)]);
+            let refText = null;
+            const refs = async () => {
+                if (refText === null) {
+                    const parts = [];
+                    for (const f of allFiles) if (/\.(json|js|mjs|mcfunction|material)$/i.test(f)) { try { parts.push(await fs.readText(f)); } catch (e) { /* 读不了的文件跳过 */ } }
+                    refText = parts.join('\n');
+                }
+                return refText;
+            };
+            let total = 0;
+            for (const pk of packs) {
+                const langs = packLangs.get(pk.root);
+                if (!langs) continue;
+                const junk = new Set();
+                for (const e of langs.values()) for (const [k, v] of e.map) {
+                    if (junk.has(k)) continue;
+                    const bv = bl.get(k);
+                    if (bv == null || bv !== v.trim()) continue;
+                    const m = /^(?:item\.spawn_egg\.)?entity\.(.+)\.name$/.exec(k);
+                    if (m ? definedIds.has(m[1]) : (await refs()).includes(k)) continue;
+                    junk.add(k);
+                }
+                if (junk.size) { junkByPack.set(pk.root, junk); total += junk.size; }
+            }
+            if (total) log(`[lang] 发现 ${total} 条模板残留的无效条目（别的包的刷怪蛋 / 实体名等），将从各语言文件中删除`, 'warn');
+        }
+
         const writeLangs = (pk, entries, isRP) => {
+            const junk = junkByPack.get(pk.root) || new Set();
             const langs = packLangs.get(pk.root) || new Map();
             const texts = pk.root ? `${pk.root}/texts` : 'texts';
             // 脚本多语言表里的语言：只算写进这个包的键
@@ -442,7 +477,7 @@
                 const map = e ? e.map : new Map();
                 const added = [];
                 for (const [k, v] of entries) {
-                    if (map.has(k)) continue;
+                    if (map.has(k) || junk.has(k)) continue;
                     // 脚本自带的多语言表里有这种语言的译文 → 直接使用
                     const tr = ctx.translations.get(k);
                     added.push(`${k}=${toLangValue(tr && tr.has(lang) ? tr.get(lang) : v)}`);
@@ -450,7 +485,7 @@
                 const filled = [];
                 if (opt.fillMissing && isRP) {
                     for (const k of allExistingKeys) {
-                        if (map.has(k) || entries.has(k) || ctx.hiddenKeys.has(k)) continue;
+                        if (map.has(k) || entries.has(k) || ctx.hiddenKeys.has(k) || junk.has(k)) continue;
                         const v = fillFrom(k);
                         if (v != null) filled.push(`${k}=${v}`);
                     }
@@ -465,14 +500,23 @@
                     ctx.warn(`${e.path}: ${k.slice(0, -1)} 混用了 %1$s 和 %s，已改为 ${f}`);
                     return k + f;
                 });
-                if (!added.length && !filled.length && !fixedN) { if (e) written.push(lang); continue; }
+                let junkN = 0;
+                if (e && junk.size) raw = raw.split('\n').filter((line) => {
+                    const t = line.trimStart();
+                    if (!t || t.startsWith('#')) return true;
+                    const eq = line.indexOf('=');
+                    if (eq <= 0 || !junk.has(line.slice(0, eq).trim())) return true;
+                    junkN++;
+                    return false;
+                }).join('\n');
+                if (!added.length && !filled.length && !fixedN && !junkN) { if (e) written.push(lang); continue; }
                 let out = e ? raw.replace(/\s*$/, '\n') : '';
                 if (added.length) out += `\n${MARK} 自动提取（源语言 ${sourceLang}${lang === sourceLang ? '' : '，待翻译'}）\n${added.join('\n')}\n`;
                 if (filled.length) out += `\n${MARK} 从其他语言补全（待翻译）\n${filled.join('\n')}\n`;
                 const path = e ? e.path : `${texts}/${lang}.lang`;
                 pending.set(path, out);
                 written.push(lang);
-                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN ? `，修正占位符 ${fixedN}` : ''}`);
+                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN ? `，修正占位符 ${fixedN}` : ''}${junkN ? `，删除无效条目 ${junkN}` : ''}`);
             }
             return written;
         };
@@ -503,7 +547,7 @@
             let entries;
             if (pk.type === 'RP') entries = new Map([...(entriesByRp.get(pk.root) || []), ...own]);
             else entries = own;
-            if (!entries.size && !(pk.type === 'RP' && opt.fillMissing)) continue;
+            if (!entries.size && !(pk.type === 'RP' && opt.fillMissing) && !junkByPack.has(pk.root)) continue;
             // 已存在但值不同的 pack.name：保留原值并提示
             const langs = packLangs.get(pk.root);
             for (const [k, v] of own) {
