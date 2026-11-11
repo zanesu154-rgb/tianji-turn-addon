@@ -22,7 +22,9 @@
         sayMode: 'tellraw',            // say/tell 转换：keep | tellraw | titleraw | actionbar
         listCommandBlockNames: false,  // 命令方块名称多为作者工作用标记，默认不列入需人工翻译
         includeHiddenItems: false,
-        removeJunkLang: true,          // 删除语言文件里模板残留的无效条目（见 lang-blacklist.js）     // 创造物品栏里不显示的物品 / 方块、不显示的刷怪蛋：默认不提取
+        removeJunkLang: true,
+        bakeZh: false,                 // 名字标签等只认纯文字的位置，按简体中文固定写入（仅简体中文界面提供）
+        bakeLang: null,                // 上传的已翻译 lang（Map 键→值），优先使用          // 删除语言文件里模板残留的无效条目（见 lang-blacklist.js）     // 创造物品栏里不显示的物品 / 方块、不显示的刷怪蛋：默认不提取
         processScripts: true,
         injectRuntime: true,
         fillMissing: true,
@@ -258,6 +260,22 @@
         })();
         const runtimeKey = '__ADDON_I18N_' + NS.hash6(JSON.stringify(bpManifest ? bpManifest.manifest.header.uuid : opt.baseName));
 
+        // 固定写入简体中文：用户上传的译文 > 包自带的 zh_CN.lang > 脚本字典里的中文 > 游戏自带的中文名
+        let bakeOf = null;
+        if (opt.bakeZh) {
+            const userLang = opt.bakeLang instanceof Map ? opt.bakeLang : (opt.bakeLang ? new Map(Object.entries(opt.bakeLang)) : null);
+            const unesc = (v) => String(v).replace(/\\n/g, '\n');
+            bakeOf = (k) => {
+                if (userLang && userLang.has(k)) return unesc(userLang.get(k));
+                for (const langs of packLangs.values()) { const e = langs.get('zh_CN'); if (e && e.map.has(k)) return unesc(e.map.get(k)); }
+                const t = ctx.translations.get(k);
+                if (t && t.has('zh_CN')) return t.get('zh_CN');
+                const V = NS.VANILLA;
+                return V && V.zh && V.zh[k] != null ? V.zh[k] : undefined;
+            };
+            log(`[脚本] 名字标签等只认纯文字的位置按简体中文固定写入${userLang ? `（使用上传的译文 ${userLang.size} 条）` : ''}`, 'warn');
+        }
+
         // 包里自定义的物品 / 方块 / 实体 ID → 名称翻译键（给“把 ID 拼成英文名”的脚本函数用）
         const idKeys = () => {
             const out = new Map();
@@ -303,7 +321,7 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes,
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, bakeOf,
                 });
                 if (r.changed) {
                     pending.set(p, r.content);
