@@ -41,7 +41,7 @@ Extracts the player-visible text from Minecraft Bedrock **add-ons** and **worlds
 |---|---|
 | Source language | The original language of the add-on. Auto-detected by default |
 | Lang files to generate | Comma-separated list such as `en_US, zh_CN, ja_JP`. `en_US` (the game's fallback language) and any languages already in the pack are always generated |
-| say / tell commands | The game does not translate `say`. By default it is converted to `tellraw` (looks the same, with the `[sender]` prefix); it can also become a screen title, a message above the hotbar, or be left as is |
+| say / tell / me commands | The game does not translate `say`. By default it is converted to `tellraw` (looks the same, with the `[sender]` prefix; `/me` keeps its `* sender` format); it can also become a screen title, a message above the hotbar, or be left as is |
 | Built-in script translation fields | When scripts contain their own translation tables, leave empty to auto-detect. If detection is wrong, specify fields manually (`s=en_US, v=vi_VN`) or per file (`dialogue_es.js:v=es_ES`); `off` disables it |
 | Process scripts / Inject runtime translation | Whether to process `scripts/*.js`. Runtime translation handles text stored in variables and data tables; keep it on |
 | Fill missing keys from other languages | Copies missing keys from another language so the game never shows raw key names |

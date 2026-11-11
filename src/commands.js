@@ -94,7 +94,7 @@
      *  - 消息里的选择器（@p、@a[…]）保留为 selector，作为翻译参数 %1$s …
      *  - tellraw 保留 say 的“[发送者] ”前缀；发送者默认为执行者 @s，命令方块传入它的名字
      */
-    function convertSay(text, target, mode, ctx, baseKey, meta, sender) {
+    function convertSay(text, target, mode, ctx, baseKey, meta, sender, isMe) {
         const sels = [];
         const value = text.replace(/%/g, '%%').replace(/@[aeprsvn](?:\[[^\]]*\])?|@initiator/g, (m) => { sels.push({ selector: m }); return `%${sels.length}$s`; });
         const literal = value.replace(/%\d+\$s/g, ' ');
@@ -104,7 +104,9 @@
         const node = sels.length ? { translate: key, with: { rawtext: sels } } : { translate: key };
         const who = sender || { selector: '@s' };
         if (mode === 'tellraw') {
-            return `tellraw ${target} ${JSON.stringify({ rawtext: [{ text: '[' }, who, { text: '] ' }, node] })}`;
+            // /me 的格式是“* 发送者 消息”
+            const head = isMe ? [{ text: '* ' }, who, { text: ' ' }] : [{ text: '[' }, who, { text: '] ' }];
+            return `tellraw ${target} ${JSON.stringify({ rawtext: [...head, node] })}`;
         }
         const sub = mode === 'actionbar' ? 'actionbar' : 'title';
         return `titleraw ${target} ${sub} ${JSON.stringify({ rawtext: [node] })}`;
@@ -179,7 +181,7 @@
             const target = isTell ? cmd.substring(tStart, tEnd) : '@a';
             const text = cmd.substring(skipWs(cmd, tEnd)).replace(/\s+$/, '');
             const mode = ctx.sayMode || 'keep';
-            const conv = kw !== 'me' && mode !== 'keep' ? convertSay(text, target, mode, ctx, baseKey, meta, opts.sender) : null;
+            const conv = mode !== 'keep' ? convertSay(text, target, mode, ctx, baseKey, meta, opts.sender, kw === 'me') : null;
             if (conv) return { cmd: prefix + conv, changed: true };
             if (NS.looksLikeText(text)) ctx.report(file, `/${kw}`, text, `${kw} 命令不支持翻译键（可在选项中设置转换为 tellraw / titleraw）`);
             return { cmd, changed: false };
