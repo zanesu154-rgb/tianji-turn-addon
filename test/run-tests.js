@@ -658,6 +658,20 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
             en.get(kp) === 'Craft %1$s to view your skills' && ru.get(kp) === 'Создайте %1$s, чтобы увидеть навыки' && en.get(kn) === 'Not enough items (Required: %1$s)'
             && ![...en.keys()].some(x => /hints\.(alias|both)$/.test(x)) && !vals.some(v => /@/.test(v)) && vals.includes('%1$s: §g%2$s/%3$s'), JSON.stringify(vals.filter(v => /%|@/.test(v))));
     }
+    {
+        // RPG：作者把字典也导出到了资源包 lang（同路径键、或 entity.<id>.name 这类游戏命名）→ 直接沿用，不新建重复键
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const dict = (o) => Buffer.from('export { Dictionary };\nconst Dictionary = ' + JSON.stringify(o, null, 2) + ';\n');
+        xm.files.set('BP/scripts/langs/en.js', dict({ achievements: { wood: { name: 'Chop some wood' } }, mobs: { 'sert:bear': 'Brown Bear' }, tile: { 'sert:press': 'Press' }, ui: { open: 'Open the menu', close: 'Close the menu', back: 'Go back' } }));
+        xm.files.set('BP/scripts/langs/ru.js', dict({ achievements: { wood: { name: 'Добыть дерево' } }, mobs: { 'sert:bear': 'Бурый медведь' }, tile: { 'sert:press': 'Пресс' }, ui: { open: 'Открыть меню', close: 'Закрыть меню', back: 'Назад' } }));
+        const en0 = (xm.files.get('RP/texts/en_US.lang') || '').toString();
+        xm.files.set('RP/texts/en_US.lang', Buffer.from(en0 + '\nachievements.wood.name=Chop some wood\nentity.sert:bear.name=Brown Bear\ntile.sert:press.name=Press\n'));
+        const xr = await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
+        const ks = [...xr.ctx.entries.keys()];
+        const en = NS.parseLang(xm.files.get('RP/texts/en_US.lang').toString());
+        check('字典条目与资源包 lang 已有键（同路径 / entity.<id>.name / tile.<id>.name）同内容时沿用，不新建重复键',
+            !ks.some(k => /achievements\.wood|sert:bear|sert:press/.test(k)) && ks.some(k => /langs\.ui\.open$/.test(k)) && ![...en.keys()].some(k => /^script\..*(achievements\.wood|sert:bear|sert:press)/.test(k)), JSON.stringify(ks));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
