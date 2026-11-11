@@ -134,5 +134,19 @@
         return out;
     }
 
-    NS.MinVersion = { parse, cmp, label, serverModuleGame, estimateAddon, estimateWorld, mergeWorld, SERVER_STABLE };
+    /** 日志用的说明行 */
+    function describe(mv, packVersions) {
+        const lines = [];
+        for (const p of packVersions || []) lines.push(`[版本] ${p.type === 'BP' ? '行为包' : p.type === 'RP' ? '资源包' : '包'} ${p.name || p.root || '(根目录)'}：manifest 版本号 ${p.version || '未填写'}`);
+        if (mv) {
+            const why = mv.basis.map(b => b.k === 'engine' ? `min_engine_version ${b.v}` : b.k === 'format' ? `format_version 最高 ${b.v}（${b.file}）`
+                : b.k === 'world' ? `level.dat MinimumCompatibleClientVersion ${b.v}` : b.k === 'worldLast' ? `level.dat lastOpenedWithVersion ${b.v}`
+                : b.k === 'packs' ? `存档自带包 ${b.v}` : b.k === 'beta' ? `测试版 API ${b.mod} → 仅 ${b.v}` : `${b.mod} → ${b.v}${b.k === 'newer' ? ' 以上' : ''}`).join('；');
+            lines.push(`[版本] 最低可用版本：${mv.label}（${why}${mv.lastOpened ? `；上次用 ${mv.lastOpened} 打开` : ''}）`);
+            if (mv.beta) lines.push(`[版本] ⚠ 使用了测试版脚本 API ${mv.beta.mod}：只能在 ${mv.beta.label} 开启“测试版 API”实验性玩法后运行`);
+        }
+        return lines;
+    }
+
+    NS.MinVersion = { describe, parse, cmp, label, serverModuleGame, estimateAddon, estimateWorld, mergeWorld, SERVER_STABLE };
 })(globalThis.AddonI18n = globalThis.AddonI18n || {});
