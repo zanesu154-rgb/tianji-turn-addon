@@ -216,6 +216,16 @@
         })();
         const runtimeKey = '__ADDON_I18N_' + NS.hash6(JSON.stringify(bpManifest ? bpManifest.manifest.header.uuid : opt.baseName));
 
+        // 包里自定义的物品 / 方块 / 实体 ID → 名称翻译键（给“把 ID 拼成英文名”的脚本函数用）
+        const idKeys = () => {
+            const out = new Map();
+            const has = (k) => knownKeys.has(k) || ctx.entries.has(k);
+            for (const it of info.defs.items) { const k = [`item.${it.id}.name`, `item.${it.id}`].find(has); if (k) out.set(it.id, k); }
+            for (const b of info.defs.blocks) if (has(`tile.${b.id}.name`)) out.set(b.id, `tile.${b.id}.name`);
+            for (const e of info.defs.entities) if (!out.has(e.id) && has(`entity.${e.id}.name`)) out.set(e.id, `entity.${e.id}.name`);
+            return out;
+        };
+
         // ---------------- 4. 逐文件处理 ----------------
         let processed = 0;
         const total = allFiles.length;
@@ -251,7 +261,7 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax,
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys,
                 });
                 if (r.changed) {
                     pending.set(p, r.content);

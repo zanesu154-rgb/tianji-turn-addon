@@ -164,4 +164,6 @@ test/                 测试附加包与测试脚本
 
 第三方组件：[acorn](https://github.com/acornjs/acorn)（MIT）、[JSZip](https://github.com/Stuk/jszip)（MIT 或 GPLv3，本项目按 MIT 使用）、[JSON5](https://github.com/json5/json5)（MIT）。
 
+`src/vanilla-names.js`（原版物品 / 方块 / 生物 ID 与游戏翻译键、英文名的对照表）由 [Mojang/bedrock-samples](https://github.com/Mojang/bedrock-samples) 生成，这部分数据版权归 Mojang AB，受 [Minecraft 最终用户许可协议](https://www.minecraft.net/zh-hans/eula) 约束，不在本项目的 MIT 许可范围内。
+
 Minecraft 是 Mojang Synergies AB 的商标。本工具为非官方工具，与 Mojang、Microsoft 无关。

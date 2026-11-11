@@ -2,7 +2,7 @@
 const path = require('path');
 const fs = require('fs');
 globalThis.acorn = require('../vendor/acorn.js');
-for (const f of ['util', 'lang-blacklist', 'minversion', 'context', 'commands', 'json', 'script', 'pipeline', 'world/nbt', 'world/leveldb', 'world/world']) {
+for (const f of ['util', 'lang-blacklist', 'minversion', 'vanilla-names', 'context', 'commands', 'json', 'script', 'pipeline', 'world/nbt', 'world/leveldb', 'world/world']) {
     require(path.join(__dirname, '..', 'src', f + '.js'));
 }
 const zlib = require('zlib');

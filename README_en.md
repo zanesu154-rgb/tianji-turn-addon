@@ -164,4 +164,6 @@ Released under the [MIT License](LICENSE).
 
 Third-party components: [acorn](https://github.com/acornjs/acorn) (MIT), [JSZip](https://github.com/Stuk/jszip) (MIT or GPLv3; used here under MIT), [JSON5](https://github.com/json5/json5) (MIT).
 
+`src/vanilla-names.js` (vanilla item / block / mob IDs mapped to the game's translation keys and English names) is generated from [Mojang/bedrock-samples](https://github.com/Mojang/bedrock-samples); that data is © Mojang AB, subject to the [Minecraft EULA](https://www.minecraft.net/en-us/eula), and not covered by this project's MIT license.
+
 Minecraft is a trademark of Mojang Synergies AB. This is an unofficial tool and is not affiliated with Mojang or Microsoft.

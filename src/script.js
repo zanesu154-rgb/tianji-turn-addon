@@ -188,6 +188,35 @@
     }
 
     /** 片段 → lang 值（动态部分为 %1$s …） */
+    /**
+     * 原版 ID（或旧式写法）→ 游戏自带翻译键；英文必须和给定文字一致（作者改过名的不替换）
+     * @param {'item'|'block'|'entity'} kind
+     */
+    let vanillaByValue = null;
+    NS.vanillaKeyFor = function (id, kind, value) {
+        const V = NS.VANILLA;
+        if (!V || typeof value !== 'string') return null;
+        const ns = id.indexOf(':') >= 0 ? id.split(':')[0] : 'minecraft';
+        if (ns !== 'minecraft') return null;
+        const full = id.indexOf(':') >= 0 ? id : 'minecraft:' + id;
+        const want = value.replace(/§./g, '').trim().toLowerCase();
+        const ok = (k) => k && V.en[k] && V.en[k].trim().toLowerCase() === want;
+        const k1 = kind === 'entity' ? V.ents[full] : (V.ids[full] || V.ents[full]);
+        if (ok(k1)) return k1;
+        // 旧式 / 自造的写法（appleEnchanted、porkchop_cooked）：按英文名在同类键里找唯一的一个
+        if (!vanillaByValue) {
+            vanillaByValue = new Map();
+            for (const [k, v] of Object.entries(V.en)) {
+                const t = v.trim().toLowerCase();
+                if (!vanillaByValue.has(t)) vanillaByValue.set(t, []);
+                vanillaByValue.get(t).push(k);
+            }
+        }
+        const pre = kind === 'entity' ? /^entity\./ : kind === 'block' ? /^tile\./ : /^(item|tile)\./;
+        const ks = (vanillaByValue.get(want) || []).filter(k => pre.test(k) && /\.name$/.test(k) && !/spawn_egg/.test(k));
+        return ks.length === 1 ? ks[0] : null;
+    };
+
     // 脚本字典的 @引用 / $变量 记号（见 collectCrossFileDicts）
     const DICT_REF = /@[A-Za-z0-9_\-$#]*[.:][A-Za-z0-9_.:\-$#]*[A-Za-z0-9_\-#]|\$#?[A-Za-z0-9_]+#?/g;
     /** 把字面量片段里的 @引用 / $变量 拆成占位（{ ref }），运行时由作者解析后的文字按句式匹配 */
@@ -958,7 +987,21 @@
     p.sort((a, b) => b[2] - a[2]);
     cache.clear();
   };
-  return (g[K] = { T, M, MA, J, TJ, C, reg });
+  // 把 ID 拼成英文名的函数（"minecraft:iron_sword" → "Iron Sword"）：记下这段文字对应的翻译键
+  const ids = new Map(), ents = new Map();
+  const H = (id, text) => {
+    if (typeof id === "string" && typeof text === "string" && text) {
+      const full = id.indexOf(":") >= 0 ? id : "minecraft:" + id;
+      const k = ids.get(full) || ents.get(full);
+      if (k && m.get(text) !== k) { m.set(text, k); cache.delete(text); }
+    }
+    return text;
+  };
+  const regIds = (a, b) => {
+    for (const k in a || {}) ids.set(k, a[k]);
+    for (const k in b || {}) ents.set(k, b[k]);
+  };
+  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds });
 })();
 `;
     }
@@ -1183,7 +1226,7 @@
                 out += v.slice(last).replace(/%/g, '%%');
                 return { lits, order, value: out };
             };
-            let groups = 0, reused = 0;
+            let groups = 0, reused = 0, vanilla = 0;
             for (const [path, m] of byPath) {
                 const src = m.get('en_US') || m.get('en_GB') || [...m.values()].find(x => !/[^\u0000-ɏ\s\p{P}\p{S}\p{N}]/u.test(x.node.value)) || [...m.values()][0];
                 let value = src.node.value;
@@ -1222,7 +1265,17 @@
                     else cands.push(`item.${id}.name`, `item.${id}`, `tile.${id}.name`);
                 }
                 const same = (k) => { const ex = ctx.existingValues && ctx.existingValues.get(k); return ex && (ex.has(value) || ex.has(value.replace(/\r?\n/g, '\\n'))); };
-                const reuse = cands.find(same);
+                let reuse = cands.find(same);
+                // 原版物品 / 方块 / 生物：用游戏自带的翻译键（所有语言都有），英文内容一致才用
+                if (!reuse && idm && NS.vanillaKeyFor) reuse = NS.vanillaKeyFor(idm[2], /^(mobs|entities)$/.test(idm[1]) ? 'entity' : /^(tile|blocks)$/.test(idm[1]) ? 'block' : 'item', value);
+                if (reuse && !cands.includes(reuse)) {
+                    vanilla++;
+                    for (const x of m.values()) {
+                        add(x.file, 'exact', [x.node.value, reuse]);
+                        if (/[^.]\.$/.test(x.node.value)) add(x.file, 'exact', [x.node.value.slice(0, -1), reuse]);
+                    }
+                    continue;
+                }
                 if (reuse) {
                     ctx.ref(reuse, src.file);
                     reused++;
@@ -1257,7 +1310,7 @@
                 }
             }
             for (const v of out.values()) v.exact = v.exact.filter(Boolean);
-            ctx.warn(`${dir || '(根目录)'}：识别到按语言分文件的翻译字典（${dicts.map(d => d.file.split('/').pop() + '=' + d.lang).join('、')}），合并 ${groups} 组${reused ? `；另有 ${reused} 组资源包 lang 里已有同名同内容的键，直接沿用` : ''}`);
+            ctx.warn(`${dir || '(根目录)'}：识别到按语言分文件的翻译字典（${dicts.map(d => d.file.split('/').pop() + '=' + d.lang).join('、')}），合并 ${groups} 组${reused ? `；另有 ${reused} 组资源包 lang 里已有同名同内容的键，直接沿用` : ''}${vanilla ? `；${vanilla} 组是原版物品 / 生物名，改用游戏自带的翻译键` : ''}`);
         }
         return out;
     }
@@ -1416,6 +1469,28 @@
         }
         const warnedCollide = new Set();
         const src = source;
+
+        // ---- 把 ID 拼成英文名的函数：(id) => id.split(":").pop().split("_").map(首字母大写).join(" ") ----
+        // 文字在运行时才生成，没有可提取的原文；给返回值套上 H(id, 文字)，运行时按 ID 记下对应的翻译键
+        // （原版用游戏自带键，包里自定义的物品 / 方块 / 实体用 item.<id>.name 等），之后显示时就能翻译
+        let humanizers = 0;
+        walk(ast, (n) => {
+            if (!/Function/.test(n.type) || !n.params.length || n.params[0].type !== 'Identifier') return;
+            const body = src.slice(n.body.start, n.body.end);
+            if (body.length > 600 || !/\.split\(\s*(?:"_"|'_'|\/_\/g?)\s*\)/.test(body) || !/toUpperCase\(\)/.test(body) || !/\.join\(\s*(?:" "|' ')\s*\)/.test(body)) return;
+            const pn = n.params[0].name;
+            const wrap = (e) => { const prev = overrides.get(e); overrides.set(e, () => ` ${RT}.H(${pn}, (${prev ? prev() : renderOrig(e)}))`); };
+            if (n.body.type !== 'BlockStatement') wrap(n.body);
+            else walk(n.body, (r) => {
+                if (r.type !== 'ReturnStatement' || !r.argument) return;
+                let f = r.parent;
+                while (f && !/Function/.test(f.type)) f = f.parent;
+                if (f === n) wrap(r.argument);
+            });
+            humanizers++;
+            usesRuntime = true;
+        });
+        if (humanizers) ctx.warn(`${file}: 发现 ${humanizers} 个把 ID 拼成英文名的函数，运行时按 ID 换成翻译键`);
 
         const renderOrig = (node) => {
             const out = [];
@@ -2048,6 +2123,13 @@
                 for (const [s, k] of exact) { if (!seen.has(s)) { seen.add(s); ex.push([s, k]); } }
                 prelude += `${RT}.reg(${JSON.stringify(ex)}, ${JSON.stringify(patterns)}${joinSeps.length ? ', ' + JSON.stringify(joinSeps) : ''});\n`;
             }
+            if (humanizers) {
+                // ID → 翻译键：包里自定义的 + 原版
+                const own = {};
+                if (opts.idKeys) for (const [id, k] of opts.idKeys()) own[id] = k;
+                const V = NS.VANILLA || { ids: {}, ents: {} };
+                prelude += `${RT}.regIds(${JSON.stringify(Object.assign({}, V.ids, own))}, ${JSON.stringify(V.ents)});\n`;
+            }
         } else if (usesRuntime) {
             // 不注入运行时却用到了 → 不应发生，保险起见放弃改写
             ctx.warn(`${file}: 内部错误，未写入改动`);
@@ -2083,6 +2165,8 @@
         const endMark = txt.indexOf('// ---- end i18n runtime ----', from);
         if (endMark < 0) return null;
         let to = txt.indexOf(`\n${rt}.reg(`, from);
+        const to2 = txt.indexOf(`\n${rt}.regIds(`, from);
+        if (to2 >= 0 && to2 < endMark && (to < 0 || to2 < to)) to = to2;
         to = to >= 0 && to < endMark ? to + 1 : endMark;
         const fresh = buildRuntime(rt, key);
         if (txt.slice(from, to) === fresh) return null;
