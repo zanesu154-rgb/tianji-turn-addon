@@ -642,6 +642,22 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('按语言分文件的字典（langs/en.js、ru.js、uk.js）：同路径共用一个键，各语言写进各自 lang', k && en.get(k) === 'Apple' && ru.get(k) === 'Яблоко' && uk && uk.get(k) === 'Яблуко' && en.get(ka) === 'Adult %1$s Axolotl' && ru.get(ka) === '%1$s взрослого аксолотля'
             && ![...xr.ctx.entries.values()].some(e => /[\u0400-\u04ff]/.test(e.value)));
     }
+    {
+        // RPG：字典值里的 @引用 / $变量 由作者的 translate() 解析，lang 里改成 %n$s，运行时按解析后的整句匹配
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const dict = (o) => Buffer.from('export { Dictionary };\nconst Dictionary = ' + JSON.stringify(o, null, 2) + ';\n');
+        xm.files.set('BP/scripts/langs/en.js', dict({ tile: { 'sert:press': 'Press', 'sert:bowl': 'Grinding Bowl' }, common: { exp: 'Experience' }, hints: { press: 'Craft @tile.sert:press to view your skills', need: 'Not enough items (Required: $requiredAmount# )', alias: '@common.exp', both: '@tile.sert:press & @tile.sert:bowl' } }));
+        xm.files.set('BP/scripts/langs/ru.js', dict({ tile: { 'sert:press': 'Пресс', 'sert:bowl': 'Ступка' }, common: { exp: 'Опыт' }, hints: { press: 'Создайте @tile.sert:press, чтобы увидеть навыки', need: 'Недостаточно предметов (нужно: $requiredAmount# )', alias: '@common.exp', both: '@tile.sert:press & @tile.sert:bowl' } }));
+        xm.files.set('BP/scripts/xp.js', Buffer.from('import { world } from "@minecraft/server";\nimport { translate } from "./t.js";\nexport function show(p, a, b) { p.sendMessage(translate("@common.exp: §g" + a + "/" + b, p)); p.sendMessage(translate("/give @s apple", p)); }\n'));
+        const xr = await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
+        const en = NS.parseLang(xm.files.get('RP/texts/en_US.lang').toString());
+        const ru = NS.parseLang(xm.files.get('RP/texts/ru_RU.lang').toString());
+        const kp = [...en.keys()].find(x => /langs\.hints\.press$/.test(x)), kn = [...en.keys()].find(x => /langs\.hints\.need$/.test(x));
+        const vals = [...xr.ctx.entries.values()].map(e => e.value);
+        check('字典 @引用 / $变量：lang 里改成 %n$s，各语言对应；纯引用条目不提取；代码里的 "@common.exp: " 也当占位',
+            en.get(kp) === 'Craft %1$s to view your skills' && ru.get(kp) === 'Создайте %1$s, чтобы увидеть навыки' && en.get(kn) === 'Not enough items (Required: %1$s)'
+            && ![...en.keys()].some(x => /hints\.(alias|both)$/.test(x)) && !vals.some(v => /@/.test(v)) && vals.includes('%1$s: §g%2$s/%3$s'), JSON.stringify(vals.filter(v => /%|@/.test(v))));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

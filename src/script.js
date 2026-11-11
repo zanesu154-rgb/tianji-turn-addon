@@ -188,6 +188,46 @@
     }
 
     /** 片段 → lang 值（动态部分为 %1$s …） */
+    // 脚本字典的 @引用 / $变量 记号（见 collectCrossFileDicts）
+    const DICT_REF = /@[A-Za-z0-9_\-$#]*[.:][A-Za-z0-9_.:\-$#]*[A-Za-z0-9_\-#]|\$#?[A-Za-z0-9_]+#?/g;
+    /** 把字面量片段里的 @引用 / $变量 拆成占位（{ ref }），运行时由作者解析后的文字按句式匹配 */
+    function splitDictRefs(parts) {
+        const out = [];
+        let any = false;
+        // 先把跨表达式拼出来的引用合成一个占位：`@attributes.${id}.name`、`@items.${id}§r`
+        const merged = [];
+        for (let i = 0; i < parts.length; i++) {
+            const p = parts[i];
+            const m = 'lit' in p && i + 1 < parts.length && !('lit' in parts[i + 1]) ? /@[A-Za-z0-9_\-$#]*(?:[.:][A-Za-z0-9_\-$#]+)*[.:]$/.exec(p.lit) : null;
+            if (!m) { merged.push(p); continue; }
+            if (m.index > 0) merged.push({ lit: p.lit.slice(0, m.index) });
+            let j = i + 1;
+            while (j < parts.length && !('lit' in parts[j])) j++;   // 连续的表达式
+            const nx = j < parts.length ? parts[j] : null;
+            const cont = nx ? /^(?:[.:][A-Za-z0-9_\-$#]+)*/.exec(nx.lit)[0] : '';
+            merged.push({ ref: '@dynamic' });
+            any = true;
+            if (nx) { const rest = nx.lit.slice(cont.length); if (rest) merged.push({ lit: rest }); j++; }
+            i = j - 1;
+        }
+        parts = merged;
+        for (const p of parts) {
+            if (!('lit' in p)) { out.push(p); continue; }
+            let last = 0;
+            for (const m of p.lit.matchAll(DICT_REF)) {
+                let a = m.index, b = a + m[0].length;
+                if (m[0].startsWith('$#') && a > 0) a--;
+                if (m[0].endsWith('#') && p.lit[b] === ' ') b++;
+                if (a > last) out.push({ lit: p.lit.slice(last, a) });
+                out.push({ ref: m[0] });
+                any = true;
+                last = b;
+            }
+            if (last < p.lit.length) out.push({ lit: p.lit.slice(last) });
+        }
+        return any ? out : null;
+    }
+
     function partsToValue(parts) {
         const hasExpr = parts.some(p => !('lit' in p));
         let n = 0;
@@ -1108,12 +1148,69 @@
                 out.get(file)[kind].push(v);
             };
             const PH = /%(\d+)\$[sd]|%[sd]/g;
+            // 字典自己的引用语法（RPG 等）：
+            //   @路径      → 运行时换成字典里另一条（如 "@tile.sert:press"、"@items.$item"）
+            //   $变量 / $变量#  → 换成传入的值（# 结尾时连同后面一个空格一起替换）
+            // 这些在 lang 里无法解析，改成 %1$s 占位，运行时把作者解析好的整句按句式匹配，引用部分单独翻译
+            // @引用至少带一个 . 或 :（排除 @s、@a 这类目标选择器）
+            const REF = /@[A-Za-z0-9_\-$#]*[.:][A-Za-z0-9_.:\-$#]*[A-Za-z0-9_\-#]|\$#?[A-Za-z0-9_]+#?/g;
+            const refsOf = (v) => {
+                const toks = [];
+                for (const mm of v.matchAll(REF)) {
+                    let a = mm.index, b = a + mm[0].length;
+                    if (mm[0].startsWith('$#') && a > 0) a--;
+                    if (mm[0].endsWith('#') && v[b] === ' ') b++;
+                    toks.push({ tok: mm[0], a, b });
+                }
+                return toks;
+            };
+            const refValue = (v, numOf) => {
+                const toks = refsOf(v);
+                const lits = [''], order = [];
+                let last = 0, out = '';
+                for (const t of toks) {
+                    const lit = v.slice(last, t.a);
+                    lits[lits.length - 1] += lit;
+                    out += lit.replace(/%/g, '%%');
+                    let n = numOf(t.tok);
+                    if (!n) { lits[lits.length - 1] += v.slice(t.a, t.b); out += v.slice(t.a, t.b); last = t.b; continue; }
+                    order.push(n);
+                    lits.push('');
+                    out += `%${n}$s`;
+                    last = t.b;
+                }
+                lits[lits.length - 1] += v.slice(last);
+                out += v.slice(last).replace(/%/g, '%%');
+                return { lits, order, value: out };
+            };
             let groups = 0;
             for (const [path, m] of byPath) {
                 const src = m.get('en_US') || m.get('en_GB') || [...m.values()].find(x => !/[^\u0000-ɏ\s\p{P}\p{S}\p{N}]/u.test(x.node.value)) || [...m.values()][0];
-                const value = src.node.value;
+                let value = src.node.value;
                 for (const x of m.values()) out.has(x.file) || add(x.file, 'exact', null), out.get(x.file).nodes.add(x.node);
                 if (!looksLikeText(value, 'loose') && ![...m.values()].some(x => hasCJK(x.node.value))) continue;
+                // 带 @引用 / $变量 的条目
+                const srcToks = PH.test(value) ? [] : refsOf(value);
+                PH.lastIndex = 0;
+                if (srcToks.length) {
+                    if (/^@/.test(srcToks[0].tok) || srcToks.some(t => t.tok[0] === '@')) out.refSyntax = true;
+                    const nums = new Map();
+                    for (const t of srcToks) if (!nums.has(t.tok)) nums.set(t.tok, nums.size + 1);
+                    const conv = refValue(value, (tok) => nums.get(tok));
+                    // 整条只是引用（"@quests.defaultRewardDescription"、"@tile.a & @tile.b"）：显示的就是被引用条目，不单独提取
+                    if (!conv.lits.some(l => /\p{L}/u.test(l))) continue;
+                    const key = ctx.alloc(`${prefix}.${path.replace(/[^A-Za-z0-9_.:\-]/g, '_')}`, conv.value, { file: src.file, kind: 'script', scope: 'xdict:' + prefix + ':' + path });
+                    groups++;
+                    for (const [lang, x] of m) {
+                        const c = x === src ? conv : refValue(x.node.value, (tok) => nums.get(tok));
+                        ctx.addTranslation(key, lang, c.value);
+                        add(x.file, 'patterns', [key, c.lits, c.order]);
+                        // 作者的 translate() 会去掉结尾的一个句点
+                        const lastLit = c.lits[c.lits.length - 1];
+                        if (lastLit.endsWith('.')) add(x.file, 'patterns', [key, [...c.lits.slice(0, -1), lastLit.slice(0, -1)], c.order]);
+                    }
+                    continue;
+                }
                 const key = ctx.alloc(`${prefix}.${path.replace(/[^A-Za-z0-9_.:\-]/g, '_')}`, value, { file: src.file, kind: 'script', scope: 'xdict:' + prefix + ':' + path });
                 groups++;
                 for (const [lang, x] of m) {
@@ -1130,7 +1227,11 @@
                         }
                         lits[lits.length - 1] += x.node.value.slice(last);
                         add(x.file, 'patterns', [key, lits, order]);
-                    } else add(x.file, 'exact', [x.node.value, key]);
+                    } else {
+                        add(x.file, 'exact', [x.node.value, key]);
+                        // 作者的 translate() 会去掉结尾的一个句点
+                        if (/[^.]\.$/.test(x.node.value)) add(x.file, 'exact', [x.node.value.slice(0, -1), key]);
+                    }
                     PH.lastIndex = 0;
                 }
             }
@@ -1702,6 +1803,7 @@
         };
 
         const registerExact = (text, fromSplit = false) => {
+            if (opts.refSyntax && (DICT_REF.lastIndex = 0, DICT_REF.test(text))) { DICT_REF.lastIndex = 0; registerPattern([{ lit: text }]); return; }
             const lines = ctx.splitNewlines ? text.split(/\r?\n/) : [text];
             for (const line of lines) {
                 if (!looksLikeText(line, 'strict')) continue;
@@ -1762,6 +1864,23 @@
 
         const registerPattern = (parts, relaxed = false) => {
             if (isKeyTemplate(parts)) return;
+            // 字典带 @引用 的包：代码里的 "@common.exp: §g" + n 这类拼接，引用部分当占位
+            if (opts.refSyntax && !parts.refSplit) {
+                const sp = splitDictRefs(parts);
+                if (sp) {
+                    sp.refSplit = true;
+                    const lines = ctx.splitNewlines ? splitLines(sp) : [sp];
+                    for (const line of lines) {
+                        if (!line.length || !line.some(x => 'ref' in x)) { if (line.length) registerPattern(Object.assign(line, { refSplit: true }), relaxed); continue; }
+                        const lits = [''];
+                        for (const x of line) { if ('lit' in x) lits[lits.length - 1] += x.lit; else lits.push(''); }
+                        if (lits.every(l => !l.trim())) continue;   // 只有引用和变量，没有自己的文字
+                        const key = ctx.alloc(keyBase('fmt'), partsToValue(line), meta('fmt'));
+                        patterns.push([key, lits]);
+                    }
+                    return;
+                }
+            }
             if (!relaxed) {
                 const vs = expandChoices(parts);
                 if (vs) {
