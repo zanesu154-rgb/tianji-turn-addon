@@ -790,6 +790,29 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const pv = [...cp.entries.values()].map(e => e.value);
         check('百分号：带参数时 %→%%、已转义的 %% 不翻倍；不带参数时 %%→%', JSON.stringify(pv) === JSON.stringify(['Full 100% safe now', 'Chance: %1$s%% to win', 'Rate 50% done here', 'Bonus %1$s%% extra power', 'Keep %%s as written']), JSON.stringify(pv));
     }
+    {
+        // 基岩版重塑：界面用 (#title_text = 'Magic') 判断显示哪个自定义界面；manifest 的包设置 / 子包名称
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        xm.files.set('RP/ui/server_form.json', Buffer.from(JSON.stringify({ namespace: 'server_form', panel: { type: 'panel', bindings: [{ binding_name: '#title_text' }, { binding_type: 'view', source_property_name: "((#title_text = 'Magic Quests') or (#title_text = 'The End'))", target_property_name: '#visible' }], controls: [{ lbl: { type: 'label', text: 'Magic Quests' } }, { lbl2: { type: 'label', text: 'Choose your path wisely' } }] } })));
+        xm.files.set('BP/scripts/q.js', Buffer.from('import { ActionFormData } from "@minecraft/server-ui";\nexport function q(p, t) { new ActionFormData().title("Magic Quests").body("Pick a quest to start").button("The End").show(p); new ActionFormData().title(t).show(p); }\n'));
+        const man = NS.parseJsonLenient(xm.files.get('RP/manifest.json').toString());
+        man.settings = [{ type: 'label', text: 'Health bar settings' }, { type: 'dropdown', name: 'x:health', text: 'Show health bars', options: [{ name: 'off', text: 'Never shown' }, { name: 'on', text: 'Always shown' }], default: 'off' }, { type: 'toggle', name: 'x:keyed', text: 'br.settings.keyed', default: true }];
+        man.subpacks = [{ folder_name: 'a', name: 'Custom Visuals (Default)', memory_performance_tier: 0 }];
+        xm.files.set('RP/manifest.json', Buffer.from(JSON.stringify(man)));
+        const xr = await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
+        const ui = JSON.parse(xm.files.get('RP/ui/server_form.json').toString());
+        const js = xm.files.get('BP/scripts/q.js').toString();
+        const m2 = JSON.parse(xm.files.get('RP/manifest.json').toString());
+        const rpEn = NS.parseLang(xm.files.get('RP/texts/en_US.lang').toString());
+        check('界面里拿来比较的文字：脚本标题、按钮保持原文（界面里只显示的标签照常翻译），其他照常翻译',
+            ui.panel.controls[0].lbl.text !== 'Magic Quests' && ui.panel.controls[1].lbl2.text !== 'Choose your path wisely' && /\.title\("Magic Quests"\)/.test(js) && /\.button\("The End"\)/.test(js) && /\.body\(\{"rawtext"/.test(js) && /__i18n\.keep\(\[/.test(js));
+        check('manifest：包设置 text 换成本包键（选项也是），已是键的不动；子包名称列入需人工处理',
+            m2.settings[0].text === 'pack.settings.0' && m2.settings[1].text === 'pack.settings.health' && m2.settings[1].options[1].text === 'pack.settings.health.on' && m2.settings[2].text === 'br.settings.keyed'
+            && rpEn.get('pack.settings.health') === 'Show health bars' && xr.ctx.untranslatable.some(u => u.text === 'Custom Visuals (Default)' && /子包/.test(u.where)), JSON.stringify(m2.settings));
+        const rt = new Function(js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        rt.reg([['The End', 'k.end'], ['Some text here', 'k.s']], []);
+        check('  └ 运行时 keep：比较用的文字不翻译', rt.M('The End') === 'The End' && rt.M('§lThe End§r') === '§lThe End§r' && JSON.stringify(rt.M('Some text here')) === '{"rawtext":[{"translate":"k.s"}]}');
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
