@@ -99,6 +99,7 @@
 
         // ---- 包自身的版本号 / 最低可用版本（在日志最后输出，见 app.js） ----
         const packVersions = packs.map(pk => ({ root: pk.root, type: pk.type, name: String(pk.manifest.header.name || ''), version: Array.isArray(pk.manifest.header.version) ? pk.manifest.header.version.join('.') : String(pk.manifest.header.version || '') }));
+        // 包名写成翻译键（pack.name）时，等读完 lang 再换成实际名称
         let minVersion = null;
         if (NS.MinVersion) {
             const formats = [];
@@ -135,6 +136,14 @@
             packLangs.set(pk.root, langs);
         }
         log(`已有翻译键：${knownKeys.size} 条`);
+        for (const pv of packVersions) {
+            if (!/^[\w.:-]+$/.test(pv.name) || !/[.:]/.test(pv.name)) continue;
+            const langs = packLangs.get(pv.root);
+            if (!langs) continue;
+            const order = ['en_US', 'zh_CN', ...langs.keys()];
+            for (const l of order) { const e = langs.get(l); if (e && e.map.has(pv.name)) { pv.name = e.map.get(pv.name).trim(); break; } }
+        }
+        for (const pv of packVersions) pv.name = pv.name.replace(/§./g, '').trim();
 
         if (typeof NS.ExtractContext !== 'function') throw new Error('页面文件没有完整加载（context.js），请刷新页面后重试');
         const ctx = new NS.ExtractContext({ knownKeys, existingValues, splitNewlines: opt.splitNewlines });

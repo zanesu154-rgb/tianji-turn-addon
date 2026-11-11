@@ -137,7 +137,14 @@
     /** 日志用的说明行 */
     function describe(mv, packVersions) {
         const lines = [];
-        for (const p of packVersions || []) lines.push(`[版本] ${p.type === 'BP' ? '行为包' : p.type === 'RP' ? '资源包' : '包'} ${p.name || p.root || '(根目录)'}：manifest 版本号 ${p.version || '未填写'}`);
+        // 同类包只有一个时只写“行为包 / 资源包”，有多个时带上包名区分
+        const count = {};
+        for (const p of packVersions || []) count[p.type] = (count[p.type] || 0) + 1;
+        const multi = Object.values(count).some(n => n > 1);
+        for (const p of packVersions || []) {
+            const kind = p.type === 'BP' ? '行为包' : p.type === 'RP' ? '资源包' : '包';
+            lines.push(`[版本] ${kind}${multi ? ' ' + (p.name || p.root || '(根目录)') : ''}：manifest 版本号 ${p.version || '未填写'}`);
+        }
         if (mv) {
             const why = mv.basis.map(b => b.k === 'engine' ? `min_engine_version ${b.v}` : b.k === 'format' ? `format_version 最高 ${b.v}（${b.file}）`
                 : b.k === 'world' ? `level.dat MinimumCompatibleClientVersion ${b.v}` : b.k === 'worldLast' ? `level.dat lastOpenedWithVersion ${b.v}`

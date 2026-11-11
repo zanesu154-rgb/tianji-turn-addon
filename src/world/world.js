@@ -189,11 +189,23 @@
             const list = nodeAt(rec, path);
             if (!list || list.t !== T.LIST || list.v.et !== T.COMPOUND) return;
             list.v.items.forEach((it, i) => {
+                const slot = child(it, 'Slot');
+                oneItem(it, [...path, i], `${keyBase}.s${slot ? slot.v : i}`);
+            });
+        };
+        // 单个物品：展示框 / 荧光展示框的 Item、掉落物实体的 Item、营火 Item1~4、饰纹陶罐 item 等
+        const singleItems = (keyBase) => {
+            for (const f of ['Item', 'item', 'Item1', 'Item2', 'Item3', 'Item4']) {
+                const nd = child(c, f);
+                if (nd && nd.t === T.COMPOUND) oneItem(nd.v, P(f), `${keyBase}.${f.toLowerCase()}`);
+            }
+        };
+        const oneItem = (it, ipath, kb) => {
+            {
+                const path = ipath.slice(0, -1), i = ipath[ipath.length - 1];
                 const name = getStr(it, 'Name') || '';
                 const tag = child(it, 'tag');
                 if (!tag || tag.t !== T.COMPOUND) return;
-                const slot = child(it, 'Slot');
-                const kb = `${keyBase}.s${slot ? slot.v : i}`;
                 const display = child(tag.v, 'display');
                 if (display && display.t === T.COMPOUND) {
                     const dn = getStr(display.v, 'Name');
@@ -216,7 +228,7 @@
                     });
                 }
                 items([...path, i, 'tag', 'Items'], kb);   // 潜影盒等嵌套容器
-            });
+            }
         };
 
         if (kind === 'block') {
@@ -240,6 +252,7 @@
             if (cn && id === 'CommandBlock') { if (ctx.listCommandBlockNames) report(P('CustomName'), '命令方块名称', cn, '命令方块名称（say 等命令输出时显示的发送者名）不支持翻译键'); }
             else if (cn) report(P('CustomName'), '方块名称', cn, '容器/方块的自定义名称不支持翻译键');
             items(P('Items'), `${kp}.book.${pos}`);
+            singleItems(`${kp}.book.${pos}`);
             if (child(c, 'book')) {
                 // 讲台上的书：book 是单个物品
                 const bk = child(c, 'book');
@@ -300,6 +313,7 @@
             if (cn && !isNpc && (ident !== 'minecraft:command_block_minecart' || ctx.listCommandBlockNames)) report(P('CustomName'), ident === 'minecraft:command_block_minecart' ? '命令方块名称' : '实体名字标签', cn, '实体名称只能是纯文本，不支持翻译键');
             const who = rec.kind === 'player' ? 'player' : idPart;
             for (const f of ['Armor', 'Mainhand', 'Offhand', 'ChestItems', 'Items', 'Inventory', 'EnderChestInventory', 'PlayerUIItems']) items(P(f), `${kp}.book.${who}.${f.toLowerCase()}`);
+            singleItems(`${kp}.book.${who}`);   // 掉落物（minecraft:item）等
         }
         return changed;
     }
