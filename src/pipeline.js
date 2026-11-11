@@ -197,6 +197,14 @@
         }
         const collidingMethods = new Set(Object.keys(NS.SCRIPT_SINKS).filter(n => userMethods.has(n)));
         const bpManifest = packs.find(p => p.type === 'BP');
+        // @minecraft/server 2.2.0（1.21.110）起 ItemStack.setLore 接受 RawMessage，物品描述也能翻译
+        const rawLore = packs.some(pk => (pk.manifest.dependencies || []).some(d => {
+            if (!d || d.module_name !== '@minecraft/server') return false;
+            const v = String(d.version || '');
+            if (/^beta$/i.test(v)) return true;
+            const m = /^(\d+)\.(\d+)/.exec(v);
+            return !!m && (+m[1] > 2 || (+m[1] === 2 && +m[2] >= 2));
+        }));
         const langFields = (() => {
             const raw = String(opt.scriptLangFields || '').trim();
             if (!raw || raw.toLowerCase() === 'auto') return { mode: 'auto', map: new Map() };
@@ -261,7 +269,7 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys,
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore,
                 });
                 if (r.changed) {
                     pending.set(p, r.content);

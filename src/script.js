@@ -924,6 +924,13 @@
       }
       if (!x) continue;
       let k = m.get(x), y = null;
+      // 分隔符吃掉了这一项开头的颜色码（", \\u00a7eMagic connector"）：带上颜色码再找
+      const lead = i > 0 ? (/(?:\\u00a7.)+$/.exec(parts[i - 1]) || [""])[0] : "";
+      if (!k && lead && (k = m.get(lead + x))) {
+        const last = els[els.length - 1];
+        if (last && typeof last.text === "string" && last.text.endsWith(lead)) last.text = last.text.slice(0, -lead.length);
+        else k = null;
+      }
       if (k) y = [{ translate: k }];
       else {
         const mm = /^((?:\\u00a7.|\\s)*)([\\s\\S]*?)((?:\\u00a7.|\\s)*)$/.exec(x);
@@ -936,8 +943,15 @@
   };
   const lookup = (s) => {
     if (cache.has(s)) return cache.get(s);
-    let r = one(s);
-    if (!r && s.indexOf("\\n") >= 0) {
+    // 按固定宽度排版的表单正文（"textures/...png" + 制表符补齐 + 进度 + 制表符补齐 + 描述）：只翻译最后一段，前面的位置不动
+    let r = null;
+    const tab = s.lastIndexOf("\\t");
+    if (tab >= 0 && tab < s.length - 1 && !m.has(s)) {
+      const tail = lookup(s.slice(tab + 1));
+      if (tail) r = [{ text: s.slice(0, tab + 1) }, ...tail.rawtext];
+    }
+    if (!r) r = one(s);
+    if (!r && tab < 0 && s.indexOf("\\n") >= 0) {
       // 自动换行过的文字（作者按宽度把空格换成了换行）：换行还原成空格再找
       const un = (t) => t.indexOf("\\n") >= 0 ? one(t.replace(/\\n/g, " ")) : null;
       const lines = (t, els) => {
@@ -1245,6 +1259,7 @@
                 return { lits, order, value: out };
             };
             let groups = 0, reused = 0, vanilla = 0;
+            const dotVariants = (v) => { const out = []; let t = v; while (t.length > 1 && t.endsWith('.') && out.length < 4) { t = t.slice(0, -1); if (/\S/.test(t)) out.push(t); } return out; };
             for (const [path, m] of byPath) {
                 const src = m.get('en_US') || m.get('en_GB') || [...m.values()].find(x => !/[^\u0000-ɏ\s\p{P}\p{S}\p{N}]/u.test(x.node.value)) || [...m.values()][0];
                 let value = src.node.value;
@@ -1290,7 +1305,7 @@
                     vanilla++;
                     for (const x of m.values()) {
                         add(x.file, 'exact', [x.node.value, reuse]);
-                        if (/[^.]\.$/.test(x.node.value)) add(x.file, 'exact', [x.node.value.slice(0, -1), reuse]);
+                        dotVariants(x.node.value).forEach(v => add(x.file, 'exact', [v, reuse]));
                     }
                     continue;
                 }
@@ -1299,7 +1314,7 @@
                     reused++;
                     for (const x of m.values()) {
                         add(x.file, 'exact', [x.node.value, reuse]);
-                        if (/[^.]\.$/.test(x.node.value)) add(x.file, 'exact', [x.node.value.slice(0, -1), reuse]);
+                        dotVariants(x.node.value).forEach(v => add(x.file, 'exact', [v, reuse]));
                     }
                     continue;
                 }
@@ -1321,8 +1336,8 @@
                         add(x.file, 'patterns', [key, lits, order]);
                     } else {
                         add(x.file, 'exact', [x.node.value, key]);
-                        // 作者的 translate() 会去掉结尾的一个句点
-                        if (/[^.]\.$/.test(x.node.value)) add(x.file, 'exact', [x.node.value.slice(0, -1), key]);
+                        // 作者的 translate() 每调用一次去掉结尾的一个句点（有时调用不止一次）
+                        dotVariants(x.node.value).forEach(v => add(x.file, 'exact', [v, key]));
                     }
                     PH.lastIndex = 0;
                 }
@@ -1460,7 +1475,12 @@
             return false;
         };
         // this.form / this.#form（私有字段）
-        const thisProp = (m) => m && m.type === 'MemberExpression' && !m.computed && m.property.type === 'PrivateIdentifier' ? '#' + m.property.name : propName(m);
+        // 按所在的类区分：两个类都有 #form，一个是原生表单、一个是作者的包装类
+        const classOf = (n) => { let c = n; while (c && c.type !== 'ClassBody') c = c.parent; return c ? c.start : -1; };
+        const thisProp = (m) => {
+            const nm = m && m.type === 'MemberExpression' && !m.computed && m.property.type === 'PrivateIdentifier' ? '#' + m.property.name : propName(m);
+            return nm ? classOf(m) + ':' + nm : null;
+        };
         const formThisProps = new Set();   // this.form = new ActionFormData()
         walk(ast, (n) => {
             if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && chainIsFormNew(n.init)) formVars.add(n.id.name);
@@ -1746,6 +1766,13 @@
                             }
                         });
                     }
+                }
+                // @minecraft/server 2.2.0 起 setLore 接受 RawMessage：按显示文字处理
+                if (name === 'setLore' && opts.rawLore && injectRuntime && n.callee.type === 'MemberExpression' && n.arguments[0] && !inDebug(n)) {
+                    const a = n.arguments[0];
+                    if (a.type === 'ArrayExpression') a.elements.forEach(el => el && el.type !== 'SpreadElement' && transformSinkExpr(el, 'lore'));
+                    else if (a.type !== 'Literal' && a.type !== 'SpreadElement') { usesRuntime = true; overrides.set(a, () => `${RT}.MA(${renderOrig(a)})`); }
+                    return;
                 }
                 // 无法翻译的显示位置：记录
                 if (name && Object.prototype.hasOwnProperty.call(UNTRANSLATABLE_CALLS, name)) {

@@ -722,6 +722,22 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('运行时：自动换行过的文字还原换行再匹配；"§r\\n" 分隔的多条逐条翻译', JSON.stringify(rt.M(wrapped)) === '{"rawtext":[{"translate":"k.bait"}]}'
             && JSON.stringify(rt.M(wrapped + '§r\nI am new here')) === '{"rawtext":[{"translate":"k.bait"},{"text":"§r\\n"},{"translate":"k.new"}]}');
     }
+    {
+        // RPG 第二轮：两个类都有 #form（一个原生、一个作者包装类）；setLore 在 2.2.0+ 可用 RawMessage；运行时排版 / 颜色 / 句点
+        const ui = 'import * as uiDef from "@minecraft/server-ui";\nclass Base { constructor() { this.#form = new uiDef.ActionFormData(); } #form\n  button(t) { this.#form.button("§r" + t); } }\nexport class ActionFormData { constructor() { this.#form = new Base(); } #form\n  button(t) { this.#form.button(t); return this; } }\nexport function lore(item, lines) { item.setLore(lines); item.setLore(["Sharp blade of the north"]); }\n';
+        const cx = new NS.ExtractContext({});
+        const o1 = NS.processScript(ui, 'scripts/ui.js', cx, { injectRuntime: true, runtimeKey: '__ADDON_I18N_r2', rawLore: true, collidingMethods: new Set(['button']) }).content;
+        const o2 = NS.processScript(ui, 'scripts/ui2.js', new NS.ExtractContext({}), { injectRuntime: true, runtimeKey: '__ADDON_I18N_r2b', collidingMethods: new Set(['button']) }).content;
+        check('同名私有字段 #form 按类区分：只有原生表单那个类的调用翻译；setLore 在 2.2.0+ 走 RawMessage，旧版本仍列入无法本地化',
+            /class Base[^]*this\.#form\.button\(\{"rawtext"|class Base[^]*this\.#form\.button\(__i18n/.test(o1) && /return this; \}/.test(o1) && /class ActionFormData[^}]*\{[^}]*\}[^]*button\(t\) \{ this\.#form\.button\(t\); return this;/.test(o1)
+            && /setLore\(__i18n\.MA\(lines\)\)/.test(o1) && /setLore\(\[\{"rawtext"/.test(o1) && !/setLore\(__i18n/.test(o2));
+        const rt = new Function(o1.slice(0, o1.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        rt.reg([['Guidebook To Magic', 'k.g'], ['§eMagic connector', 'k.c']], [['k.d', ['You will receive: ', ''], null]]);
+        const body = 'textures/ui/bar.png'.padEnd(100, '\t') + '0/14'.padEnd(100, '\t') + 'You will receive: Guidebook To Magic, §eMagic connector';
+        const r = JSON.stringify(rt.M(body));
+        check('运行时：制表符排版的正文只翻最后一段；列表里被分隔符吃掉的颜色码补回再找',
+            r.startsWith('{"rawtext":[{"text":"textures/ui/bar.png\\t') && /"translate":"k\.d"/.test(r) && /"translate":"k\.g"/.test(r) && /\{"text":", "\},\{"translate":"k\.c"\}/.test(r), r.slice(-300));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
