@@ -1035,6 +1035,7 @@
   // 把 ID 拼成英文名的函数（"minecraft:iron_sword" → "Iron Sword"）：记下这段文字对应的翻译键
   const ids = new Map(), ents = new Map();
   const H = (id, text) => {
+    if (id && typeof id === "object" && typeof id.typeId === "string") id = id.typeId;   // 传的是 ItemStack / 方块
     if (typeof id === "string" && typeof text === "string" && text) {
       const full = id.indexOf(":") >= 0 ? id : "minecraft:" + id;
       const k = ids.get(full) || ents.get(full);
@@ -1553,7 +1554,7 @@
             if (!/Function/.test(n.type) || !n.params.length || n.params[0].type !== 'Identifier') return;
             const body = src.slice(n.body.start, n.body.end);
             // 下划线 → 空格：split("_") 或 replace(/[._\-]+/g, " ") 这类；首字母大写：toUpperCase 或 .map(某个函数)
-            const underscore = /\.split\(\s*(?:"_"|'_'|\/_\/g?)\s*\)/.test(body) || /\.replace(?:All)?\(\s*\/[^/]*_[^/]*\/g?\s*,\s*(?:" "|' ')\s*\)/.test(body);
+            const underscore = /\.split\(\s*(?:"_"|'_'|\/[^/]*_[^/]*\/g?)\s*\)/.test(body) || /\.replace(?:All)?\(\s*\/[^/]*_[^/]*\/g?\s*,\s*(?:" "|' ')\s*\)/.test(body);
             const capital = /toUpperCase\(\)/.test(body) || /\.map\(\s*[A-Za-z_$][\w$]*\s*\)/.test(body);
             if (body.length > 600 || !underscore || !capital || !/\.join\(\s*(?:" "|' ')\s*\)/.test(body)) return;
             const pn = n.params[0].name;
