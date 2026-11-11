@@ -771,6 +771,18 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const me = NS.translateCommand('/me waves at @p warmly', cm, 'cmd.me', 'f', { sender: { text: 'Guide' } }).cmd;
         check('/me → tellraw，保留 “* 发送者 消息” 格式', me === '/tellraw @a {"rawtext":[{"text":"* "},{"text":"Guide"},{"text":" "},{"translate":"cmd.me","with":{"rawtext":[{"selector":"@p"}]}}]}' && [...cm.entries.values()][0].value === 'waves at %1$s warmly', me);
     }
+    {
+        // 基岩版重塑：名称里引用了别的键（%tile.x.name、%potion.wither），只把自己的文字换成 %新键
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        xm.files.set('BP/blocks/spikes.json', Buffer.from(JSON.stringify({ format_version: '1.21.90', 'minecraft:block': { description: { identifier: '5fs_br:spikes' }, components: { 'minecraft:display_name': '%tile.5fs_br.spikes.name\n§7§c%potion.wither II (0:05)§r\n§9Bedrock Reimagined' } } })));
+        xm.files.set('BP/blocks/only.json', Buffer.from(JSON.stringify({ format_version: '1.21.90', 'minecraft:block': { description: { identifier: '5fs_br:only' }, components: { 'minecraft:display_name': '%tile.5fs_br.only.name\n§7%potion.wither II' } } })));
+        const xr = await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
+        const dn = JSON.parse(xm.files.get('BP/blocks/spikes.json').toString())['minecraft:block'].components['minecraft:display_name'];
+        const d2 = JSON.parse(xm.files.get('BP/blocks/only.json').toString())['minecraft:block'].components['minecraft:display_name'];
+        const vals = [...xr.ctx.entries.values()].map(e => e.value);
+        check('名称里引用了别的 %键：引用原样保留，只把自己的文字换成 %新键；只有引用的不动',
+            dn === '%tile.5fs_br.spikes.name\n§7§c%potion.wither II (0:05)§r\n§9%tile.5fs_br:spikes.name.text' && vals.includes('Bedrock Reimagined') && !vals.some(v => /%tile|%potion/.test(v)) && d2 === '%tile.5fs_br.only.name\n§7%potion.wither II', JSON.stringify(dn));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

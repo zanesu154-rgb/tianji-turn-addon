@@ -36,6 +36,37 @@
         else return false;
         if (isEmptyText(text)) return false;
         if (ctx.isKey(text)) { ctx.ref(text.trim(), meta.file); return false; }
+        // 引用了别的键（"%tile.x.name\n§7%potion.wither II\n§9Bedrock Reimagined"）：游戏会解析里面的 %键，
+        // 整段换成一个新键反而让引用失效。只把其中自己的文字换成 %新键，引用原样保留
+        if (/(^|[^%])%[A-Za-z_][\w.:\-]*/.test(text)) {
+            const REF = /%[A-Za-z_][\w.:\-]*/g;
+            let out = '', last = 0, changed = false, n = 0;
+            // 按行处理：每行里自己的文字单独成一个键
+            const seg = (piece) => {
+                const lines = piece.split('\n');
+                let pos = last;
+                return lines.map((t, li) => {
+                    const start = pos;
+                    pos += t.length + 1;
+                    const m = /^((?:\u00a7.|\s)*)([\s\S]*?)((?:\u00a7.|\s)*)$/.exec(t);
+                    // 换成的 %新键 后面必须是空白 / 换行或结尾，游戏才能认出键名的边界
+                    const atEnd = start + t.length >= text.length || li < lines.length - 1;
+                    if (!m || !/\p{L}{3,}/u.test(m[2]) || !looksLikeText(m[2], 'loose') || (!atEnd && !/^\s/.test(m[3]))) return t;
+                    changed = true;
+                    return m[1] + '%' + ctx.alloc(n++ ? `${baseKey}.text${n}` : `${baseKey}.text`, m[2], meta) + m[3];
+                }).join('\n');
+            };
+            for (const mm of text.matchAll(REF)) {
+                ctx.ref(mm[0].slice(1), meta.file);
+                const piece = text.slice(last, mm.index);
+                out += seg(piece);
+                out += mm[0];
+                last = mm.index + mm[0].length;
+            }
+            out += seg(text.slice(last));
+            if (changed) set(out);
+            return changed;
+        }
         if (!looksLikeText(text, 'loose')) return false;
         if (/[\r\n]/.test(text)) ctx.warn(`${meta.file}: "${field}" 含换行，已写成 \\n`);
         set(ctx.alloc(baseKey, text, meta));
