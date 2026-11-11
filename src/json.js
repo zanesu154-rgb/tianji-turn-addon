@@ -569,6 +569,24 @@
             header[field] = key;
             changed = true;
         }
+        // 包设置（加载资源包页面的“设置”）：text 支持本包 texts 里的翻译键
+        if (Array.isArray(data.settings)) {
+            const toKey = (obj, key) => {
+                const v = obj && obj.text;
+                if (typeof v !== 'string' || isEmptyText(v) || ctx.isKey(v) || !looksLikeText(v, 'loose')) return;
+                ctx.setPackEntry(info.packRoot, key, v);
+                obj.text = key;
+                changed = true;
+            };
+            data.settings.forEach((st, i) => {
+                if (!st || typeof st !== 'object') return;
+                const id = NS.sanitizeKeyPart(String(st.name || '').replace(/^[^:]*:/, '') || String(i));
+                toKey(st, `pack.settings.${id}`);
+                if (Array.isArray(st.options)) st.options.forEach((o, j) => o && toKey(o, `pack.settings.${id}.${NS.sanitizeKeyPart(String(o.name || j))}`));
+            });
+        }
+        // 子包名称：游戏不支持翻译键 → 列入需人工处理
+        if (Array.isArray(data.subpacks)) data.subpacks.forEach(sp => sp && typeof sp.name === 'string' && ctx.report(file, `子包名称（${sp.folder_name || ''}）`, sp.name, '子包名称不支持翻译键，只能直接改成目标语言'));
         return changed;
     }
 

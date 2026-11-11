@@ -941,8 +941,12 @@
     }
     return els;
   };
+  // 资源包界面拿来比较的文字（标题等于 'Magic' 时用自定义界面）：保持原文
+  const kept = new Set();
+  const keep = (a) => { for (const x of a || []) kept.add(x); cache.clear(); };
   const lookup = (s) => {
     if (cache.has(s)) return cache.get(s);
+    if (kept.size && kept.has(s.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ""))) { cache.set(s, null); return null; }
     // 按固定宽度排版的表单正文（"textures/...png" + 制表符补齐 + 进度 + 制表符补齐 + 描述）：只翻译最后一段，前面的位置不动
     let r = null;
     const tab = s.lastIndexOf("\\t");
@@ -1033,7 +1037,7 @@
     for (const k in a || {}) ids.set(k, a[k]);
     for (const k in b || {}) ents.set(k, b[k]);
   };
-  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds });
+  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds, keep });
 })();
 `;
     }
@@ -1657,6 +1661,8 @@
         function transformSinkExpr(e, hint) {
             if (!e || e.type === 'SpreadElement') return;
             if (inDebug(e)) { skipDebug(e); return; }   // p.sendMessage(DEBUG ? "…" : "…") 的调试分支
+            // 资源包界面拿来比较的文字（form.title("Magic") 时显示自定义界面）：保持原文
+            if (opts.uiCompared && isStr(e) && opts.uiCompared.has(e.value.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) { handled.add(e); return; }
             if (isStr(e) || e.type === 'TemplateLiteral' || (e.type === 'BinaryExpression' && e.operator === '+')) {
                 const parts = isStr(e) ? [{ lit: e.value }] : flattenConcat(e);
                 if (parts) {
@@ -1968,6 +1974,7 @@
         };
 
         const registerExact = (text, fromSplit = false) => {
+            if (opts.uiCompared && opts.uiCompared.has(String(text).replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) return;
             if (opts.refSyntax && (DICT_REF.lastIndex = 0, DICT_REF.test(text))) { DICT_REF.lastIndex = 0; registerPattern([{ lit: text }]); return; }
             const lines = ctx.splitNewlines ? text.split(/\r?\n/) : [text];
             for (const line of lines) {
@@ -2192,6 +2199,7 @@
                 for (const [s, k] of exact) { if (!seen.has(s)) { seen.add(s); ex.push([s, k]); } }
                 prelude += `${RT}.reg(${JSON.stringify(ex)}, ${JSON.stringify(patterns)}${joinSeps.length ? ', ' + JSON.stringify(joinSeps) : ''});\n`;
             }
+            if (opts.uiCompared && opts.uiCompared.size) prelude += `${RT}.keep(${JSON.stringify([...opts.uiCompared])});\n`;
             if (humanizers) {
                 // ID → 翻译键：包里自定义的 + 原版
                 const own = {};
@@ -2234,8 +2242,10 @@
         const endMark = txt.indexOf('// ---- end i18n runtime ----', from);
         if (endMark < 0) return null;
         let to = txt.indexOf(`\n${rt}.reg(`, from);
-        const to2 = txt.indexOf(`\n${rt}.regIds(`, from);
-        if (to2 >= 0 && to2 < endMark && (to < 0 || to2 < to)) to = to2;
+        for (const fn of ['regIds', 'keep']) {
+            const to2 = txt.indexOf(`\n${rt}.${fn}(`, from);
+            if (to2 >= 0 && to2 < endMark && (to < 0 || to2 < to)) to = to2;
+        }
         to = to >= 0 && to < endMark ? to + 1 : endMark;
         const fresh = buildRuntime(rt, key);
         if (txt.slice(from, to) === fresh) return null;
