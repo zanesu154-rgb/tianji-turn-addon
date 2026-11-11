@@ -603,6 +603,14 @@
             log(`[存档] 自带包：新增翻译键 ${embedded.summary.newKeys} 条，无法本地化 ${embedded.ctx.untranslatable.length} 处（见翻译表 packs_untranslatable.csv）`);
         }
         const session = makeSession(records, ctx, opt, { levelName, rootDir, levelDatPath: levelDat, wrpOriginal, existingPack, packDir, embedded });
+        // 最低可用版本：level.dat 的 MinimumCompatibleClientVersion；存档自带包要求更高时一并说明
+        if (NS.MinVersion) {
+            const lr = records.find(r => r.kind === 'level');
+            const root = lr && lr.tags && lr.tags[0] && lr.tags[0].v;
+            const w = root ? NS.MinVersion.estimateWorld(root) : null;
+            session.minVersion = NS.MinVersion.mergeWorld(w, embedded && embedded.summary ? embedded.summary.minVersion : null);
+            if (session.minVersion) log(`[版本] 最低可用版本：${session.minVersion.label}${w ? `（level.dat MinimumCompatibleClientVersion ${w.label}${w.lastOpened ? `，上次用 ${w.lastOpened} 打开` : ''}）` : ''}`);
+        }
         session.build = async function (outFs, buildLog = log) { return buildWorld(this, outFs, dbFiles, db, buildLog); };
         return session;
     }
@@ -722,6 +730,7 @@
                 packs: [], processedFiles: records.filter(r => r.dirty).length, newKeys: ctx.entries.size, packKeys: 0, placeholders: 0,
                 untranslatable: ctx.untranslatable.length, warnings: ctx.warnings, missingRefs: [], sourceLang,
                 createdRP: packDir, restructured: false, inputGroups: 0, world: true, manualEdits: session.edits,
+                minVersion: session.minVersion || null,
             },
         };
     }
