@@ -28,7 +28,7 @@
     /**
      * 可编辑的值：字符串用多行文本框，数字用输入框；失焦或回车提交
      */
-    function valueEditor(session, ref, t, value, onChange) {
+    function valueEditor(session, ref, t, value, onChange, orig) {
         const isStr = t === T.STRING;
         const input = isStr
             ? el('textarea', { class: 'nbt-input', rows: Math.min(6, Math.max(1, String(value).split('\n').length)), spellcheck: 'false' })
@@ -36,6 +36,13 @@
         input.value = value;
         let committed = value;
         const msg = el('span', { class: 'nbt-msg' });
+        // 和原文不同（手动改过或导入翻译表写入的）：标记“已修改”
+        const tag = orig != null ? el('span', { class: 'nbt-tag-edited', text: L('e_modified') }) : null;
+        const mark = () => {
+            const on = orig != null ? committed !== orig : input.classList.contains('edited');
+            input.classList.toggle('edited', on);
+            if (tag) tag.hidden = !on;
+        };
         // 有长度限制的字段（成书页、书名）显示字数
         const limit = isStr && session.limitOf ? session.limitOf(ref) : null;
         const counter = limit ? el('span', { class: 'nbt-count' }) : null;
@@ -54,6 +61,7 @@
                 committed = session.setValue(ref, input.value);
                 input.value = committed;
                 input.classList.add('edited');
+                mark();
                 input.classList.remove('invalid');
                 msg.textContent = '';
                 onChange && onChange();
@@ -76,7 +84,8 @@
                 io.observe(input);
             }
         }
-        return el('div', { class: 'nbt-value' }, input, counter, msg);
+        mark();
+        return el('div', { class: 'nbt-value' }, input, tag, counter, msg);
     }
 
     function mount(container, session, { onChange, downloadCsv } = {}) {
@@ -191,7 +200,7 @@
                 list.append(el('div', { class: 'nbt-row' },
                     el('div', { class: 'nbt-loc' }, el('b', { text: u.where }), el('span', { text: ` · ${u.file}` })),
                     el('div', { class: 'nbt-orig', text: L('e_orig', u.text) }),
-                    valueEditor(session, u.ref, r.node.t, cur, changed),
+                    valueEditor(session, u.ref, r.node.t, cur, changed, u.text),
                 ));
             }
             if (!items.length) list.append(el('p', { class: 'nbt-empty', text: L('e_no_match') }));

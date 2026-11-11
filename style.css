@@ -1036,3 +1036,14 @@ body.mode-world .addon-only {
 .opt-bake[hidden] { display: none; }
 .opt-bake-file { font-size: 0.9em; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .opt-bake small { color: var(--muted, #888); }
+
+.nbt-tag-edited {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+.nbt-tag-edited[hidden] { display: none; }
