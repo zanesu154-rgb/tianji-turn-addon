@@ -1030,3 +1030,9 @@ body.mode-world .addon-only {
 .col-output {
     scroll-margin-top: 64px;
 }
+
+/* 固定写入简体中文（只在简体中文界面显示） */
+.opt-bake { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border: 1px dashed var(--border, #ccc); border-radius: 6px; }
+.opt-bake[hidden] { display: none; }
+.opt-bake-file { font-size: 0.9em; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.opt-bake small { color: var(--muted, #888); }

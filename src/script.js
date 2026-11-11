@@ -1047,7 +1047,45 @@
     for (const k in a || {}) ids.set(k, a[k]);
     for (const k in b || {}) ents.set(k, b[k]);
   };
-  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds, keep });
+  // 固定写入某种语言（名字标签等只认纯文字的位置）：按键查预先写入的译文，拼成纯文字
+  const baked = new Map();
+  const bake = (o) => { for (const k in o || {}) baked.set(k, o[k]); };
+  const render = (els) => {
+    let out = "";
+    for (const e of els || []) {
+      if (!e) continue;
+      if (typeof e.text === "string") { out += e.text; continue; }
+      if (Array.isArray(e.rawtext)) { const r = render(e.rawtext); if (r == null) return null; out += r; continue; }
+      if (typeof e.translate !== "string") return null;
+      const v = baked.get(e.translate);
+      if (v == null) return null;
+      const w = e.with && Array.isArray(e.with.rawtext) ? e.with.rawtext : (Array.isArray(e.with) ? e.with.map((x) => ({ text: String(x) })) : []);
+      const args = w.map((x) => render([x]));
+      if (args.some((a) => a == null)) return null;
+      let i = 0;
+      out += v.replace(/%(\\d+)\\$[sd]|%[sd]|%%/g, (m0, n) => m0 === "%%" ? "%" : n ? (args[n - 1] ?? "") : (args[i++] ?? ""));
+    }
+    return out;
+  };
+  const B = (s) => {
+    if (typeof s !== "string" || !baked.size) return s;
+    const r = lookup(s);
+    const t = r ? render(r.rawtext) : null;
+    if (t != null) return t;
+    // 整句对不上（"\\u00a7fIron Sword \\u00a76x64"）：按颜色码 / 换行切开，逐段换
+    let hit = false;
+    const out = s.split(/(\\u00a7.|\\n)/).map((seg) => {
+      if (!seg || /^(\\u00a7.|\\n)$/.test(seg)) return seg;
+      const m = /^(\\s*)([\\s\\S]*?)(\\s*)$/.exec(seg);
+      const x = m[2] ? lookup(m[2]) : null;
+      const y = x ? render(x.rawtext) : null;
+      if (y == null) return seg;
+      hit = true;
+      return m[1] + y + m[3];
+    }).join("");
+    return hit ? out : s;
+  };
+  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds, keep, bake, B });
 })();
 `;
     }
@@ -1549,7 +1587,7 @@
         // ---- 把 ID 拼成英文名的函数：(id) => id.split(":").pop().split("_").map(首字母大写).join(" ") ----
         // 文字在运行时才生成，没有可提取的原文；给返回值套上 H(id, 文字)，运行时按 ID 记下对应的翻译键
         // （原版用游戏自带键，包里自定义的物品 / 方块 / 实体用 item.<id>.name 等），之后显示时就能翻译
-        let humanizers = 0;
+        let humanizers = 0, bakeSites = 0;
         walk(ast, (n) => {
             if (!/Function/.test(n.type) || !n.params.length || n.params[0].type !== 'Identifier') return;
             const body = src.slice(n.body.start, n.body.end);
@@ -1805,6 +1843,14 @@
             if (n.type === 'AssignmentExpression' && n.left.type === 'MemberExpression' &&
                 UNTRANSLATABLE_ASSIGN.has(propName(n.left)) && isStr(n.right) && looksLikeText(n.right.value)) {
                 ctx.report(file, `.${propName(n.left)} =`, n.right.value, '名称标签只能是纯文本，不支持翻译键');
+            }
+            // 固定写入简体中文：名字标签赋值的是运行时拼出来的文字时，按译文换成纯文字
+            if (opts.bakeOf && injectRuntime && n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'MemberExpression' &&
+                UNTRANSLATABLE_ASSIGN.has(propName(n.left)) && !isStr(n.right) && !(n.right.type === 'Literal') && !inDebug(n)) {
+                const rt0 = n.right;
+                overrides.set(rt0, () => `${RT}.B(${renderOrig(rt0)})`);
+                usesRuntime = true;
+                bakeSites++;
             }
         });
 
@@ -2213,13 +2259,24 @@
                 prelude += `${RT}.reg(${JSON.stringify(ex)}, ${JSON.stringify(patterns)}${joinSeps.length ? ', ' + JSON.stringify(joinSeps) : ''});\n`;
             }
             if ((opts.uiCompared && opts.uiCompared.size) || (opts.uiPrefixes && opts.uiPrefixes.size)) prelude += `${RT}.keep(${JSON.stringify([...(opts.uiCompared || [])])}, ${JSON.stringify([...(opts.uiPrefixes || [])])});\n`;
+            const own = {};
             if (humanizers) {
                 // ID → 翻译键：包里自定义的 + 原版
-                const own = {};
                 if (opts.idKeys) for (const [id, k] of opts.idKeys()) own[id] = k;
                 const V = NS.VANILLA || { ids: {}, ents: {} };
                 prelude += `${RT}.regIds(${JSON.stringify(Object.assign({}, V.ids, own))}, ${JSON.stringify(V.ents)});\n`;
             }
+            if (opts.bakeOf && (bakeSites || hasRegistrations || humanizers)) {
+                // 这个文件登记的键（和拼英文名用到的键）的简体中文
+                const keys = new Set();
+                for (const [, k] of exact) keys.add(k);
+                for (const p of patterns) keys.add(p[0]);
+                if (humanizers) { const V = NS.VANILLA || { ids: {}, ents: {} }; for (const k of Object.values(V.ids)) keys.add(k); for (const k of Object.values(V.ents)) keys.add(k); for (const k of Object.values(own)) keys.add(k); }
+                const bk = {};
+                for (const k of keys) { const v = opts.bakeOf(k); if (v != null) bk[k] = v; }
+                if (Object.keys(bk).length) prelude += `${RT}.bake(${JSON.stringify(bk)});\n`;
+            }
+            if (bakeSites) ctx.warn(`${file}: ${bakeSites} 处名字标签按简体中文固定写入`);
         } else if (usesRuntime) {
             // 不注入运行时却用到了 → 不应发生，保险起见放弃改写
             ctx.warn(`${file}: 内部错误，未写入改动`);
@@ -2255,7 +2312,7 @@
         const endMark = txt.indexOf('// ---- end i18n runtime ----', from);
         if (endMark < 0) return null;
         let to = txt.indexOf(`\n${rt}.reg(`, from);
-        for (const fn of ['regIds', 'keep']) {
+        for (const fn of ['regIds', 'keep', 'bake']) {
             const to2 = txt.indexOf(`\n${rt}.${fn}(`, from);
             if (to2 >= 0 && to2 < endMark && (to < 0 || to2 < to)) to = to2;
         }

@@ -829,6 +829,19 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const r = JSON.stringify(rt.T('inspecting:§e§n§t' + gy('minecraft:allium')));
         check('拼英文名的函数（replace(/[._-]+/g," ") + map(WN)）也套 H；"inspecting:" 前缀保留、后面的名字翻译成游戏键', /__i18n\.H\(e,/.test(js) && /"text":"inspecting:"/.test(r) && /"translate":"tile\.red_flower\.allium\.name"/.test(r), r);
     }
+    {
+        // 固定写入简体中文：掉落物名字标签 = k5e(itemStack)（拼英文名）→ 运行时按 ID 找键，再用中文译文拼成纯文字
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        xm.files.set('BP/scripts/drop.js', Buffer.from('import { world } from "@minecraft/server";\nfunction k5e(e){let t=e.typeId.replace(/^[^:]+:/,"");return t.split(/[_ ]+/).map(i=>i.charAt(0).toUpperCase()+i.slice(1)).join(" ")}\nexport function label(ent, st, n) { ent.nameTag = `${k5e(st)} §6x${n}`; ent.nameTag = k5e(st); }\nexport function hi(p) { p.sendMessage("Your bag is now full"); }\n'));
+        const run = async (o) => { const m = new MemFS([...xm.files]); await NS.runPipeline(m, { baseName: 'fixture', ...o }, () => {}); return m.files.get('BP/scripts/drop.js').toString(); };
+        const off = await run({});
+        const on = await run({ bakeZh: true, bakeLang: new Map([['script.drop.sendmessage', '你的背包满了']]) });
+        check('固定写入简体中文：默认不改名字标签；开启后名字标签套 B()，写入用到的键的中文', !/__i18n\.B\(/.test(off) && /nameTag = __i18n\.B\(/.test(on) && /__i18n\.bake\(/.test(on) && /"item\.iron_sword\.name":"铁剑"/.test(on) && /"script\.drop\.sendmessage":"你的背包满了"/.test(on));
+        const rt = new Function(on.slice(0, on.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const k5e = new Function('__i18n', on.split('\n').find(l => l.startsWith('function k5e')) + '\nreturn k5e;')(rt);
+        const nm = k5e({ typeId: 'minecraft:iron_sword' });
+        check('  └ 运行时：拼出的 “Iron Sword” 写成 “铁剑”，“Iron Sword §6x3” 里的名字也换掉；没有译文的保持原文', rt.B(nm) === '铁剑' && rt.B(`${nm} §6x3`) === '铁剑 §6x3' && rt.B('Unknown Thing') === 'Unknown Thing', rt.B(`${nm} §6x3`));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

@@ -196,6 +196,9 @@ function readOptions() {
         listCommandBlockNames: $('opt-cbname').checked,
         includeHiddenItems: $('opt-hidden').checked,
         removeJunkLang: $('opt-junk').checked,
+        // 固定写入简体中文：只在简体中文界面提供
+        bakeZh: NS.UI.lang === 'zh_CN' && $('opt-bake').checked,
+        bakeLang: NS.UI.lang === 'zh_CN' && $('opt-bake').checked ? state.bakeLang || null : null,
         fillMissing: $('opt-fill').checked,
         placeholderNames: $('opt-placeholder').checked,
         scriptLangFields: $('opt-langfields').value,
@@ -527,7 +530,21 @@ dropZone.addEventListener('drop', async (e) => {
     for (const [code, name] of NS.UI.LANGS) sel.append(new Option(name, code));
     sel.value = NS.UI.lang;
     sel.addEventListener('change', () => NS.UI.set(sel.value));
+    const bakeWrap = $('bake-wrap');
+    const bakeFile = $('opt-bake-file');
+    if (bakeFile) bakeFile.addEventListener('change', async () => {
+        const f = bakeFile.files && bakeFile.files[0];
+        state.bakeLang = null;
+        if (f) {
+            try {
+                state.bakeLang = NS.parseLang(await f.text());
+                $('opt-bake-info').textContent = `已读取 ${state.bakeLang.size} 条译文`;
+                $('opt-bake').checked = true;
+            } catch (e) { $('opt-bake-info').textContent = `读取失败：${e.message}`; }
+        }
+    });
     const refresh = () => {
+        if (bakeWrap) bakeWrap.hidden = NS.UI.lang !== 'zh_CN';
         $('footer-by').innerHTML = escapeHtml(NS.UI.t('footer_by', '\u0000')).replace('\u0000', '<a href="https://github.com/zanesu154-rgb" target="_blank" rel="noopener">栈主</a>');
         setMode(mode);
         progressText.textContent = NS.UI.t(...progressKey);
