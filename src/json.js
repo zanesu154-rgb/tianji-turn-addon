@@ -527,10 +527,10 @@
             if (!node || typeof node !== 'object') return;
             for (const [k, v] of Object.entries(node)) {
                 if (typeof v === 'string') {
-                    // property_bag 里的 "#hover_text": "Upgrade Accessory Bag to Unlock"（悬停提示，标签会本地化）
+                    // property_bag 里的 "#hover_text": "Upgrade Accessory Bag to Unlock"：游戏的悬停提示标签不翻译它，
+                    // 写成键会把键名原样显示出来 → 保持原文，列进需人工翻译
                     if (/^#\w*(hover_text|tooltip|tooltip_text)$/.test(k) && okText(v)) {
-                        node[k] = ctx.alloc(`ui.${fileBase}.${ctrl}.hover`, v, { file, kind: 'ui', scope: 'ui' });
-                        changed = true;
+                        ctx.report(file, `${ctrl} ${k}`, v, '界面悬停提示只显示纯文字，不支持翻译键');
                         continue;
                     }
                     if (k === 'text' && okText(v)) {

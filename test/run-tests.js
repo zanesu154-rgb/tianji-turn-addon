@@ -818,10 +818,11 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
         xm.files.set('RP/ui/waila.json', Buffer.from(JSON.stringify({ namespace: 'waila', w: { type: 'label', text: '#t', bindings: [{ binding_type: 'view', source_property_name: "(#title_text - 'inspecting:')", target_property_name: '#t' }] }, lock: { 'hover@common.hover_text': { property_bag: { '#hover_text': 'Upgrade Accessory Bag to Unlock' } } } })));
         xm.files.set('BP/scripts/w.js', Buffer.from('import { world } from "@minecraft/server";\nfunction WN(w){return w.charAt(0).toUpperCase()+w.slice(1)}\nfunction gy(e){if(!e)return"";return String(e).replace(/^[^:]+:/,"").replace(/[._\\-]+/g," ").trim().split(/\\s+/).filter(Boolean).map(WN).join(" ")}\nexport function show(p, b) { p.runCommand(`titleraw @s title ${JSON.stringify({rawtext:[{text:"inspecting:§e§n§t" + gy(b) + "\\n§9§oMinecraft"}]})}`); }\n'));
-        await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
+        const xres = await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
         const js = xm.files.get('BP/scripts/w.js').toString();
         const ui = JSON.parse(xm.files.get('RP/ui/waila.json').toString());
-        check('界面悬停提示 property_bag 的 #hover_text 换成键', /^ui\./.test(ui.lock['hover@common.hover_text'].property_bag['#hover_text']));
+        check('界面悬停提示 #hover_text 保持原文、列进需人工翻译（游戏不翻译它，写键会显示键名）', ui.lock['hover@common.hover_text'].property_bag['#hover_text'] === 'Upgrade Accessory Bag to Unlock'
+            && xres.ctx.untranslatable.some(u => u.text === 'Upgrade Accessory Bag to Unlock'));
         const head = js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '');
         const rt = new Function(head + '\nreturn __i18n;')();
         const body = js.slice(js.indexOf('// ---- end i18n runtime ----'));
@@ -1239,6 +1240,28 @@ console.log(JSON.stringify(calls));`;
         const imp = res2.manualSession.importCsv(csv);
         const got = res2.manualSession.ctx.untranslatable.filter(x => x.ref && x.ref.startsWith('F|')).every(x => res2.manualSession.getText(x.ref) === 'C');
         check('导入翻译表：ref 序号对不上时按原文找回对应条目', got && imp.applied >= 4, JSON.stringify(imp));
+    }
+    {
+        // BR：任务奖励 arr.push({translate:`- ${名字} (${a}-${b})`})、自定义效果名 + 等级时间、界面比较的标题以 s 结尾
+        const ctx = new NS.ExtractContext({});
+        const src = 'import { world } from "@minecraft/server";\n'
+            + 'function $a(e){return kge(e?.replace(/\\w+:/,""))}function kge(e){return e?.replace(/[_.]/g," ")?.replace(/\\w\\S*/g,t=>t.charAt(0)?.toUpperCase()+t?.substr(1)?.toLowerCase())}\n'
+            + 'function R_(e){let a=e.split(":").pop();let i=a.replace(/[_-]+/g," ").trim();return i.split(/\\s+/g).map(r=>r.charAt(0).toUpperCase()+r.slice(1)).join(" ")}\n'
+            + 'var Sg="5fs_br:illumination";we.registerEffect(Sg,{});\n'
+            + 'const D={t:"Advancements"};\n'
+            + 'export function f(p,n,r,s,f){const e=[];e.push({translate:`§8- §8${R_(n)} §5(${r}-${s}) `});p.sendMessage({rawtext:e});f.title(D.t);p.setActionBar(`${$a(n)} ${r}`);}\n';
+        const out = NS.processScript(src, 'scripts/br.js', ctx, { injectRuntime: true, runtimeKey: '__br_q', uiCompared: new Set(['Advancements']), idKeys: () => [] }).content;
+        const head = out.slice(0, out.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '');
+        const rest = out.split('\n').filter(l => /^__i18n\.(reg|keep|regIds)\(/.test(l)).join('\n');
+        const rt = new Function(head + rest + '\nreturn __i18n;')();
+        rt.regIds({ 'minecraft:emerald': 'item.emerald.name' });
+        rt.reg([['Advancements', 'k.adv']], []);
+        check('push 进数组的 {translate:`- ${名字} (…)`} 换成文字 + 参数', !/translate:`/.test(out) && /e\.push\(\{"text":"§8- §8"\},__i18n\.T\(R_\(n\)\)/.test(out), out.slice(out.indexOf('export function f'), out.indexOf('export function f') + 200));
+        rt.H('minecraft:emerald', 'Emerald');
+        check('奖励里的原版物品名经 H 翻译', JSON.stringify(rt.T('Emerald')) === '{"rawtext":[{"translate":"item.emerald.name"}]}');
+        const ill = JSON.stringify(rt.M('Illumination III (0:44)'));
+        check('自定义效果名提取，"名字 + 等级 + 时间" 只翻译名字', [...ctx.entries.values()].some(e => e.value === 'Illumination') && /"translate":"script\.br\.effect\.illumination"\},\{"text":" III \(0:44\)"\}/.test(ill), ill);
+        check('界面拿来比较的标题以 s 结尾也保持原文（运行时正则转义）', rt.M('Advancements') === 'Advancements' && rt.M('§lAdvancements ') === '§lAdvancements ');
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
