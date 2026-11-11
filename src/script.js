@@ -938,14 +938,32 @@
     if (cache.has(s)) return cache.get(s);
     let r = one(s);
     if (!r && s.indexOf("\\n") >= 0) {
-      const els = []; let hit = false;
-      s.split("\\n").forEach((l, i) => {
-        if (i) els.push({ text: "\\n" });
-        if (!l) return;
-        const x = one(l);
-        if (x) { hit = true; els.push(...x); } else els.push({ text: l });
-      });
-      if (hit) r = els;
+      // 自动换行过的文字（作者按宽度把空格换成了换行）：换行还原成空格再找
+      const un = (t) => t.indexOf("\\n") >= 0 ? one(t.replace(/\\n/g, " ")) : null;
+      const lines = (t, els) => {
+        let hit = false;
+        t.split("\\n").forEach((l, i) => {
+          if (i) els.push({ text: "\\n" });
+          if (!l) return;
+          const x = one(l);
+          if (x) { hit = true; els.push(...x); } else els.push({ text: l });
+        });
+        return hit;
+      };
+      if (s.indexOf("\\u00a7r\\n") < 0) r = un(s);
+      if (!r) {
+        // 多条拼在一起的（动作栏 "§r\\n" 分隔）：逐条找，每条再试还原换行、逐行
+        const blocks = s.split("\\u00a7r\\n");
+        const els = []; let hit = false;
+        blocks.forEach((b, i) => {
+          if (i) els.push({ text: "\\u00a7r\\n" });
+          if (!b) return;
+          const x = blocks.length > 1 ? (one(b) || un(b)) : null;
+          if (x) { hit = true; els.push(...x); return; }
+          if (lines(b, els)) hit = true;
+        });
+        if (hit) r = els;
+      }
     }
     r = r ? { rawtext: r } : null;
     // 满了只丢最早的一批，不整个清空（每帧都变的字符串不会把常用文本挤掉）
@@ -1409,28 +1427,52 @@
         while (source.includes(RT)) RT += '_';
 
         // ---- 收集表单变量 / 表单类别名 ----
+        // 作者自己写的同名包装类（RPG 的 systems/ui.js 导出 ActionFormData，内部再拼字符串调原生表单）不算原生表单：
+        // 从本地文件导入的、文件里自己声明的同名类都排除，只认 @minecraft/server-ui
         const formClassNames = new Set(FORM_CLASSES);
         const formVars = new Set();
+        const localNs = new Set();      // import * as f from "./functions.js"
         walk(ast, (n) => {
-            if (n.type === 'ImportSpecifier' && n.imported && FORM_CLASSES.has(n.imported.name || n.imported.value)) {
-                formClassNames.add(n.local.name);
+            if (n.type === 'ImportDeclaration') {
+                const fromUi = n.source && n.source.value === '@minecraft/server-ui';
+                for (const sp of n.specifiers) {
+                    if (sp.type === 'ImportSpecifier') {
+                        const im = sp.imported && (sp.imported.name || sp.imported.value);
+                        if (!FORM_CLASSES.has(im)) continue;
+                        if (fromUi) formClassNames.add(sp.local.name);
+                        else formClassNames.delete(sp.local.name);
+                    } else if (sp.type === 'ImportNamespaceSpecifier' && !fromUi) localNs.add(sp.local.name);
+                }
             }
+            if ((n.type === 'ClassDeclaration' || n.type === 'ClassExpression') && n.id && FORM_CLASSES.has(n.id.name)) formClassNames.delete(n.id.name);
         });
         const isFormNew = (n) => n && n.type === 'NewExpression' &&
             ((n.callee.type === 'Identifier' && formClassNames.has(n.callee.name)) ||
-             (n.callee.type === 'MemberExpression' && FORM_CLASSES.has(propName(n.callee))));
+             (n.callee.type === 'MemberExpression' && FORM_CLASSES.has(propName(n.callee)) && !(n.callee.object.type === 'Identifier' && localNs.has(n.callee.object.name))));
+        // new ActionFormData().title(…) 这种链式调用的结果也是表单
+        const chainIsFormNew = (e) => {
+            for (let g = 0; g < 200 && e; g++) {
+                if (isFormNew(e)) return true;
+                if (e.type === 'CallExpression' && e.callee.type === 'MemberExpression') e = e.callee.object;
+                else if (e.type === 'ParenthesizedExpression') e = e.expression;
+                else return false;
+            }
+            return false;
+        };
+        // this.form / this.#form（私有字段）
+        const thisProp = (m) => m && m.type === 'MemberExpression' && !m.computed && m.property.type === 'PrivateIdentifier' ? '#' + m.property.name : propName(m);
         const formThisProps = new Set();   // this.form = new ActionFormData()
         walk(ast, (n) => {
-            if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && isFormNew(n.init)) formVars.add(n.id.name);
-            if (n.type === 'AssignmentExpression' && isFormNew(n.right)) {
+            if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && chainIsFormNew(n.init)) formVars.add(n.id.name);
+            if (n.type === 'AssignmentExpression' && chainIsFormNew(n.right)) {
                 if (n.left.type === 'Identifier') formVars.add(n.left.name);
-                else if (n.left.type === 'MemberExpression' && n.left.object.type === 'ThisExpression' && propName(n.left)) formThisProps.add(propName(n.left));
+                else if (n.left.type === 'MemberExpression' && n.left.object.type === 'ThisExpression' && thisProp(n.left)) formThisProps.add(thisProp(n.left));
             }
         });
         const rootIsForm = (expr) => {
             let e = expr;
             for (let g = 0; g < 200 && e; g++) {
-                if (e.type === 'MemberExpression' && e.object.type === 'ThisExpression' && formThisProps.has(propName(e))) return true;
+                if (e.type === 'MemberExpression' && e.object.type === 'ThisExpression' && formThisProps.has(thisProp(e))) return true;
                 if (e.type === 'CallExpression') e = e.callee;
                 else if (e.type === 'MemberExpression') e = e.object;
                 else if (e.type === 'ParenthesizedExpression') e = e.expression;
