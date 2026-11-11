@@ -703,6 +703,25 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
             && (out.match(/__i18n\.H\(/g) || []).length === 2 && /return __i18n\.H\(e,/.test(out));
         check('  └ 运行时升级时保留 regIds 登记', NS.upgradeRuntime(out.replace(', FUZZY_MAX = 600', '')).includes('__i18n.regIds('));
     }
+    {
+        // RPG：作者自己的 ActionFormData 包装类（本地导入），内部拼字符串再调原生表单 → 只在原生调用处翻译，避免 [object Object]
+        const ui = 'import * as uiDef from "@minecraft/server-ui";\nexport class ActionFormData {\n  constructor() { this.#form = new uiDef.ActionFormData(); }\n  #form\n  title(text) { this.#form.title("§r" + text + "§c§u§s§f§o§r§m"); return this; }\n  body(text) { this.#form.body(text); return this; }\n  button(text, icon) { this.#form.button("§p§a§s§s§r" + text, icon); return this; }\n}\n';
+        const use = 'import { ActionFormData } from "./ui.js";\nimport * as f from "./functions.js";\nexport function open(p) { const menu = new ActionFormData(); menu.title(f.translate("@quest.title", p)); menu.body("Choose the category you like"); menu.button("Back to the menu"); }\n';
+        const nat = 'import { ActionFormData } from "@minecraft/server-ui";\nexport function w(p) { const menu = new ActionFormData().title("Welcome to the addon"); menu.body("Thank you for downloading"); menu.button("Already played"); }\n';
+        const cw = new NS.ExtractContext({});
+        const oUi = NS.processScript(ui, 'scripts/ui.js', cw, { injectRuntime: true, collidingMethods: new Set(['title', 'body', 'button']) }).content;
+        const oUse = NS.processScript(use, 'scripts/use.js', cw, { injectRuntime: true, collidingMethods: new Set(['title', 'body', 'button']) }).content;
+        const oNat = NS.processScript(nat, 'scripts/nat.js', cw, { injectRuntime: true, runtimeKey: '__ADDON_I18N_wrap', collidingMethods: new Set(['title', 'body', 'button']) }).content;
+        check('作者的同名表单包装类：调用处不包 M（避免 [object Object]），包装类内部的原生 this.#form 调用照常翻译',
+            /this\.#form\.title\(\{"rawtext"|this\.#form\.title\(__i18n/.test(oUi) && /this\.#form\.body\(__i18n\.M/.test(oUi) && /this\.#form\.button\(\{"rawtext"|this\.#form\.button\(__i18n/.test(oUi)
+            && !/menu\.(title|body|button)\(__i18n/.test(oUse) && /menu\.body\(\{"rawtext"|menu\.body\(__i18n/.test(oNat) && /menu\.button\(\{"rawtext"|menu\.button\(__i18n/.test(oNat), oUse + '\n' + oNat);
+        // 运行时：作者按宽度自动换行、多条动作栏用 "§r\n" 拼在一起
+        const rt = new Function(oNat.slice(0, oNat.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        rt.reg([['To select bait, take it in your hand and click on a block. Then select the desired fishing rod', 'k.bait'], ['I am new here', 'k.new']], []);
+        const wrapped = 'To select bait, take it in your hand and click on a block. Then select the\ndesired fishing rod';
+        check('运行时：自动换行过的文字还原换行再匹配；"§r\\n" 分隔的多条逐条翻译', JSON.stringify(rt.M(wrapped)) === '{"rawtext":[{"translate":"k.bait"}]}'
+            && JSON.stringify(rt.M(wrapped + '§r\nI am new here')) === '{"rawtext":[{"translate":"k.bait"},{"text":"§r\\n"},{"translate":"k.new"}]}');
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
