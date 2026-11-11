@@ -107,6 +107,9 @@
 
 ## 常见问题
 
+**结果里的「最低可用版本」怎么算的？**
+附加包取三项中最高的：manifest 的 `min_engine_version`（作者自己填，常偏低，只作参考）、脚本 API `@minecraft/server` 版本对应的游戏版本（按官方对照表）、items / blocks / entities 等文件里最高的 `format_version`（游戏不加载比自身新的文件）。用了 `-beta` 测试版脚本 API 的，只能在对应的那一个版本开启「测试版 API」实验性玩法运行，会单独提示。世界存档直接读 `level.dat` 的 `MinimumCompatibleClientVersion`；存档自带的包要求更高时取更高的。
+
 **翻译完进游戏还是显示原文？**
 确认翻译写进了**资源包**的 `texts/` 下对应语言的文件（如 `zh_CN.lang`），并且资源包已启用。行为包里的 lang 只对包名、包描述生效。
 

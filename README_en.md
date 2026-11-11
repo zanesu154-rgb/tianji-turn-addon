@@ -107,6 +107,9 @@ Game limits: written books allow at most 256 characters and 14 lines per page, 5
 
 ## FAQ
 
+**How is the "minimum game version" in the results worked out?**
+For add-ons it is the highest of: the manifest `min_engine_version` (set by the author, often too low, for reference only); the game version that first shipped the `@minecraft/server` Script API version the pack depends on (from the official mapping); and the highest `format_version` among items / blocks / entities files (the game will not load files newer than itself). Packs that depend on a `-beta` Script API only run in that one game version with the Beta APIs experiment enabled, which is flagged separately. For worlds it reads `MinimumCompatibleClientVersion` from `level.dat`, raised if the packs inside the world need a newer version.
+
 **The game still shows the original text after translating.**
 Make sure the translations are in the matching file under the **resource pack's** `texts/` folder (e.g. `fr_FR.lang`) and the resource pack is enabled. Lang files in behavior packs only affect the pack name and description.
 

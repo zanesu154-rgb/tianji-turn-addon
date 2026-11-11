@@ -223,6 +223,11 @@ function renderSummary(res) {
         if (s.createdRP) html += `<p class="summary-note">${t('n_world_rp', `<code>${escapeHtml(s.createdRP)}</code>`)}</p>`;
         if (s.untranslatable) html += `<p class="summary-note">${t('n_untr_editor', s.untranslatable)}</p>`;
     } else if (s.createdRP) html += `<p class="summary-note">${t('n_created_rp', `<code>${escapeHtml(s.createdRP)}/</code>`)}</p>`;
+    if (s.minVersion) {
+        const mv = s.minVersion;
+        const why = mv.basis.map(b => t('mv_' + b.k, escapeHtml(b.v), escapeHtml(b.mod || ''), escapeHtml(b.file || ''))).join('；');
+        html += `<p class="summary-note">${t('n_minver', `<b>${escapeHtml(mv.label)}</b>`)}<br><small>${why}</small>${mv.beta ? `<br><small>⚠ ${t('mv_beta_warn', escapeHtml(mv.beta.mod), escapeHtml(mv.beta.label))}</small>` : ''}</p>`;
+    }
     if (s.placeholders) html += `<p class="summary-note">${t('n_placeholders', s.placeholders)}</p>`;
     if (s.inputGroups) html += `<p class="summary-note">${t('n_input', s.inputGroups)}</p>`;
     if (untr.length && !s.world) {

@@ -261,6 +261,27 @@ function renderCommand(cmd, lang) {
         await NS.runPipeline(m2, { baseName: 'fixture', removeJunkLang: false }, () => {});
         check('  └ 关闭选项后不删除', /pa:crab/.test(m2.files.get('RP/texts/en_US.lang').toString()));
     }
+    {
+        // 最低可用版本
+        const MV = NS.MinVersion;
+        check('最低版本：脚本 API 对照（稳定版 / 新编号 / 测试版）',
+            MV.label(MV.serverModuleGame('2.0.0').game) === '1.21.90' && MV.label(MV.serverModuleGame('2.6.0').game) === '26.10'
+            && MV.serverModuleGame('2.1.0-beta').beta && MV.label(MV.serverModuleGame('2.1.0-beta').game) === '1.21.90' && MV.serverModuleGame('2.30.0').newer);
+        const pm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const man = NS.parseJsonLenient(pm.files.get('BP/manifest.json').toString());
+        man.header.min_engine_version = [1, 20, 0];
+        man.dependencies = (man.dependencies || []).filter(d => d.module_name !== '@minecraft/server').concat([{ module_name: '@minecraft/server', version: '1.16.0' }]);
+        pm.files.set('BP/manifest.json', Buffer.from(JSON.stringify(man)));
+        pm.files.set('BP/items/newer.json', Buffer.from('{"format_version": "1.21.60", "minecraft:item": {"description": {"identifier": "t:newer"}, "components": {}}}'));
+        const pr = await NS.runPipeline(pm, { baseName: 'fixture' }, () => {});
+        const mv = pr.summary.minVersion;
+        check('最低版本：附加包取 min_engine_version / 脚本 API / format_version 中最高的', mv && mv.label === '1.21.60' && mv.basis.some(b => b.k === 'script' && b.v === '1.21.50') && mv.basis.some(b => b.k === 'engine'), JSON.stringify(mv));
+        const T = NS.NBT.T;
+        const lvl = [{ t: T.LIST, n: 'MinimumCompatibleClientVersion', v: { et: T.INT, items: [1, 21, 50, 0, 0] } }, { t: T.LIST, n: 'lastOpenedWithVersion', v: { et: T.INT, items: [1, 21, 80, 3, 0] } }];
+        const w = MV.estimateWorld(lvl);
+        const merged = MV.mergeWorld(w, { version: [1, 21, 90], label: '1.21.90', basis: [], beta: null });
+        check('最低版本：存档读 level.dat，自带包要求更高时取更高', w.label === '1.21.50' && w.lastOpened === '1.21.80' && merged.label === '1.21.90' && merged.basis.some(b => b.k === 'packs'));
+    }
     check('只有 %键名 引用的文本不提取（JSON UI 常见）', !NS.looksLikeText('§z(%deesse.caseSensitive)') && !NS.looksLikeText('<%menu.serverGenericName> %progressScreen.saving')
         && NS.looksLikeText('欢迎 %1$s') && NS.looksLikeText('Saving %menu.world now') && NS.looksLikeText('打开 %gui.done'));
     check('带重音字母的键名（déesse.extPacks.title）视为已有键', NS.isLikelyKey('déesse.extPacks.title') && NS.isLikelyKey('déesse.compability.gamepad.desc_1') && !NS.isLikelyKey('Déesse CORE (core)') && !NS.isLikelyKey('é.1'));
