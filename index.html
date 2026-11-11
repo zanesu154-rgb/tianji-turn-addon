@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>栈主的附加包汉化工具</title>
-    <link rel="stylesheet" href="style.css?v=2026.11.11-2">
+    <link rel="stylesheet" href="style.css?v=2026.11.11-3">
 </head>
 <body>
     <!-- 顶栏：标题 · 访问计数 · 界面语言 -->
@@ -103,6 +103,7 @@
                         <label class="opt-check addon-only"><input id="opt-placeholder" type="checkbox" checked> <span data-i18n="opt_placeholder">生成占位名</span></label>
                         <label class="opt-check"><input id="opt-cbname" type="checkbox"> <span data-i18n="opt_cbname">列出命令方块名称</span></label>
                         <label class="opt-check"><input id="opt-hidden" type="checkbox"> <span data-i18n="opt_hidden">提取创造物品栏里不显示的物品</span></label>
+                        <label class="opt-check"><input id="opt-junk" type="checkbox" checked> <span data-i18n="opt_junk">删除模板残留的无效语言条目</span></label>
                         <label class="opt-check"><input id="opt-split" type="checkbox"> <span data-i18n="opt_split">多行文本拆成多个键</span></label>
                     </div>
                 </details>
@@ -168,19 +169,20 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js"></script>
-    <script src="src/ui-i18n.js?v=2026.11.11-2"></script>
-    <script src="vendor/acorn.js?v=2026.11.11-2"></script>
-    <script src="src/util.js?v=2026.11.11-2"></script>
-    <script src="src/context.js?v=2026.11.11-2"></script>
-    <script src="src/commands.js?v=2026.11.11-2"></script>
-    <script src="src/json.js?v=2026.11.11-2"></script>
-    <script src="src/script.js?v=2026.11.11-2"></script>
-    <script src="src/pipeline.js?v=2026.11.11-2"></script>
-    <script src="src/world/nbt.js?v=2026.11.11-2"></script>
-    <script src="src/world/leveldb.js?v=2026.11.11-2"></script>
-    <script src="src/world/world.js?v=2026.11.11-2"></script>
-    <script src="src/world/editor.js?v=2026.11.11-2"></script>
-    <script src="app.js?v=2026.11.11-2"></script>
+    <script src="src/ui-i18n.js?v=2026.11.11-3"></script>
+    <script src="vendor/acorn.js?v=2026.11.11-3"></script>
+    <script src="src/util.js?v=2026.11.11-3"></script>
+    <script src="src/lang-blacklist.js?v=2026.11.11-3"></script>
+    <script src="src/context.js?v=2026.11.11-3"></script>
+    <script src="src/commands.js?v=2026.11.11-3"></script>
+    <script src="src/json.js?v=2026.11.11-3"></script>
+    <script src="src/script.js?v=2026.11.11-3"></script>
+    <script src="src/pipeline.js?v=2026.11.11-3"></script>
+    <script src="src/world/nbt.js?v=2026.11.11-3"></script>
+    <script src="src/world/leveldb.js?v=2026.11.11-3"></script>
+    <script src="src/world/world.js?v=2026.11.11-3"></script>
+    <script src="src/world/editor.js?v=2026.11.11-3"></script>
+    <script src="app.js?v=2026.11.11-3"></script>
     <!-- 访问计数（不蒜子，第三方服务；加载失败时不显示） -->
     <script async src="https://busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
 </body>

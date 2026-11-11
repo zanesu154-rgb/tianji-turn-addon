@@ -47,6 +47,8 @@ Extracts the player-visible text from Minecraft Bedrock **add-ons** and **worlds
 | Fill missing keys from other languages | Copies missing keys from another language so the game never shows raw key names |
 | Generate placeholder names | Generates English names from IDs for unnamed items / blocks / entities (skipped for items hidden from the creative inventory) |
 | List command block names | Map authors often name command blocks as notes, so these are not listed for manual translation by default |
+| Include items hidden from the creative inventory | Off by default: names of items / blocks hidden from the creative inventory (`menu_category` is `none`, etc.) and of spawn eggs that are not shown (`is_spawnable` not true) are not extracted or filled |
+| Remove leftover template lang entries | On by default: entries copied from a common template (spawn egg / entity names of other packs, etc.) whose key and value match the built-in blacklist and that the pack never uses are removed from every language |
 | Split multi-line text into separate keys | By default one paragraph is one key, with line breaks written as `\n` (confirmed to work in game) |
 
 ---

@@ -242,6 +242,25 @@ function renderCommand(cmd, lang) {
             !['Sin companero', 'No partner', 'EQUIPO 0/5', 'TEAM 0/5', 'FIND A WILD PAL', 'Parcela lista', 'Plot ready', 'Listo para luchar'].some(t => vals.includes(t))
             && vals.includes('Your team is full right now') && un.includes('No partner') && un.includes('Parcela lista'), JSON.stringify(vals.filter(v => /[A-Za-z]/.test(v)).slice(-12)));
     }
+    {
+        // 语言文件黑名单：模板残留条目删除；包里定义了实体 / 引用了键 / 值改过的保留
+        const mk = (extra) => {
+            const m = new MemFS(readDir(path.join(__dirname, 'fixture')));
+            const en = (m.files.get('RP/texts/en_US.lang') || '').toString();
+            m.files.set('RP/texts/en_US.lang', Buffer.from(en + '\nitem.spawn_egg.entity.pa:crab.name=Spawn Crab\nentity.animal:bear.name=Bear\naccessibility.disableTTS=Text To Speech disabled\nitem.spawn_egg.entity.pa:shark.name=Spawn Shark\nentity.animal:duck.name=Pato\naction.interact.sit = Sit\t#\naction.interact.rotar=Rotate\t#\n'));
+            m.files.set('RP/texts/zh_CN.lang', Buffer.from('item.spawn_egg.entity.pa:crab.name=生成螃蟹\nentity.animal:bear.name=熊\n'));
+            m.files.set('BP/entities/shark.json', Buffer.from(JSON.stringify({ format_version: '1.21.0', 'minecraft:entity': { description: { identifier: 'pa:shark', is_spawnable: true }, components: { 'minecraft:interact': { interactions: [{ interact_text: 'action.interact.sit' }] } } } })));
+            return m;
+        };
+        const m1 = mk();
+        await NS.runPipeline(m1, { baseName: 'fixture', targetLangs: ['en_US', 'zh_CN', 'ja_JP'] }, () => {});
+        const en1 = m1.files.get('RP/texts/en_US.lang').toString(), zh1 = m1.files.get('RP/texts/zh_CN.lang').toString(), ja1 = (m1.files.get('RP/texts/ja_JP.lang') || '').toString();
+        check('语言黑名单：模板残留条目从所有语言删除且不补全；定义了的实体、被引用的键、改过的值保留',
+            !/pa:crab|animal:bear|disableTTS|interact\.rotar/.test(en1 + zh1 + ja1) && /pa:shark\.name=Spawn Shark/.test(en1) && /animal:duck\.name=Pato/.test(en1) && /action\.interact\.sit/.test(en1), en1.slice(-300));
+        const m2 = mk();
+        await NS.runPipeline(m2, { baseName: 'fixture', removeJunkLang: false }, () => {});
+        check('  └ 关闭选项后不删除', /pa:crab/.test(m2.files.get('RP/texts/en_US.lang').toString()));
+    }
     check('只有 %键名 引用的文本不提取（JSON UI 常见）', !NS.looksLikeText('§z(%deesse.caseSensitive)') && !NS.looksLikeText('<%menu.serverGenericName> %progressScreen.saving')
         && NS.looksLikeText('欢迎 %1$s') && NS.looksLikeText('Saving %menu.world now') && NS.looksLikeText('打开 %gui.done'));
     check('带重音字母的键名（déesse.extPacks.title）视为已有键', NS.isLikelyKey('déesse.extPacks.title') && NS.isLikelyKey('déesse.compability.gamepad.desc_1') && !NS.isLikelyKey('Déesse CORE (core)') && !NS.isLikelyKey('é.1'));
