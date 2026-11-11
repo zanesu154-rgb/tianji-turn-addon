@@ -284,12 +284,41 @@
         }
 
         // 包里自定义的物品 / 方块 / 实体 ID → 名称翻译键（给“把 ID 拼成英文名”的脚本函数用）
+        // 名字键的值带了说明行（"Copper Pillar~LINEBREAK~~LINEBREAK~§9Bedrock Reimagined"，物品栏悬停时显示）：
+        // 脚本拼名字（准星方块名、掉落物名…）时只要第一行 → 另建一个只有名字的键，各语言取各自译文的第一行
+        const shortKeys = new Map();
+        const nameOnly = (k) => {
+            if (shortKeys.has(k)) return shortKeys.get(k);
+            let res = k, src = null, lp = null;
+            const per = new Map();
+            for (const [root, langs] of packLangs) for (const [lang, e] of langs) {
+                if (!e.map.has(k)) continue;
+                const v = e.map.get(k);
+                if (!per.has(lang)) per.set(lang, v);
+                if (!lp || lang === 'en_US') { lp = e.path; if (lang === 'en_US' || src == null) src = v; }
+            }
+            const multi = (v) => /~LINEBREAK~|\\n|\n/.test(v);
+            if (src != null && multi(src)) {
+                const first = (v) => NS.stripFormatting(String(v).split(/~LINEBREAK~|\\n|\n/)[0]).trim();
+                const name = first(src);
+                if (name) {
+                    res = `${k}.short`;
+                    if (!ctx.entries.has(res)) {
+                        ctx.entries.set(res, { value: name, file: lp, kind: 'name' });
+                        ctx.keyFiles.set(res, new Set([lp]));
+                        for (const [lang, v] of per) { const f = first(v); if (f) ctx.addTranslation(res, lang, f); }
+                    }
+                }
+            }
+            shortKeys.set(k, res);
+            return res;
+        };
         const idKeys = () => {
             const out = new Map();
             const has = (k) => knownKeys.has(k) || ctx.entries.has(k);
-            for (const it of info.defs.items) { const k = [`item.${it.id}.name`, `item.${it.id}`].find(has); if (k) out.set(it.id, k); }
-            for (const b of info.defs.blocks) if (has(`tile.${b.id}.name`)) out.set(b.id, `tile.${b.id}.name`);
-            for (const e of info.defs.entities) if (!out.has(e.id) && has(`entity.${e.id}.name`)) out.set(e.id, `entity.${e.id}.name`);
+            for (const it of info.defs.items) { const k = [`item.${it.id}.name`, `item.${it.id}`].find(has); if (k) out.set(it.id, nameOnly(k)); }
+            for (const b of info.defs.blocks) if (has(`tile.${b.id}.name`)) out.set(b.id, nameOnly(`tile.${b.id}.name`));
+            for (const e of info.defs.entities) if (!out.has(e.id) && has(`entity.${e.id}.name`)) out.set(e.id, nameOnly(`entity.${e.id}.name`));
             return out;
         };
 
