@@ -246,12 +246,19 @@ function renderSummary(res) {
     summaryEl.hidden = false;
 }
 
+/** 包版本号与最低可用版本：放在日志最后 */
+function logVersions(s) {
+    if (!NS.MinVersion || !s) return;
+    for (const line of NS.MinVersion.describe(s.minVersion, s.packVersions)) log(line, /⚠/.test(line) ? 'warn' : 'info');
+}
+
 function worldSummary(session) {
     const lang = session.opt.sourceLang === 'auto' ? NS.detectSourceLang([...session.ctx.entries.values()].map(e => e.value)) : session.opt.sourceLang;
     return {
         world: true, newKeys: session.ctx.entries.size, processedFiles: session.records.filter(r => r.dirty).length,
         untranslatable: session.ctx.untranslatable.length, sourceLang: lang, warnings: session.ctx.warnings, missingRefs: [],
         createdRP: session.ctx.entries.size ? 'resource_packs/world_texts/' : null, packs: [], inputGroups: 0,
+        minVersion: session.minVersion || null, packVersions: session.packVersions || [],
     };
 }
 
@@ -377,6 +384,7 @@ async function processFile(file) {
                 downloadCsv: (text, name) => downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${state.originalName}_${name || 'untranslatable'}.csv`),
             });
             setProgress(100, 'done_edit');
+            logVersions(worldSummary(session));
             log(`✅ 分析完成：自动转换 ${session.ctx.entries.size} 条，需人工处理 ${session.ctx.untranslatable.length} 处`);
             downloadLogBtn.disabled = downloadResultBtn.disabled = downloadWorkbookBtn.disabled = false;
             return;
@@ -407,6 +415,7 @@ async function processFile(file) {
         const outExt = ext === 'mcpack' && !multiPack ? 'mcpack' : 'mcaddon';
         state.resultName = `${state.originalName}_i18n.${outExt}`;
 
+        logVersions(s);
         // 翻译表：CSV（Excel 可直接打开）+ 源语言 lang + 报告
         const wb = new JSZip();
         for (const [name, content] of Object.entries(res.workbook)) wb.file(name, content);
@@ -505,6 +514,13 @@ dropZone.addEventListener('drop', async (e) => {
 // ================================================================
 //  界面语言 · 访问计数
 // ================================================================
+
+// 底部版本号：取 app.js 的 ?v=，和发布版本保持一致（不用再手动改）
+(function initAppVersion() {
+    const sc = document.querySelector('script[src*="app.js?v="]');
+    const m = sc && /[?&]v=([^&]+)/.exec(sc.getAttribute('src'));
+    if (m && $('app-version')) $('app-version').textContent = 'v' + m[1];
+})();
 
 (function initUiLang() {
     const sel = $('ui-lang');

@@ -97,7 +97,8 @@
         const relOf = (p, pk) => pk.root === '' ? p : p.slice(pk.root.length + 1);
         for (const pk of packs) log(`[包] ${pk.root || '(根目录)'} → ${pk.type}  ${pk.manifest.header.name || ''}`);
 
-        // ---- 最低可用版本 ----
+        // ---- 包自身的版本号 / 最低可用版本（在日志最后输出，见 app.js） ----
+        const packVersions = packs.map(pk => ({ root: pk.root, type: pk.type, name: String(pk.manifest.header.name || ''), version: Array.isArray(pk.manifest.header.version) ? pk.manifest.header.version.join('.') : String(pk.manifest.header.version || '') }));
         let minVersion = null;
         if (NS.MinVersion) {
             const formats = [];
@@ -110,11 +111,6 @@
                 } catch (e) { /* 读不了的文件跳过 */ }
             }
             minVersion = NS.MinVersion.estimateAddon({ manifests: packs.map(pk => ({ path: pk.manifestPath, manifest: pk.manifest })), formats });
-            if (minVersion) {
-                const why = minVersion.basis.map(b => b.k === 'engine' ? `min_engine_version ${b.v}` : b.k === 'format' ? `format_version 最高 ${b.v}（${b.file}）` : b.k === 'beta' ? `测试版 API ${b.mod} → 仅 ${b.v}` : `${b.mod} → ${b.v}${b.k === 'newer' ? ' 以上' : ''}`).join('；');
-                log(`[版本] 最低可用版本：${minVersion.label}（${why}）`);
-                if (minVersion.beta) log(`[版本] 使用了测试版脚本 API ${minVersion.beta.mod}：只能在 ${minVersion.beta.label} 开启“测试版 API”实验性玩法后运行`, 'warn');
-            }
         }
 
         // ---------------- 2. 读取已有 lang ----------------
@@ -654,6 +650,7 @@
             createdRPs: createdRPs.map(p => ({ root: p.root, uuid: p.manifest.header.uuid })),
             restructured,
             minVersion,
+            packVersions,
         };
         return {
             ctx, summary, structureSession, manualSession,

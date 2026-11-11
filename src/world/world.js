@@ -609,7 +609,7 @@
             const root = lr && lr.tags && lr.tags[0] && lr.tags[0].v;
             const w = root ? NS.MinVersion.estimateWorld(root) : null;
             session.minVersion = NS.MinVersion.mergeWorld(w, embedded && embedded.summary ? embedded.summary.minVersion : null);
-            if (session.minVersion) log(`[版本] 最低可用版本：${session.minVersion.label}${w ? `（level.dat MinimumCompatibleClientVersion ${w.label}${w.lastOpened ? `，上次用 ${w.lastOpened} 打开` : ''}）` : ''}`);
+            session.packVersions = embedded && embedded.summary ? embedded.summary.packVersions || [] : [];
         }
         session.build = async function (outFs, buildLog = log) { return buildWorld(this, outFs, dbFiles, db, buildLog); };
         return session;
@@ -730,7 +730,7 @@
                 packs: [], processedFiles: records.filter(r => r.dirty).length, newKeys: ctx.entries.size, packKeys: 0, placeholders: 0,
                 untranslatable: ctx.untranslatable.length, warnings: ctx.warnings, missingRefs: [], sourceLang,
                 createdRP: packDir, restructured: false, inputGroups: 0, world: true, manualEdits: session.edits,
-                minVersion: session.minVersion || null,
+                minVersion: session.minVersion || null, packVersions: session.packVersions || [],
             },
         };
     }
