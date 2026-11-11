@@ -131,7 +131,12 @@
             const f = fileIn.files[0];
             if (!f) return;
             try {
-                const r = session.importCsv(await f.text());
+                // Excel 默认存成 GBK（“CSV（逗号分隔）”）：不是合法 UTF-8 时按 GB18030 读
+                const buf = await f.arrayBuffer();
+                let text;
+                try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+                catch (e) { text = new TextDecoder('gb18030').decode(buf); }
+                const r = session.importCsv(text);
                 importMsg.textContent = L('e_imported', r.applied, r.skipped);
                 renderManual();
                 if (q.value.trim()) doSearch();
