@@ -630,15 +630,15 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         // RPG：content/langs/en.js / ru.js 各导出一个字典，同路径共用键；%1$s 句式
         const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
         const dict = (o) => Buffer.from('export { Dictionary };\nconst Dictionary = ' + JSON.stringify(o, null, 2) + ';\n');
-        xm.files.set('BP/scripts/langs/en.js', dict({ items: { apple: 'Apple', axo: 'Adult %1$s Axolotl', blue: 'Blue', bread: 'Bread', bow: 'Bow' }, ui: { open: 'Open the menu' } }));
-        xm.files.set('BP/scripts/langs/ru.js', dict({ items: { apple: 'Яблоко', axo: '%1$s взрослого аксолотля', blue: 'Синий', bread: 'Хлеб', bow: 'Лук' }, ui: { open: 'Открыть меню' } }));
-        xm.files.set('BP/scripts/langs/uk.js', dict({ items: { apple: 'Яблуко', axo: 'Доросла %1$s аксолотль', blue: 'Синя', bread: 'Хліб', bow: 'Лук' }, ui: { open: 'Відкрити меню' } }));
+        xm.files.set('BP/scripts/langs/en.js', dict({ goods: { apple: 'Apple', axo: 'Adult %1$s Axolotl', blue: 'Blue', bread: 'Bread', bow: 'Bow' }, ui: { open: 'Open the menu' } }));
+        xm.files.set('BP/scripts/langs/ru.js', dict({ goods: { apple: 'Яблоко', axo: '%1$s взрослого аксолотля', blue: 'Синий', bread: 'Хлеб', bow: 'Лук' }, ui: { open: 'Открыть меню' } }));
+        xm.files.set('BP/scripts/langs/uk.js', dict({ goods: { apple: 'Яблуко', axo: 'Доросла %1$s аксолотль', blue: 'Синя', bread: 'Хліб', bow: 'Лук' }, ui: { open: 'Відкрити меню' } }));
         const xr = await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
         const en = NS.parseLang(xm.files.get('RP/texts/en_US.lang').toString());
         const ru = NS.parseLang(xm.files.get('RP/texts/ru_RU.lang').toString());
         const uk = xm.files.get('RP/texts/uk_UA.lang') && NS.parseLang(xm.files.get('RP/texts/uk_UA.lang').toString());
-        const k = [...en.keys()].find(x => /langs\.items\.apple$/.test(x));
-        const ka = [...en.keys()].find(x => /langs\.items\.axo$/.test(x));
+        const k = [...en.keys()].find(x => /langs\.goods\.apple$/.test(x));
+        const ka = [...en.keys()].find(x => /langs\.goods\.axo$/.test(x));
         check('按语言分文件的字典（langs/en.js、ru.js、uk.js）：同路径共用一个键，各语言写进各自 lang', k && en.get(k) === 'Apple' && ru.get(k) === 'Яблоко' && uk && uk.get(k) === 'Яблуко' && en.get(ka) === 'Adult %1$s Axolotl' && ru.get(ka) === '%1$s взрослого аксолотля'
             && ![...xr.ctx.entries.values()].some(e => /[\u0400-\u04ff]/.test(e.value)));
     }
@@ -671,6 +671,37 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const en = NS.parseLang(xm.files.get('RP/texts/en_US.lang').toString());
         check('字典条目与资源包 lang 已有键（同路径 / entity.<id>.name / tile.<id>.name）同内容时沿用，不新建重复键',
             !ks.some(k => /achievements\.wood|sert:bear|sert:press/.test(k)) && ks.some(k => /langs\.ui\.open$/.test(k)) && ![...en.keys()].some(k => /^script\..*(achievements\.wood|sert:bear|sert:press)/.test(k)), JSON.stringify(ks));
+    }
+    {
+        // 原版物品 / 生物名：改用游戏自带的翻译键（英文一致才用）
+        const V = NS.vanillaKeyFor;
+        check('原版名称对照：ID / 旧式写法 → 游戏自带键，英文不一致不替换',
+            V('minecraft:iron_sword', 'item', 'Iron Sword') === 'item.iron_sword.name' && V('appleEnchanted', 'item', 'Enchanted Golden Apple') === 'item.appleEnchanted.name'
+            && V('minecraft:zombie', 'entity', 'Zombie') === 'entity.zombie.name' && V('minecraft:iron_sword', 'item', 'Super Sword') === null && V('sert:press', 'item', 'Press') === null);
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const dict = (o) => Buffer.from('export { Dictionary };\nconst Dictionary = ' + JSON.stringify(o, null, 2) + ';\n');
+        xm.files.set('BP/scripts/langs/en.js', dict({ items: { 'minecraft:apple': 'Apple', 'minecraft:iron_sword': 'Old Blade' }, mobs: { 'minecraft:zombie': 'Zombie' }, ui: { open: 'Open the menu', close: 'Close the menu', back: 'Go back' } }));
+        xm.files.set('BP/scripts/langs/ru.js', dict({ items: { 'minecraft:apple': 'Яблоко', 'minecraft:iron_sword': 'Старый клинок' }, mobs: { 'minecraft:zombie': 'Зомби' }, ui: { open: 'Открыть меню', close: 'Закрыть меню', back: 'Назад' } }));
+        const xr = await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
+        const ks = [...xr.ctx.entries.keys()];
+        const reg = [...xm.files.entries()].filter(([p2]) => /langs\/en\.js$/.test(p2)).map(([, b]) => b.toString()).join('');
+        check('  └ 字典里的原版名称不新建键，运行时映射到 item.apple.name / entity.zombie.name；改过名的照常提取',
+            !ks.some(k => /minecraft:(apple|zombie)/.test(k)) && ks.some(k => /minecraft:iron_sword/.test(k)) && /"item\.apple\.name"/.test(reg) && /"entity\.zombie\.name"/.test(reg));
+    }
+    {
+        // Bedrock Reimagined：om(id) 把 ID 拼成英文名（"minecraft:iron_sword" → "Iron Sword"），运行时按 ID 映射翻译键
+        const src = 'import { world } from "@minecraft/server";\nfunction om(e){return(e.split(":").pop()??e).split("_").filter(Boolean).map(a=>a.charAt(0).toUpperCase()+a.slice(1)).join(" ")}\nconst nm = (id) => id.replace("x:", "").split("_").map(w => w[0].toUpperCase() + w.slice(1)).join(" ");\nexport function f(p, id) { p.sendMessage(`Added ${om(id)} to the filter.`); p.sendMessage(nm(id)); }\n';
+        const ch = new NS.ExtractContext({});
+        const out = NS.processScript(src, 'scripts/h.js', ch, { injectRuntime: true, runtimeKey: '__ADDON_I18N_h', idKeys: () => new Map([['x:ruby_gem', 'item.x:ruby_gem.name']]) }).content;
+        const rt = new Function(out.slice(0, out.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const body = out.slice(out.indexOf('// ---- end i18n runtime ----'));
+        const nameOf = new Function('__i18n', body.split('\n').find(l => l.startsWith('function om')) + '\nreturn om;')(rt);
+        const n1 = nameOf('minecraft:iron_sword');
+        rt.H('x:ruby_gem', 'Ruby Gem');
+        check('把 ID 拼成英文名的函数：返回值套 H(id, …)，运行时原版 ID → 游戏自带键、自定义 ID → 包里的键',
+            n1 === 'Iron Sword' && JSON.stringify(rt.M('Iron Sword')) === '{"rawtext":[{"translate":"item.iron_sword.name"}]}' && /"translate":"item\.x:ruby_gem\.name"/.test(JSON.stringify(rt.M('Ruby Gem')))
+            && (out.match(/__i18n\.H\(/g) || []).length === 2 && /return __i18n\.H\(e,/.test(out));
+        check('  └ 运行时升级时保留 regIds 登记', NS.upgradeRuntime(out.replace(', FUZZY_MAX = 600', '')).includes('__i18n.regIds('));
     }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
