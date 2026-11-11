@@ -1213,12 +1213,14 @@ console.log(JSON.stringify(calls));`;
         await NS.runPipeline(m1, { baseName: 'fixture' }, () => {});
         const en1 = NS.parseLang(m1.files.get('RP/texts/en_US.lang').toString());
         const tr = m1.files.get('RP/texts/en_US.lang').toString().replace(/^([^#\s=][^=\n]*)=.*$/mg, (l, k) => `${k}=EN:${k}`);
-        const o = readDir(fx); o.set('RP/texts/en_US.lang', Buffer.from(tr));
+        const o = readDir(fx); o.set('RP/texts/en_US.lang', Buffer.from(tr + '\nscript.main.str_999=EN:old line that was removed\n'));
         const m2 = new MemFS(o);
         await NS.runPipeline(m2, { baseName: 'fixture' }, () => {});
         const en2 = NS.parseLang(m2.files.get('RP/texts/en_US.lang').toString());
         const lost = [...en2.keys()].filter(k => !String(en2.get(k)).startsWith('EN:'));
         check('再次转换：沿用放回的译文 lang，键名一致、不新建重复键', en2.size === en1.size && lost.length === 0, JSON.stringify({ n1: en1.size, n2: en2.size, lost: lost.slice(0, 5) }));
+        const zh2 = NS.parseLang(m2.files.get('RP/texts/zh_CN.lang').toString());
+        check('再次转换：放回的 lang 里已用不到的旧键被删除', !en2.has('script.main.str_999') && !zh2.has('script.main.str_999'));
     }
     {
         // 需人工翻译：下载后再改、改回原文都能写回；表格序号对不上时按原文找回

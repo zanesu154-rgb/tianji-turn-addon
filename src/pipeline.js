@@ -567,6 +567,43 @@
             if (total) log(`[lang] 发现 ${total} 条模板残留的无效条目（别的包的刷怪蛋 / 实体名等），将从各语言文件中删除`, 'warn');
         }
 
+        // ---- 上次转换生成、这次已经用不到的键（放回的译文 lang 里多出来的）：从各语言里删除 ----
+        // 只看本工具生成的键（上次写在标记行之后的，或 script. 开头的）；改写后的文件里都找不到这个键名才删
+        {
+            const cand = new Set();
+            for (const langs of packLangs.values()) for (const e of langs.values()) for (const k of e.map.keys()) {
+                if (!(prevKeys.has(k) || /^script\./.test(k))) continue;
+                if (ctx.entries.has(k) || ctx.claimed.has(k) || ctx.referenced.has(k)) continue;
+                if (/^(item|tile|entity|action|pack|potion|enchantment|effect|biome|container|commands|death|chat|gui|options|menu|key|block|accessibility|tooltip|record|structure_block|hbui|xbox|selectWorld|createWorld)\./.test(k)) continue;
+                cand.add(k);
+            }
+            if (cand.size) {
+                const used = new Set();
+                const scan = (t) => { const re = /[A-Za-z0-9_:.\-]{3,}/g; let m; while ((m = re.exec(t))) if (cand.has(m[0])) used.add(m[0]); };
+                for (const f of allFiles) {
+                    if (/\.lang$/i.test(f)) continue;
+                    try {
+                        if (pending.has(f)) scan(String(pending.get(f)));
+                        else if (/\.(json|js|mjs|mcfunction|material|txt)$/i.test(f)) scan(await fs.readText(f));
+                        else if (/\.(mcstructure|nbt)$/i.test(f) && fs.readBytes) { const b = await fs.readBytes(f); let t = ''; for (let i = 0; i < b.length; i += 65536) t += String.fromCharCode.apply(null, b.subarray(i, i + 65536)); scan(t); }
+                    } catch (e) { /* 读不了的文件跳过 */ }
+                }
+                for (const [f, c] of pending) if (!/\.lang$/i.test(f) && !allFiles.includes(f)) scan(String(c));
+                let n = 0;
+                for (const pk of packs) {
+                    const langs = packLangs.get(pk.root);
+                    if (!langs) continue;
+                    let junk = junkByPack.get(pk.root);
+                    for (const e of langs.values()) for (const k of e.map.keys()) {
+                        if (!cand.has(k) || used.has(k)) continue;
+                        if (!junk) { junk = new Set(); junkByPack.set(pk.root, junk); }
+                        if (!junk.has(k)) { junk.add(k); n++; }
+                    }
+                }
+                if (n) log(`[lang] ${n} 个上次转换生成的键这次已经用不到（附加包更新后删掉或改了文字），将从各语言文件中删除`, 'warn');
+            }
+        }
+
         const existingUntranslated = new Map();   // 键 → { value, file, langs }
         const writeLangs = (pk, entries, isRP) => {
             const junk = junkByPack.get(pk.root) || new Set();
