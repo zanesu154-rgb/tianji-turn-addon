@@ -260,7 +260,7 @@
     function partsToValue(parts) {
         const hasExpr = parts.some(p => !('lit' in p));
         let n = 0;
-        return parts.map(p => ('lit' in p) ? (hasExpr ? p.lit.replace(/%/g, '%%') : p.lit) : `%${++n}$s`).join('');
+        return parts.map(p => ('lit' in p) ? (hasExpr ? NS.pctArgs(p.lit) : NS.pctPlain(p.lit)) : `%${++n}$s`).join('');
     }
 
     function templateEscape(s) {
@@ -1246,7 +1246,7 @@
                 for (const t of toks) {
                     const lit = v.slice(last, t.a);
                     lits[lits.length - 1] += lit;
-                    out += lit.replace(/%/g, '%%');
+                    out += NS.pctArgs(lit);
                     let n = numOf(t.tok);
                     if (!n) { lits[lits.length - 1] += v.slice(t.a, t.b); out += v.slice(t.a, t.b); last = t.b; continue; }
                     order.push(n);
@@ -1255,7 +1255,7 @@
                     last = t.b;
                 }
                 lits[lits.length - 1] += v.slice(last);
-                out += v.slice(last).replace(/%/g, '%%');
+                out += NS.pctArgs(v.slice(last));
                 return { lits, order, value: out };
             };
             let groups = 0, reused = 0, vanilla = 0;
@@ -1838,7 +1838,7 @@
         };
         for (const nd of tables.ignoredNodes || []) handled.add(nd);
         // 句式规则：英文句式与译文句式共用一个键，运行时两种原文都能匹配
-        const toValue = (parts) => parts.map(x => x.lit != null ? x.lit.replace(/%/g, '%%') : `%${x.g}$s`).join('');
+        const toValue = (parts) => parts.map(x => x.lit != null ? NS.pctArgs(x.lit) : `%${x.g}$s`).join('');
         const toLits = (parts) => {
             const lits = [''], order = [];
             for (const x of parts) { if (x.lit != null) lits[lits.length - 1] += x.lit; else { order.push(x.g); lits.push(''); } }

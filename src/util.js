@@ -190,6 +190,15 @@
         return out.replace(/\u0000/g, '%%');
     }
 
+    /**
+     * 百分号：游戏的 lang 值带参数（%1$s）时按格式字符串解析，字面的 % 要写成 %%；不带参数时原样显示。
+     * 脚本作者为了让界面显示一个 %，常在字符串里写 %%（已经转义过）。
+     *  - pctArgs：带参数的值。单个 % → %%，已有的 %% 保持（之前会变成 %%%%，游戏里显示成 %%）
+     *  - pctPlain：不带参数的值。%% → %（后面跟 s / d / 数字 / . 的保留，免得被当成占位符）
+     */
+    function pctArgs(s) { return s.replace(/%%|%/g, '%%'); }
+    function pctPlain(s) { return s.replace(/%%(?![sd0-9.$])/g, '%'); }
+
     function toLangValue(text) {
         return String(text)
             .replace(/\r\n?/g, '\n')
@@ -261,7 +270,7 @@
         stripFormatting, hasCJK, hasLetters, isEmptyText, isLikelyKey,
         looksLikeCode, looksLikeText,
         hash6, sanitizeKeyPart, sanitizeKey, fileBaseOf, humanizeIdentifier,
-        stripBOM, parseLang, toLangValue, fixMixedPlaceholders,
+        stripBOM, parseLang, toLangValue, fixMixedPlaceholders, pctArgs, pctPlain,
         stripJsonCommentsAndCommas, parseJsonLenient, escapeRegex,
     });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

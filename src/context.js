@@ -145,7 +145,7 @@
             if (hasSentinel) {
                 const args = [];
                 let n = 0;
-                const value = body.replace(/%/g, '%%').replace(SENTINEL_RE, (s) => {
+                const value = NS.pctArgs(body).replace(SENTINEL_RE, (s) => {
                     args.push({ text: s });
                     return `%${++n}$s`;
                 });
