@@ -559,6 +559,33 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('自定义 NPC 实体（low:npc）的对话和名字也提取，CustomName 不误报', vals.includes('Huh? Hello') && vals.includes('Raymond') && !st.ctx.untranslatable.some(u => u.text === 'NPC'), JSON.stringify(vals));
     }
     {
+        // 展示框 / 荧光展示框里的物品、掉落物、营火上的物品
+        const { T, NbtString, writeAll } = NS.NBT;
+        const S = (n, v) => ({ t: T.STRING, n, v: new NbtString(v, null) });
+        const I = (n, v) => ({ t: T.INT, n, v });
+        const B = (n, v) => ({ t: T.BYTE, n, v });
+        const L = (n, et, items) => ({ t: T.LIST, n, v: { et, items } });
+        const C = (n, v) => ({ t: T.COMPOUND, n, v });
+        const named = (n, id, name, lore) => C(n, [B('Count', 1), S('Name', id), C('tag', [C('display', [S('Name', name), L('Lore', T.STRING, [new NbtString(lore, null)])])])]);
+        const frame = [S('id', 'ItemFrame'), I('x', 0), I('y', 0), I('z', 0), named('Item', 'minecraft:diamond_sword', 'Frame Sword', 'Hung on the wall')];
+        const glow = [S('id', 'GlowItemFrame'), I('x', 1), I('y', 0), I('z', 0), named('Item', 'minecraft:apple', 'Glow Apple', 'Shiny fruit')];
+        const camp = [S('id', 'Campfire'), I('x', 2), I('y', 0), I('z', 0), named('Item1', 'minecraft:beef', 'Camp Beef', 'Slowly cooking')];
+        const drop = [S('identifier', 'minecraft:item'), named('Item', 'minecraft:book', 'Dropped Book', 'Lying on the ground'), L('Pos', T.FLOAT, [0.5, 1, 0.5]), { t: T.LONG, n: 'UniqueID', v: -9n }];
+        const st0 = (name) => [S('name', name), C('states', []), I('version', 18168865)];
+        const root = [I('format_version', 1), L('size', T.INT, [3, 1, 1]), C('structure', [L('block_indices', T.LIST, [{ et: T.INT, items: [0, 1, 2] }, { et: T.INT, items: [-1, -1, -1] }]), L('entities', T.COMPOUND, [drop]),
+            C('palette', [C('default', [L('block_palette', T.COMPOUND, [st0('minecraft:frame'), st0('minecraft:glow_frame'), st0('minecraft:campfire')]),
+                C('block_position_data', [C('0', [C('block_entity_data', frame)]), C('1', [C('block_entity_data', glow)]), C('2', [C('block_entity_data', camp)])])])])]), L('structure_world_origin', T.INT, [0, 0, 0])];
+        const st = await NS.openStructure('frames.mcstructure', writeAll([{ t: T.COMPOUND, n: '', v: root }]), {}, () => {});
+        const un = st.ctx.untranslatable.map(u => u.text);
+        check('展示框 / 荧光展示框 / 营火上的物品、掉落物的名称和描述列入需人工翻译',
+            ['Frame Sword', 'Hung on the wall', 'Glow Apple', 'Shiny fruit', 'Camp Beef', 'Dropped Book', 'Lying on the ground'].every(t => un.includes(t)), JSON.stringify(un));
+        const ref = st.ctx.untranslatable.find(u => u.text === 'Glow Apple').ref;
+        st.setValue(ref, '发光苹果');
+        const built = await st.build();
+        const st2 = await NS.openStructure('frames.mcstructure', built.structure, {}, () => {});
+        check('  └ 手动修改后写回展示框物品', st2.ctx.untranslatable.some(u => u.text === '发光苹果') && !st2.ctx.untranslatable.some(u => u.text === 'Glow Apple'));
+    }
+    {
         // Myths and Magic：手写 rawtext 里 { text: 变量 }（聊天消息做的弹出提示）
         const src = 'const spells=[{id:"a",lore:"Summon a wall of fire."}];\nfunction getLore(id){ return spells.find(s=>s.id===id).lore; }\nfunction notify(player, message, image){ player.sendMessage({ rawtext: [ { text: `toast.${image}` }, { text: message } ] }); }\nexport function f(p){ notify(p, `§dNew Recipe\\n§r${getLore("a")}`, "textures/ui/x"); }';
         const cm = new NS.ExtractContext({ splitNewlines: false });
