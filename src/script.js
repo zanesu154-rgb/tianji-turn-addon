@@ -874,7 +874,7 @@
     // 颜色码被代码替换过（如浅色背景下把 §7 换成 §8）：忽略颜色码再比一次，用原文的颜色
     const core = mm ? mm[2] : s;
     const sf = F(core);
-    if (sf && /[^\s\d\p{P}]/u.test(sf)) {
+    if (sf && /[^\\s\\d\\p{P}]/u.test(sf)) {
       if (!cf) { cf = new Map(); for (const [t, kk] of m) { const f = F(t); if (f && !cf.has(f)) cf.set(f, kk); } }
       if ((k = cf.get(sf))) {
         const r2 = [{ translate: k }];
@@ -945,9 +945,16 @@
   // 界面按前缀识别的数据（"inspecting:" + 方块名…）：前缀原样保留，后面的文字照常翻译
   const kept = new Set(), prefixes = [];
   const keep = (a, p) => { for (const x of a || []) kept.add(x); for (const x of p || []) if (prefixes.indexOf(x) < 0) prefixes.push(x); cache.clear(); };
+  // 名字后面跟着等级、时间、数量（"Illumination III (0:44)"、"Speed II 1:30"）：只翻译名字，后面原样保留
+  const tailOne = (s) => {
+    const t = /^([\\s\\S]*?[^\\s\\u00a7])((?:\\s+(?:\\u00a7.)*(?:[IVXLCDM]+|[\\d:.,%+\\-\\/\\u00d7x]+|\\([\\d:.,%+\\-\\/\\s]+\\))(?:\\u00a7.)*)+\\s*)$/.exec(s);
+    if (!t || !/[A-Za-z\\u00c0-\\uffff]{2,}/.test(t[1])) return null;
+    const h = one(t[1]);
+    return h ? [...h, { text: t[2] }] : null;
+  };
   const lookup = (s) => {
     if (cache.has(s)) return cache.get(s);
-    if (kept.size && kept.has(s.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ""))) { cache.set(s, null); return null; }
+    if (kept.size && kept.has(s.replace(/^(?:\u00a7.|\\s)+|(?:\u00a7.|\\s)+$/g, ""))) { cache.set(s, null); return null; }
     for (const p of prefixes) {
       if (s.length > p.length && s.startsWith(p)) {
         const tail = lookup(s.slice(p.length));
@@ -964,6 +971,7 @@
       if (tail) r = [{ text: s.slice(0, tab + 1) }, ...tail.rawtext];
     }
     if (!r) r = one(s);
+    if (!r) r = tailOne(s);
     if (!r && tab < 0 && s.indexOf("\\n") >= 0) {
       // 自动换行过的文字（作者按宽度把空格换成了换行）：换行还原成空格再找
       const un = (t) => t.indexOf("\\n") >= 0 ? one(t.replace(/\\n/g, " ")) : null;
@@ -972,7 +980,7 @@
         t.split("\\n").forEach((l, i) => {
           if (i) els.push({ text: "\\n" });
           if (!l) return;
-          const x = one(l);
+          const x = one(l) || tailOne(l);
           if (x) { hit = true; els.push(...x); } else els.push({ text: l });
         });
         return hit;
@@ -1183,6 +1191,7 @@
         const out = new Map();
         const add = (file, s) => {
             if (typeof s !== 'string' || !/^[A-Za-z][A-Za-z '-]{1,40}$/.test(s) || looksLikeCommand(s)) return;
+            if (/^[a-z]+[A-Z][A-Za-z]*$/.test(s)) return;   // weatherChange、isSprinting：代码里的名字
             if (!out.has(file)) out.set(file, new Set());
             out.get(file).add(s);
         };
@@ -1191,15 +1200,22 @@
             walk(body, (n) => {
                 if (hit || n.type !== 'TemplateLiteral') return;
                 if (!n.expressions.some(e => e.type === 'Identifier' && e.name === name)) return;
+                // console.warn(`[temperature:${e}]`, …)：调试输出，不算显示
+                const c = n.parent;
+                if (c && c.type === 'CallExpression' && c.callee.type === 'MemberExpression' && c.callee.object.type === 'Identifier' && c.callee.object.name === 'console') return;
                 const lit = n.quasis.map(q => q.value.cooked || '').join(' ');
+                if (/\bdebug\b/i.test(lit)) return;   // `[Bladeworks Debug] ${x} queued`
                 if (looksLikeText(lit, 'loose') && !looksLikeCommand(n.quasis.map(q => q.value.cooked || '').join('0'))) hit = true;
             });
             return hit;
         };
+        const nameCount = new Map();
         for (const [file, info] of infos) {
             if (!info || !info.ok) continue;
             walk(info.ast, (n) => {
                 let name = null, fn = null;
+                if (n.type === 'FunctionDeclaration' && n.id) nameCount.set(n.id.name, (nameCount.get(n.id.name) || 0) + 1);
+                else if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier') nameCount.set(n.id.name, (nameCount.get(n.id.name) || 0) + 1);
                 if (n.type === 'FunctionDeclaration' && n.id) { name = n.id.name; fn = n; }
                 else if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && /Function/.test(n.init.type)) { name = n.id.name; fn = n.init; }
                 if (!fn || !fn.params) return;
@@ -1217,7 +1233,10 @@
             walk(info.ast, (n) => {
                 if (n.type !== 'CallExpression') return;
                 const nm = n.callee.type === 'Identifier' ? n.callee.name : propName(n.callee);
-                for (const d of defs.get(nm) || []) if (isStr(n.arguments[d.index])) add(d.file, n.arguments[d.index].value);
+                const ds = defs.get(nm) || [];
+                // 打包压缩过的脚本里短函数名（E、se）在各模块重复定义：对不上是哪一个，不认
+                if (nameCount.get(nm) > 1) return;
+                for (const d of ds) if (isStr(n.arguments[d.index])) add(d.file, n.arguments[d.index].value);
             });
         }
         return new Map([...out].map(([f, set]) => [f, [...set]]));
@@ -1594,7 +1613,9 @@
             // 下划线 → 空格：split("_") 或 replace(/[._\-]+/g, " ") 这类；首字母大写：toUpperCase 或 .map(某个函数)
             const underscore = /\.split\(\s*(?:"_"|'_'|\/[^/]*_[^/]*\/g?)\s*\)/.test(body) || /\.replace(?:All)?\(\s*\/[^/]*_[^/]*\/g?\s*,\s*(?:" "|' ')\s*\)/.test(body);
             const capital = /toUpperCase\(\)/.test(body) || /\.map\(\s*[A-Za-z_$][\w$]*\s*\)/.test(body);
-            if (body.length > 600 || !underscore || !capital || !/\.join\(\s*(?:" "|' ')\s*\)/.test(body)) return;
+            // 也认按单词替换首字母的写法：.replace(/\w\S*/g, t => t.charAt(0).toUpperCase() + …)、.replace(/\b\w/g, …)
+            const joined = /\.join\(\s*(?:" "|' ')\s*\)/.test(body) || /\.replace\(\s*\/\\[bw][^/]*\/g\s*,/.test(body);
+            if (body.length > 600 || !underscore || !capital || !joined) return;
             const pn = n.params[0].name;
             const wrap = (e) => { const prev = overrides.get(e); overrides.set(e, () => ` ${RT}.H(${pn}, (${prev ? prev() : renderOrig(e)}))`); };
             if (n.body.type !== 'BlockStatement') wrap(n.body);
@@ -1851,6 +1872,51 @@
                 overrides.set(rt0, () => `${RT}.B(${renderOrig(rt0)})`);
                 usesRuntime = true;
                 bakeSites++;
+            }
+        });
+
+        // ---- 自定义状态效果的 ID（registerEffect("ns:illumination") / getEffect(e, ID)…）：拼名函数会把它显示成 "Illumination" ----
+        // 这类名字游戏里没有翻译键，先按同样的规则拼出英文名提取出来，运行时显示时就能查到
+        if (humanizers && injectRuntime) {
+            const consts = new Map();
+            walk(ast, (n) => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && isStr(n.init)) consts.set(n.id.name, n.init.value); });
+            const effIds = new Set();
+            walk(ast, (n) => {
+                if (n.type !== 'CallExpression') return;
+                const nm = n.callee.type === 'MemberExpression' ? propName(n.callee) : (n.callee.type === 'Identifier' ? n.callee.name : '');
+                if (!nm || !/^(register|add|get|remove|has|apply|set)\w*Effect$/i.test(nm)) return;
+                for (const a of n.arguments) {
+                    const v = isStr(a) ? a.value : (a && a.type === 'Identifier' ? consts.get(a.name) : null);
+                    if (typeof v === 'string' && /^[a-z0-9_]+:[a-z][a-z0-9_]*$/.test(v) && !v.startsWith('minecraft:')) effIds.add(v);
+                }
+            });
+            const ownIds = opts.idKeys ? new Map(opts.idKeys()) : new Map();
+            for (const id of effIds) {
+                if (ownIds.has(id)) continue;
+                const name = id.split(':').pop().split(/[_.]+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+                if (!/[A-Za-z]{3,}/.test(name)) continue;
+                exact.push([name, ctx.alloc(keyBase('effect.' + id.split(':').pop()), name, meta('effect'))]);
+                usesRuntime = true;
+            }
+        }
+
+        // ---- 一条条 push 进数组、最后再交给 {rawtext: arr} 的元素：arr.push({ translate: `- ${名字} (${a}-${b})` }) ----
+        // translate / text 是拼出来的文字（不是键）：按显示文字处理，换成翻译键 + 参数
+        if (injectRuntime) walk(ast, (n) => {
+            if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || !/^(push|unshift)$/.test(propName(n.callee) || '')) return;
+            if (inDebug(n)) return;
+            for (const el of n.arguments) {
+                if (!el || el.type !== 'ObjectExpression' || el.properties.length !== 1 || handled.has(el) || overrides.has(el)) continue;
+                const p = el.properties[0];
+                if (p.type !== 'Property' || p.computed || !/^(text|translate)$/.test(p.key.name || p.key.value)) continue;
+                const v = p.value;
+                if (!(v.type === 'TemplateLiteral' && v.expressions.length) && !(v.type === 'BinaryExpression' && v.operator === '+')) continue;
+                const parts = flattenConcat(v);
+                if (!parts || !parts.some(x => 'lit' in x)) continue;
+                const els = buildElements(parts, 'rawtext');
+                if (!els || !els.length) continue;
+                markHandled(el);
+                overrides.set(el, () => els.join(','));
             }
         });
 
