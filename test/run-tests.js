@@ -752,6 +752,20 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         rt.reg([['Press', 'k.p'], ['Grinding Bowl', 'k.g']], []);
         check('运行时：“A & B” 两项都认识时逐项翻译', JSON.stringify(rt.M('Press & Grinding Bowl')) === '{"rawtext":[{"translate":"k.p"},{"text":" & "},{"translate":"k.g"}]}' && rt.M('Tom & Jerry') === 'Tom & Jerry');
     }
+    {
+        // 方块藏在创造栏，但有可见物品通过 block_placer + replace_block_item 代替它出现（RPG 的 sert:pink_lotus_waterlily）
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        xm.files.set('BP/blocks/lily.json', Buffer.from(JSON.stringify({ format_version: '1.21.90', 'minecraft:block': { description: { identifier: 'sert:lily', menu_category: { category: 'none' } }, components: { 'minecraft:display_name': 'Lily pad with lotus' } } })));
+        xm.files.set('BP/blocks/ghost.json', Buffer.from(JSON.stringify({ format_version: '1.21.90', 'minecraft:block': { description: { identifier: 'sert:ghost', menu_category: { category: 'none' } }, components: { 'minecraft:display_name': 'Ghost Block' } } })));
+        xm.files.set('BP/items/lily.json', Buffer.from(JSON.stringify({ format_version: '1.21.90', 'minecraft:item': { description: { identifier: 'sert:lily_item', menu_category: { category: 'nature' } }, components: { 'minecraft:block_placer': { block: 'sert:lily', replace_block_item: true } } } })));
+        const en0 = (xm.files.get('RP/texts/en_US.lang') || '').toString();
+        xm.files.set('RP/texts/en_US.lang', Buffer.from(en0 + '\nitem.sert:lily_item=Lily pad\n'));
+        const xr = await NS.runPipeline(xm, { baseName: 'fixture', targetLangs: ['en_US', 'zh_CN'] }, () => {});
+        const vals = [...xr.ctx.entries.values()].map(e => e.value);
+        const zh = xm.files.get('RP/texts/zh_CN.lang').toString();
+        check('隐藏方块有可见物品代替出现时：方块名照常提取、物品键照常补全；真正隐藏的仍跳过',
+            vals.includes('Lily pad with lotus') && !vals.includes('Ghost Block') && /item\.sert:lily_item=Lily pad/.test(zh), JSON.stringify(vals.slice(-5)));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

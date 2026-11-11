@@ -115,7 +115,9 @@
         }
         if (scanCommandFields(item.events, `item.${id}.message`, ctx, file)) changed = true;
 
-        info.defs.items.push({ id, file, data, hasName: comps['minecraft:display_name'] != null, isDataDriven: !!item.components, hidden });
+        const placer = comps['minecraft:block_placer'];
+        const placesBlock = placer && typeof placer === 'object' && placer.replace_block_item && typeof placer.block === 'string' ? placer.block : (placer && typeof placer.block === 'object' && placer.replace_block_item && placer.block.name) || null;
+        info.defs.items.push({ id, file, data, hasName: comps['minecraft:display_name'] != null, isDataDriven: !!item.components, hidden, placesBlock });
         return changed;
     }
 
@@ -133,7 +135,8 @@
         const base = `tile.${id}.name`;
 
         const hidden = isHiddenFromCreative(block.description);
-        const skipName = hidden && !ctx.includeHiddenItems;
+        // 有可见物品代替它出现在创造栏（同 ID，或 block_placer + replace_block_item）：名称照常处理
+        const skipName = hidden && !ctx.includeHiddenItems && !(ctx.visibleItemBlocks && ctx.visibleItemBlocks.has(id));
         if (skipName) hideKeys(ctx, [base, `item.${id}.name`, `item.${id}`]);
         const handleComps = (comps, suffix) => {
             if (!comps || typeof comps !== 'object') return;

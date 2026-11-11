@@ -153,6 +153,22 @@
         ctx.hiddenKeys = new Set();
         const info = { defs: { items: [], blocks: [], entities: [], spawnEggs: [] }, packRoot: '' };
 
+        // 可见物品对应的方块 ID（同 ID 的物品，或 block_placer + replace_block_item 指向的方块）
+        ctx.visibleItemBlocks = new Set();
+        for (const p of allFiles) {
+            const pk = packOf(p);
+            if (!pk || pk.type !== 'BP' || !/^items\/.+\.json$/i.test(relOf(p, pk))) continue;
+            let d;
+            try { d = parseJsonLenient(await fs.readText(p)); } catch (e) { continue; }
+            const it = d && d['minecraft:item'];
+            if (!it || !it.description || typeof it.description.identifier !== 'string') continue;
+            const mc = it.description.menu_category;
+            if (mc && typeof mc === 'object' && (String(mc.category || '').toLowerCase() === 'none' || mc.is_hidden_in_commands === true)) continue;
+            ctx.visibleItemBlocks.add(it.description.identifier);
+            const bp = it.components && it.components['minecraft:block_placer'];
+            if (bp && bp.replace_block_item) { const b = typeof bp.block === 'string' ? bp.block : bp.block && bp.block.name; if (b) ctx.visibleItemBlocks.add(b); }
+        }
+
         // ---------------- 3. 预扫描 UI / 脚本 ----------------
         const uiData = [];
         const scriptInfos = new Map();
@@ -326,6 +342,17 @@
                 pending.set(p, JSON.stringify(jsonCache.get(p), null, 2));
             }
             log(`[UI] ${info.localizeFlips} 个标签原为 "localize": false，已改为 true，否则会直接显示键名`, 'warn');
+        }
+
+        // 方块藏在创造栏里、但有同 ID（或 block_placer + replace_block_item 指向它）的可见物品代替它出现：
+        // 名称照常提取 / 补全（如 sert:pink_lotus_waterlily）
+        if (ctx.hiddenKeys && ctx.hiddenKeys.size) {
+            for (const it of info.defs.items) {
+                if (it.hidden) continue;
+                for (const id of [it.id, it.placesBlock].filter(Boolean)) {
+                    for (const k of [`item.${id}.name`, `item.${id}`, `tile.${id}.name`]) ctx.hiddenKeys.delete(k);
+                }
+            }
         }
 
         // ---------------- 5. 缺失的默认名称 ----------------
