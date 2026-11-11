@@ -1183,7 +1183,7 @@
                 out += v.slice(last).replace(/%/g, '%%');
                 return { lits, order, value: out };
             };
-            let groups = 0;
+            let groups = 0, reused = 0;
             for (const [path, m] of byPath) {
                 const src = m.get('en_US') || m.get('en_GB') || [...m.values()].find(x => !/[^\u0000-ɏ\s\p{P}\p{S}\p{N}]/u.test(x.node.value)) || [...m.values()][0];
                 let value = src.node.value;
@@ -1208,6 +1208,27 @@
                         // 作者的 translate() 会去掉结尾的一个句点
                         const lastLit = c.lits[c.lits.length - 1];
                         if (lastLit.endsWith('.')) add(x.file, 'patterns', [key, [...c.lits.slice(0, -1), lastLit.slice(0, -1)], c.order]);
+                    }
+                    continue;
+                }
+                // 资源包 lang 里已经有同路径、同内容的键（作者把字典也导出成了 lang）：直接用它，不再新建重复的键
+                // 也认游戏自己的命名：mobs.<id> ↔ entity.<id>.name、tile.<id> ↔ tile.<id>.name、items.<id> ↔ item.<id>(.name)
+                const cands = [path, `${path}.name`];
+                const idm = /^(mobs|entities|tile|blocks|items?)\.(.+)$/.exec(path);
+                if (idm) {
+                    const id = idm[2];
+                    if (/^(mobs|entities)$/.test(idm[1])) cands.push(`entity.${id}.name`);
+                    else if (/^(tile|blocks)$/.test(idm[1])) cands.push(`tile.${id}.name`);
+                    else cands.push(`item.${id}.name`, `item.${id}`, `tile.${id}.name`);
+                }
+                const same = (k) => { const ex = ctx.existingValues && ctx.existingValues.get(k); return ex && (ex.has(value) || ex.has(value.replace(/\r?\n/g, '\\n'))); };
+                const reuse = cands.find(same);
+                if (reuse) {
+                    ctx.ref(reuse, src.file);
+                    reused++;
+                    for (const x of m.values()) {
+                        add(x.file, 'exact', [x.node.value, reuse]);
+                        if (/[^.]\.$/.test(x.node.value)) add(x.file, 'exact', [x.node.value.slice(0, -1), reuse]);
                     }
                     continue;
                 }
@@ -1236,7 +1257,7 @@
                 }
             }
             for (const v of out.values()) v.exact = v.exact.filter(Boolean);
-            ctx.warn(`${dir || '(根目录)'}：识别到按语言分文件的翻译字典（${dicts.map(d => d.file.split('/').pop() + '=' + d.lang).join('、')}），合并 ${groups} 组`);
+            ctx.warn(`${dir || '(根目录)'}：识别到按语言分文件的翻译字典（${dicts.map(d => d.file.split('/').pop() + '=' + d.lang).join('、')}），合并 ${groups} 组${reused ? `；另有 ${reused} 组资源包 lang 里已有同名同内容的键，直接沿用` : ''}`);
         }
         return out;
     }
