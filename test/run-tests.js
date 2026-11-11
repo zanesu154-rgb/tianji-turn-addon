@@ -738,6 +738,20 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('运行时：制表符排版的正文只翻最后一段；列表里被分隔符吃掉的颜色码补回再找',
             r.startsWith('{"rawtext":[{"text":"textures/ui/bar.png\\t') && /"translate":"k\.d"/.test(r) && /"translate":"k\.g"/.test(r) && /\{"text":", "\},\{"translate":"k\.c"\}/.test(r), r.slice(-300));
     }
+    {
+        // 包里原有、目标语言还没有译文的键（item.sert:hogweed）也要进翻译表；"A & B" 按列表逐项翻译
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const en0 = (xm.files.get('RP/texts/en_US.lang') || '').toString();
+        xm.files.set('RP/texts/en_US.lang', Buffer.from(en0 + '\nitem.sert:hogweed=Hogweed\n'));
+        const xr = await NS.runPipeline(xm, { baseName: 'fixture', targetLangs: ['en_US', 'zh_CN'] }, () => {});
+        const csv = String(xr.workbook['strings.csv']), src = String(Object.entries(xr.workbook).find(([n]) => /^source_/.test(n))[1]);
+        check('翻译表包含包里原有、目标语言还没有译文的键', /item\.sert:hogweed,Hogweed,[^,]*,existing/.test(csv) && /item\.sert:hogweed=Hogweed/.test(src));
+        const cl = new NS.ExtractContext({});
+        const o = NS.processScript('import { world } from "@minecraft/server";\nexport function f(p, a) { p.sendMessage(a); }\n', 'scripts/amp.js', cl, { injectRuntime: true, runtimeKey: '__ADDON_I18N_amp' }).content;
+        const rt = new Function(o.slice(0, o.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        rt.reg([['Press', 'k.p'], ['Grinding Bowl', 'k.g']], []);
+        check('运行时：“A & B” 两项都认识时逐项翻译', JSON.stringify(rt.M('Press & Grinding Bowl')) === '{"rawtext":[{"translate":"k.p"},{"text":" & "},{"translate":"k.g"}]}' && rt.M('Tom & Jerry') === 'Tom & Jerry');
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);

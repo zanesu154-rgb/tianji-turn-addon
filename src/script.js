@@ -913,7 +913,7 @@
   const seps = [];
   const list = (s) => {
     const alt = seps.filter((x) => s.indexOf(x) >= 0).map(esc);
-    const parts = s.split(new RegExp("(" + (alt.length ? alt.join("|") + "|" : "") + "(?:\\\\s|\\u00a7.)*[,;|\\u00b7\\u2022\\\\/\\uff0c\\u3001](?:\\\\s|\\u00a7.)*)"));
+    const parts = s.split(new RegExp("(" + (alt.length ? alt.join("|") + "|" : "") + "(?:\\\\s|\\u00a7.)*[,;|&\\u00b7\\u2022\\\\/\\uff0c\\u3001](?:\\\\s|\\u00a7.)*)"));
     if (parts.length < 3) return null;
     const els = [];
     for (let i = 0; i < parts.length; i++) {

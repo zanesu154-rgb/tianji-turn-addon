@@ -496,6 +496,7 @@
             if (total) log(`[lang] 发现 ${total} 条模板残留的无效条目（别的包的刷怪蛋 / 实体名等），将从各语言文件中删除`, 'warn');
         }
 
+        const existingUntranslated = new Map();   // 键 → { value, file, langs }
         const writeLangs = (pk, entries, isRP) => {
             const junk = junkByPack.get(pk.root) || new Set();
             const langs = packLangs.get(pk.root) || new Map();
@@ -530,7 +531,12 @@
                     for (const k of allExistingKeys) {
                         if (map.has(k) || entries.has(k) || ctx.hiddenKeys.has(k) || junk.has(k)) continue;
                         const v = fillFrom(k);
-                        if (v != null) filled.push(`${k}=${v}`);
+                        if (v != null) {
+                            filled.push(`${k}=${v}`);
+                            // 包里原有、但这个语言还没有译文的键：也放进翻译表，不然只翻新提取的会漏掉它们
+                            if (!existingUntranslated.has(k)) existingUntranslated.set(k, { value: v, file: `${pk.root ? pk.root + "/" : ""}texts/${lang}.lang`, langs: new Set() });
+                            existingUntranslated.get(k).langs.add(lang);
+                        }
                     }
                 }
                 // 已有译文里 %1$s 和 %s 混用（游戏会显示成 “%3”）→ 自动改成全部带序号
@@ -614,6 +620,8 @@
             rows.push([k, e.value, e.file, e.kind, ...trLangs.map(l => (tr && tr.get(l)) || '')]);
         }
         for (const [rootDir, m] of ctx.packEntries) for (const [k, v] of m) rows.push([k, v, rootDir + '/manifest.json', 'manifest']);
+        for (const [k, x] of existingUntranslated) if (!ctx.entries.has(k)) rows.push([k, NS.fromLangValue ? NS.fromLangValue(x.value) : x.value, x.file, 'existing', ...trLangs.map(() => '')]);
+        if (existingUntranslated.size) log(`[lang] 包里原有的 ${existingUntranslated.size} 个键在目标语言里还没有译文（已先填入原文），一并列入翻译表`, 'warn');
         const stringsCsv = '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
         // 附加包里的结构：转换后可在编辑器里手动修改（用合并前的逐条列表）
         const structureSession = NS.makeAddonStructureSession ? NS.makeAddonStructureSession(ctx, opt) : null;
@@ -660,7 +668,8 @@
             inputCsv = '\ufeff' + lines.map(r => r.map(csvCell).join(',')).join('\r\n');
             log(`玩家输入匹配（聊天关键词/正则）${merged.size} 组：游戏不会翻译玩家输入，已导出到翻译表 input_aliases.csv，可按语言补充说法`, 'warn');
         }
-        const sourceLangFile = [...ctx.entries].map(([k, e]) => `${k}=${toLangValue(e.value)}`).join('\n') + '\n';
+        const sourceLangFile = [...ctx.entries].map(([k, e]) => `${k}=${toLangValue(e.value)}`).join('\n') + '\n'
+            + (existingUntranslated.size ? '\n## 包里原有、目标语言还没有译文的条目\n' + [...existingUntranslated].filter(([k]) => !ctx.entries.has(k)).map(([k, x]) => `${k}=${x.value}`).join('\n') + '\n' : '');
 
         const summary = {
             packs: packs.map(p => ({ root: p.root, type: p.type })),
