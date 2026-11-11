@@ -30,6 +30,10 @@
         constructor(options = {}) {
             this.knownKeys = options.knownKeys || new Set();         // 附加包中已有的所有 lang 键
             this.existingValues = options.existingValues || new Map(); // 源语言 lang 中已有的 键→值
+            this.keyLangs = options.keyLangs || new Map();           // 键 → Set(有这个键的语言)
+            this.prevKeys = options.prevKeys || new Set();           // 上次转换写进 lang 的键（标记行之后）
+            this.claimed = new Set();      // 本次转换已认领的已有键（上次转换生成的）
+            this.reusedPrev = 0;
             this.splitNewlines = options.splitNewlines !== false;
             this.entries = new Map();      // 新键 → { value, file, kind }
             this.keyFiles = new Map();     // 键 → Set(用到它的文件)
@@ -67,6 +71,37 @@
                 if (d) return d;
             }
             let key;
+            // 上次转换生成的同系列键（base、base_1、base_2……）：
+            // 1) 原文相同（把上次输出的 en_US.lang 一起放回来）→ 直接复用
+            // 2) 只有译文、没有原文这一侧的语言（只放回了翻译好的 zh_CN.lang）→ 按顺序认领，
+            //    分配顺序和上次一样，所以会对上同一个键，已有译文保留
+            const series = [];
+            for (let i = 0; ; i++) {
+                const k = i ? `${base}_${i}` : base;
+                if (!this.knownKeys.has(k)) break;
+                series.push(k);
+            }
+            if (series.length > 1 || (series.length === 1 && this.keyLangs.size)) {
+                const free = (k) => !this.claimed.has(k) && !this.entries.has(k);
+                let hit = series.find(k => free(k) && (() => { const e = this.existingValues.get(k); return e instanceof Set ? e.has(text) : e === text; })());
+                if (!hit && this.keyLangs.size) {
+                    const cjk = NS.hasCJK(text);
+                    const sideOf = (l) => cjk ? /^(zh|ja|ko)_/.test(l) : /^en_/.test(l);
+                    hit = series.find(k => free(k) && (this.prevKeys.has(k) || ![...(this.keyLangs.get(k) || [])].some(sideOf)));
+                    if (hit) {
+                        this.claimed.add(hit);
+                        this.reusedPrev++;
+                        this.entries.set(hit, { value: text, file, kind });
+                        if (scope) this.dedupe.set(scope + '\u0000' + text, hit);
+                        return hit;
+                    }
+                }
+                if (hit) {
+                    this.claimed.add(hit);
+                    if (scope) this.dedupe.set(scope + '\u0000' + text, hit);
+                    return hit;
+                }
+            }
             // 附加包里已有这个键且值相同 → 直接复用
             const ev = this.existingValues.get(base);
             const evList = ev instanceof Set ? [...ev] : (ev != null ? [ev] : []);

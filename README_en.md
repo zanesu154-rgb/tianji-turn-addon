@@ -86,7 +86,8 @@ Extracts the player-visible text from Minecraft Bedrock **add-ons** and **worlds
 Some places only accept plain text, such as `set_name` / `set_lore` in loot tables, `nameTag` in scripts, and item and container names in worlds. They appear in the **editor** below the results:
 
 - **Manual translation**: edit each entry directly. Use the category checkboxes at the top to hide categories; hidden categories are not exported either
-- **Export / import sheet**: for many entries, click "Export sheet", fill in the `translation` column in Excel or similar, then "Import sheet" to write everything back. Do not change the `ref` column, which records the location
+- **Export / import sheet**: for many entries, click "Export sheet", fill in the `translation` column in Excel or similar, then "Import sheet" to write everything back. Do not change the `ref` column, which records the location. CSVs saved by Excel in the system encoding can be imported too; edits made after a download are written back on the next download
+- **Re-converting after translating**: put your translated lang (e.g. `zh_CN.lang`) back into the original pack's `texts/` and convert again; the previous keys and your translations are kept and only new entries are added. If the add-on was updated, also put back the previous `en_US.lang` so entries are matched by source text
 - **Search / Browse all** (worlds): find and edit any NBT data in the world by key or value, e.g. search `CustomName` to rename everything at once
 
 All edits are written back when you click "Download converted file".

@@ -119,6 +119,8 @@
         // ---------------- 2. 读取已有 lang ----------------
         const knownKeys = new Set();
         const existingValues = new Map();
+        const keyLangs = new Map();
+        const prevKeys = new Set();
         const packLangs = new Map();   // 包根 → Map(语言 → {path, map, raw})
         for (const pk of packs) {
             const langs = new Map();
@@ -129,8 +131,13 @@
                 const raw = await fs.readText(p);
                 const map = parseLang(raw);
                 langs.set(m[1], { path: p, map, raw });
+                // 上次转换写进去的键（标记行之后）：再次转换时按顺序认领，保留已有译文
+                const at = raw.indexOf(MARK);
+                if (at >= 0) for (const k of parseLang(raw.slice(at)).keys()) prevKeys.add(k);
                 for (const [k, v] of map) {
                     knownKeys.add(k);
+                    if (!keyLangs.has(k)) keyLangs.set(k, new Set());
+                    keyLangs.get(k).add(m[1]);
                     if (!existingValues.has(k)) existingValues.set(k, new Set());
                     existingValues.get(k).add(v);
                 }
@@ -148,7 +155,7 @@
         for (const pv of packVersions) pv.name = pv.name.replace(/§./g, '').trim();
 
         if (typeof NS.ExtractContext !== 'function') throw new Error('页面文件没有完整加载（context.js），请刷新页面后重试');
-        const ctx = new NS.ExtractContext({ knownKeys, existingValues, splitNewlines: opt.splitNewlines });
+        const ctx = new NS.ExtractContext({ knownKeys, existingValues, keyLangs, prevKeys, splitNewlines: opt.splitNewlines });
         ctx.sayMode = opt.sayMode;
         ctx.listCommandBlockNames = !!opt.listCommandBlockNames;
         ctx.includeHiddenItems = !!opt.includeHiddenItems;
@@ -425,6 +432,7 @@
         for (const m of ctx.packEntries.values()) values.push(...m.values());
         const sourceLang = opt.sourceLang === 'auto' ? detectSourceLang(values) : opt.sourceLang;
         log(`源语言：${sourceLang}${opt.sourceLang === 'auto' ? '（自动识别）' : ''}`);
+        if (ctx.reusedPrev) log(`[lang] 沿用了 ${ctx.reusedPrev} 个上次转换生成的键（包里只有它们的译文），已有译文保留；附加包如果更新过内容，建议把上次输出的 en_US.lang 一起放回去，按原文核对更准确`, 'warn');
 
         // ---------------- 7. 行为包与资源包配对；没有资源包的行为包新建一个 ----------------
         // 多个附加包放在一起时，每个包的文字写进它自己的资源包，互不混合
@@ -772,6 +780,7 @@
         if (!fileItems.length && !structureSession) return null;
         const byRef = new Map(fileItems.map(u => [u.refs[0], u]));
         const values = new Map();      // F 引用 → 新文字
+        const writtenVals = new Map(); // F 引用 → 已写进文件的文字
         const S = structureSession;
         const T = NS.NBT && NS.NBT.T;
         const editorList = [...(S ? S.ctx.untranslatable : []), ...fileItems.map(u => ({ ...u, ref: u.refs[0] }))];
@@ -807,16 +816,28 @@
                 const rows = NS.worldParseCsv(String(text).replace(/^﻿/, ''));
                 const head = rows[0] || [];
                 const iRef = head.indexOf('ref'), iTr = head.indexOf('translation');
+                const iText = head.indexOf('text'), iFile = head.indexOf('file');
                 if (iRef < 0 || iTr < 0) throw new Error('表格缺少 ref 或 translation 列');
                 let applied = 0, skipped = 0;
                 const rest = [head];
+                // 表格来自另一次转换（选项不同，序号对不上）：按原文 + 文件找回对应条目
+                const norm = (t) => String(t == null ? '' : t).replace(/\r\n/g, '\n');
+                const byText = new Map();
+                for (const u of fileItems) { const k = u.file + '\u0000' + norm(u.text); if (!byText.has(k)) byText.set(k, []); byText.get(k).push(u.refs[0]); }
                 for (const r of rows.slice(1)) {
                     const tr = r[iTr];
                     if (!r[iRef] || tr == null || tr === '') { skipped++; continue; }
                     const refs = String(r[iRef]).split(';').map(x => x.trim()).filter(Boolean);
                     const sRefs = [];
+                    const txt = iText >= 0 ? norm(r[iText]) : null;
                     for (const ref of refs) {
-                        if (byRef.has(ref)) { session.setValue(ref, tr); applied++; } else sRefs.push(ref);
+                        if (!ref.startsWith('F|')) { sRefs.push(ref); continue; }
+                        let targets = [ref];
+                        if (txt != null && (!byRef.has(ref) || norm(byRef.get(ref).text) !== txt)) {
+                            targets = (iFile >= 0 && byText.get(r[iFile] + '\u0000' + txt)) || [];
+                        }
+                        if (!targets.length) { skipped++; continue; }
+                        for (const t of targets) { session.setValue(t, tr); applied++; }
                     }
                     if (sRefs.length) { const c = r.slice(); c[iRef] = sRefs.join(';'); rest.push(c); }
                 }
@@ -830,10 +851,14 @@
             async applyTo(fs) {
                 const structures = S ? S.applyTo(fs) : 0;
                 const byFile = new Map();
-                for (const [ref, v] of values) {
+                // 已经写回过一次（先下载、又改了）：从上次写进去的文字改起，改回原文也能写回
+                for (const ref of new Set([...values.keys(), ...writtenVals.keys()])) {
                     const u = byRef.get(ref);
+                    const cur = writtenVals.has(ref) ? writtenVals.get(ref) : u.text;
+                    const to = values.has(ref) ? values.get(ref) : u.text;
+                    if (cur === to) continue;
                     if (!byFile.has(u.file)) byFile.set(u.file, []);
-                    byFile.get(u.file).push({ from: u.text, to: v, sub: u.where.startsWith('/') });
+                    byFile.get(u.file).push({ from: cur, to, sub: u.where.startsWith('/'), ref });
                 }
                 let files = 0, missed = 0;
                 for (const [file, reps] of byFile) {
@@ -842,6 +867,7 @@
                     const r = replaceInFile(file, src, reps);
                     missed += r.missed;
                     if (r.text !== src) { fs.writeText(file, r.text); files++; }
+                    for (const x of (r.done || reps)) { if (x.to === byRef.get(x.ref).text) writtenVals.delete(x.ref); else writtenVals.set(x.ref, x.to); }
                 }
                 return { structures, files, missed };
             },
@@ -863,7 +889,7 @@
         const mark = (before, after) => { for (const r of reps) if (before !== after && (before === r.from || (r.sub && before.includes(r.from)))) hit.add(r); };
         if (/\.json$/i.test(file)) {
             const data = parseJsonLenient(src);
-            if (data === undefined) return { text: src, missed: reps.length };
+            if (data === undefined) return { text: src, missed: reps.length, done: [] };
             const walkJ = (v) => {
                 if (typeof v === 'string') { const n = sub(v); mark(v, n); return n; }
                 if (Array.isArray(v)) return v.map(walkJ);
@@ -872,12 +898,12 @@
             };
             const out = walkJ(data);
             for (const r of reps) if (!hit.has(r)) missed++;
-            return { text: hit.size ? JSON.stringify(out, null, 2) : src, missed };
+            return { text: hit.size ? JSON.stringify(out, null, 2) : src, missed, done: [...hit] };
         }
         if (/\.(m?js)$/i.test(file) && root.acorn) {
             let ast;
             try { ast = root.acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true }); }
-            catch (e) { return { text: src, missed: reps.length }; }
+            catch (e) { return { text: src, missed: reps.length, done: [] }; }
             const edits = [];
             const visit = (n, inReg) => {
                 if (!n || typeof n.type !== 'string') return;
@@ -905,12 +931,12 @@
             let out = src;
             for (const [a, b, t] of edits) out = out.slice(0, a) + t + out.slice(b);
             for (const r of reps) if (!hit.has(r)) missed++;
-            return { text: out, missed };
+            return { text: out, missed, done: [...hit] };
         }
         // 其他文本（.mcfunction 等）：按行替换
         const out = src.split('\n').map(line => { const n = sub(line); mark(line, n); return n; }).join('\n');
         for (const r of reps) if (!hit.has(r)) missed++;
-        return { text: out, missed };
+        return { text: out, missed, done: [...hit] };
     }
 
     NS.runPipeline = runPipeline;

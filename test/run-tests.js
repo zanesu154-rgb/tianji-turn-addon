@@ -1205,6 +1205,41 @@ console.log(JSON.stringify(calls));`;
         check('附加包里的 structures/*.mcstructure 随附加包转换，翻译写进附加包资源包', zhA.get('structure.village.sign.0_0_0.back') === 'Welcome to the village');
     }
 
+    {
+        // 再次转换原包：放回翻译好的 lang（只放目标语言）→ 键名和上次一致，译文保留，不重复建键
+        const fx = path.join(__dirname, 'fixture');
+        const m1 = new MemFS(readDir(fx));
+        await NS.runPipeline(m1, { baseName: 'fixture' }, () => {});
+        const en1 = NS.parseLang(m1.files.get('RP/texts/en_US.lang').toString());
+        const tr = m1.files.get('RP/texts/en_US.lang').toString().replace(/^([^#\s=][^=\n]*)=.*$/mg, (l, k) => `${k}=EN:${k}`);
+        const o = readDir(fx); o.set('RP/texts/en_US.lang', Buffer.from(tr));
+        const m2 = new MemFS(o);
+        await NS.runPipeline(m2, { baseName: 'fixture' }, () => {});
+        const en2 = NS.parseLang(m2.files.get('RP/texts/en_US.lang').toString());
+        const lost = [...en2.keys()].filter(k => !String(en2.get(k)).startsWith('EN:'));
+        check('再次转换：沿用放回的译文 lang，键名一致、不新建重复键', en2.size === en1.size && lost.length === 0, JSON.stringify({ n1: en1.size, n2: en2.size, lost: lost.slice(0, 5) }));
+    }
+    {
+        // 需人工翻译：下载后再改、改回原文都能写回；表格序号对不上时按原文找回
+        const sm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const res = await NS.runPipeline(sm, { baseName: 'fixture' }, () => {});
+        const ss = res.manualSession;
+        const u = ss.ctx.untranslatable.filter(x => x.ref && x.ref.startsWith('F|'));
+        for (const x of u) ss.setValue(x.ref, 'A' + x.text);
+        await ss.applyTo(sm);
+        for (const x of u) ss.setValue(x.ref, 'B' + x.text);
+        const ap2 = await ss.applyTo(sm);
+        const ok2 = u.every(x => sm.files.get(x.file).toString().includes('B'));
+        ss.setValue(u[0].ref, u[0].text);
+        const ap3 = await ss.applyTo(sm);
+        check('需人工翻译：下载后再修改、改回原文也能写回', ap2.missed === 0 && ok2 && ap3.missed === 0 && ap3.files === 1, JSON.stringify({ ap2, ap3 }));
+        const res2 = await NS.runPipeline(new MemFS(readDir(path.join(__dirname, 'fixture'))), { baseName: 'fixture' }, () => {});
+        const csv = 'ref,file,where,text,translation\n' + res2.manualSession.ctx.untranslatable.filter(x => x.ref && x.ref.startsWith('F|'))
+            .map((x, i, a) => [a[(i + 1) % a.length].ref, x.file, x.where, x.text, 'C'].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+        const imp = res2.manualSession.importCsv(csv);
+        const got = res2.manualSession.ctx.untranslatable.filter(x => x.ref && x.ref.startsWith('F|')).every(x => res2.manualSession.getText(x.ref) === 'C');
+        check('导入翻译表：ref 序号对不上时按原文找回对应条目', got && imp.applied >= 4, JSON.stringify(imp));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
