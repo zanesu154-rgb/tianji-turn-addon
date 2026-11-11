@@ -813,6 +813,22 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         rt.reg([['The End', 'k.end'], ['Some text here', 'k.s']], []);
         check('  └ 运行时 keep：比较用的文字不翻译', rt.M('The End') === 'The End' && rt.M('§lThe End§r') === '§lThe End§r' && JSON.stringify(rt.M('Some text here')) === '{"rawtext":[{"translate":"k.s"}]}');
     }
+    {
+        // 基岩版重塑：准星方块名（WAILA）"inspecting:" 前缀 + gy() 拼的英文名；界面悬停提示 #hover_text
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        xm.files.set('RP/ui/waila.json', Buffer.from(JSON.stringify({ namespace: 'waila', w: { type: 'label', text: '#t', bindings: [{ binding_type: 'view', source_property_name: "(#title_text - 'inspecting:')", target_property_name: '#t' }] }, lock: { 'hover@common.hover_text': { property_bag: { '#hover_text': 'Upgrade Accessory Bag to Unlock' } } } })));
+        xm.files.set('BP/scripts/w.js', Buffer.from('import { world } from "@minecraft/server";\nfunction WN(w){return w.charAt(0).toUpperCase()+w.slice(1)}\nfunction gy(e){if(!e)return"";return String(e).replace(/^[^:]+:/,"").replace(/[._\\-]+/g," ").trim().split(/\\s+/).filter(Boolean).map(WN).join(" ")}\nexport function show(p, b) { p.runCommand(`titleraw @s title ${JSON.stringify({rawtext:[{text:"inspecting:§e§n§t" + gy(b) + "\\n§9§oMinecraft"}]})}`); }\n'));
+        await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
+        const js = xm.files.get('BP/scripts/w.js').toString();
+        const ui = JSON.parse(xm.files.get('RP/ui/waila.json').toString());
+        check('界面悬停提示 property_bag 的 #hover_text 换成键', /^ui\./.test(ui.lock['hover@common.hover_text'].property_bag['#hover_text']));
+        const head = js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '');
+        const rt = new Function(head + '\nreturn __i18n;')();
+        const body = js.slice(js.indexOf('// ---- end i18n runtime ----'));
+        const gy = new Function('__i18n', body.split('\n').filter(l => /^function (WN|gy)/.test(l)).join('\n') + '\nreturn gy;')(rt);
+        const r = JSON.stringify(rt.T('inspecting:§e§n§t' + gy('minecraft:allium')));
+        check('拼英文名的函数（replace(/[._-]+/g," ") + map(WN)）也套 H；"inspecting:" 前缀保留、后面的名字翻译成游戏键', /__i18n\.H\(e,/.test(js) && /"text":"inspecting:"/.test(r) && /"translate":"tile\.red_flower\.allium\.name"/.test(r), r);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
