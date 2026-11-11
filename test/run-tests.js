@@ -1283,6 +1283,19 @@ console.log(JSON.stringify(calls));`;
         check('读回 lore 还原成原文：反复更新不重复追加；复制 lore 仍是翻译键', stored.length === 3 && stored[0] === 'Custom' && JSON.stringify(stored[1]).includes('"2997"')
             && Array.isArray(copied) && copied.length === 3 && JSON.stringify(copied[1]).includes('translate'), JSON.stringify(stored).slice(0, 300));
     }
+    {
+        // 名字键带说明行（Name~LINEBREAK~~LINEBREAK~§9Mod）：脚本拼名字时用只有名字的键，不把说明行带进准星方块名
+        const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const en = xm.files.get('RP/texts/en_US.lang').toString().replace(/^tile\.tianji:altar\.name=.*$/m, 'tile.tianji:altar.name=Altar~LINEBREAK~~LINEBREAK~§9Tianji');
+        xm.files.set('RP/texts/en_US.lang', Buffer.from(en));
+        xm.files.set('RP/texts/zh_CN.lang', Buffer.from('tile.tianji:altar.name=祭坛~LINEBREAK~~LINEBREAK~§9天机\n'));
+        xm.files.set('BP/scripts/hn.js', Buffer.from('import { world } from "@minecraft/server";\nfunction gy(e){return String(e).replace(/^[^:]+:/,"").replace(/[._\\-]+/g," ").split(" ").map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(" ")}\nexport function show(p, b) { p.onScreenDisplay.setActionBar(gy(b)); }\n'));
+        await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
+        const js = xm.files.get('BP/scripts/hn.js').toString();
+        const en2 = NS.parseLang(xm.files.get('RP/texts/en_US.lang').toString()), zh2 = NS.parseLang(xm.files.get('RP/texts/zh_CN.lang').toString());
+        check('名字键带说明行：另建只有名字的键给拼名函数用（各语言取第一行）', /"tianji:altar":"tile\.tianji:altar\.name\.short"/.test(js)
+            && en2.get('tile.tianji:altar.name.short') === 'Altar' && zh2.get('tile.tianji:altar.name.short') === '祭坛', JSON.stringify([en2.get('tile.tianji:altar.name.short'), zh2.get('tile.tianji:altar.name.short')]));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
