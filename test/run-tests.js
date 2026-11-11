@@ -783,6 +783,13 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('名称里引用了别的 %键：引用原样保留，只把自己的文字换成 %新键；只有引用的不动',
             dn === '%tile.5fs_br.spikes.name\n§7§c%potion.wither II (0:05)§r\n§9%tile.5fs_br:spikes.name.text' && vals.includes('Bedrock Reimagined') && !vals.some(v => /%tile|%potion/.test(v)) && d2 === '%tile.5fs_br.only.name\n§7%potion.wither II', JSON.stringify(dn));
     }
+    {
+        // 百分号：带参数的值 % → %%、已有的 %% 不再翻倍；不带参数的值 %% → %
+        const cp = new NS.ExtractContext({});
+        NS.processScript('import { world } from "@minecraft/server";\nexport function f(p, a) { p.sendMessage("Full 100% safe now"); p.sendMessage("Chance: " + a + "% to win"); p.sendMessage("Rate 50%% done here"); p.sendMessage(`Bonus ${a}%% extra power`); p.sendMessage("Keep %%s as written"); }\n', 'scripts/pct.js', cp, { injectRuntime: true, runtimeKey: '__ADDON_I18N_pct' });
+        const pv = [...cp.entries.values()].map(e => e.value);
+        check('百分号：带参数时 %→%%、已转义的 %% 不翻倍；不带参数时 %%→%', JSON.stringify(pv) === JSON.stringify(['Full 100% safe now', 'Chance: %1$s%% to win', 'Rate 50% done here', 'Bonus %1$s%% extra power', 'Keep %%s as written']), JSON.stringify(pv));
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
