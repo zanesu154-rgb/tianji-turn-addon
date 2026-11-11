@@ -766,6 +766,11 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('隐藏方块有可见物品代替出现时：方块名照常提取、物品键照常补全；真正隐藏的仍跳过',
             vals.includes('Lily pad with lotus') && !vals.includes('Ghost Block') && /item\.sert:lily_item=Lily pad/.test(zh), JSON.stringify(vals.slice(-5)));
     }
+    {
+        const cm = new NS.ExtractContext({}); cm.sayMode = 'tellraw';
+        const me = NS.translateCommand('/me waves at @p warmly', cm, 'cmd.me', 'f', { sender: { text: 'Guide' } }).cmd;
+        check('/me → tellraw，保留 “* 发送者 消息” 格式', me === '/tellraw @a {"rawtext":[{"text":"* "},{"text":"Guide"},{"text":" "},{"translate":"cmd.me","with":{"rawtext":[{"selector":"@p"}]}}]}' && [...cm.entries.values()][0].value === 'waves at %1$s warmly', me);
+    }
     for (const [t, isCmd] of [['fill -20 64 -20 20 64 20 stone', true], ['setblock 0 69 -20 stone', true], ['tp ~ ~10 ~', true],
         ['Fill the bucket with water', false], ['Time is up!', false], ['list of items: 3 swords', false]]) {
         check(`命令识别：${t} → ${isCmd ? '命令' : '文本'}`, NS.looksLikeCommand(t) === isCmd);
@@ -1023,6 +1028,17 @@ console.log(JSON.stringify(calls));`;
         const acts = JSON.parse(G(npc, 'Actions'));
         check('NPC 名字、正文、按钮 → 翻译键', rr(G(npc, 'RawtextName')) === '你好,claude' && rr(G(npc, 'InterativeText')) === '这是一条测试文本' && rr(acts[0].button_name) === '这是一条测试文本');
         check('NPC 按钮命令保持不变', acts[0].data[0].cmd_line === '/give @a command_block');
+        {
+            // 世界名称：列在需人工处理最前面，修改后写回 level.dat 的 LevelName 和 levelname.txt
+            const nm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
+            const ns = await NS.openWorld(nm, {}, () => {});
+            const u0 = ns.ctx.untranslatable[0];
+            ns.setValue(u0.ref, '我的测试世界');
+            await ns.build(nm, () => {});
+            const lvb = nm.files.get('level.dat');
+            const lt = NS.NBT.readAll(new Uint8Array(lvb).subarray(8));
+            check('世界名称可修改：写回 level.dat 的 LevelName 和 levelname.txt', /世界名称/.test(u0.where) && NS.NBT.getStr(lt[0].v, 'LevelName') === '我的测试世界' && String(nm.files.get('levelname.txt')) === '我的测试世界');
+        }
         {
             const sx = await NS.openWorld(new MemFS(readDir(path.join(__dirname, 'world-fixture'))), { listCommandBlockNames: true }, () => {});
             const sd = await NS.openWorld(new MemFS(readDir(path.join(__dirname, 'world-fixture'))), {}, () => {});

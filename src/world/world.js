@@ -616,6 +616,12 @@
             ctx.warnings.push(...embedded.ctx.warnings);
             log(`[存档] 自带包：新增翻译键 ${embedded.summary.newKeys} 条，无法本地化 ${embedded.ctx.untranslatable.length} 处（见翻译表 packs_untranslatable.csv）`);
         }
+        // 世界名称（世界列表里显示的名字）：游戏不支持翻译键，放在需人工处理的最前面，可直接改名
+        {
+            const lr = records.find(r => r.kind === 'level');
+            const ln = lr && lr.tags[0] && getStr(lr.tags[0].v, 'LevelName');
+            if (ln != null) ctx.untranslatable.unshift({ file: lr.label, where: '世界名称（世界列表里显示的名字）', text: ln, reason: '世界名不支持翻译键，可在这里直接改名', ref: `${lr.id}|${JSON.stringify([0, 'LevelName'])}` });
+        }
         const session = makeSession(records, ctx, opt, { levelName, rootDir, levelDatPath: levelDat, wrpOriginal, existingPack, packDir, embedded });
         // 最低可用版本：level.dat 的 MinimumCompatibleClientVersion；存档自带包要求更高时一并说明
         if (NS.MinVersion) {
@@ -707,7 +713,7 @@
             fs.writeBytes(session.levelDatPath, out);
             // 世界列表显示的名字来自 levelname.txt
             const ln = getStr(lv.tags[0].v, 'LevelName');
-            if (ln != null && fs.list().includes(rootDir + 'levelname.txt')) fs.writeText(rootDir + 'levelname.txt', ln);
+            if (ln != null) fs.writeText(rootDir + 'levelname.txt', ln);
             log('[写回] level.dat 已更新');
         }
 
