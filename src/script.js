@@ -1026,14 +1026,47 @@
     }
     return cmd;
   };
-  const reg = (exact, pats, sp) => {
+  // 键 → 原文（第一条登记的是源语言）：读回 lore 时还原
+  const srcText = new Map(), srcPat = new Map();
+  const back = (e) => {
+    if (e == null) return "";
+    if (typeof e === "string") return e;
+    if (typeof e.text === "string") return e.text;
+    if (Array.isArray(e.rawtext)) { let o = ""; for (const x of e.rawtext) { const y = back(x); if (y == null) return null; o += y; } return o; }
+    if (typeof e.translate !== "string") return null;
+    const w = e.with && Array.isArray(e.with.rawtext) ? e.with.rawtext.map(back) : (Array.isArray(e.with) ? e.with.map(String) : []);
+    if (w.some((x) => x == null)) return null;
+    const sp = srcPat.get(e.translate);
+    if (sp) {
+      const [lits, ord] = sp;
+      let o = lits[0];
+      for (let i = 1; i < lits.length; i++) { const g = ord && ord.length ? ord[i - 1] : i; o += (w[g - 1] == null ? "" : w[g - 1]) + lits[i]; }
+      return o;
+    }
+    return srcText.has(e.translate) ? srcText.get(e.translate) : null;
+  };
+  const GL = (it, opt) => {
+    if (opt && (it == null || typeof it.getLore !== "function")) return undefined;
+    if (it == null || typeof it.getLore !== "function") return it.getLore();   // 和原来一样抛错，让外面的 catch 接住
+    try {
+      if (typeof it.getRawLore === "function") {
+        const r = it.getRawLore();
+        if (Array.isArray(r) && r.length) { const out = r.map(back); if (out.every((x) => x != null)) return out; }
+      }
+    } catch (e) { /* 读不了就用原来的 */ }
+    return it.getLore();
+  };
+  const reg = (exact, pats, sp, srcs) => {
     cf = null;
+    for (const [k, lits] of srcs || []) if (!srcPat.has(k)) srcPat.set(k, [lits, null]);
     if (sp) for (const x of sp) if (seps.indexOf(x) < 0) seps.push(x);
     for (const [s, k] of exact) {
       if (!m.has(s)) m.set(s, k);
+      if (!srcText.has(k)) srcText.set(k, s);
       if (s.indexOf("\\n") >= 0 && !m.has(N(s))) m.set(N(s), k);
     }
     for (const [k, lits, ord] of pats) {
+      if (!srcPat.has(k)) srcPat.set(k, [lits, ord]);
       const len = lits.join("").length;
       p.push([k, new RegExp("^" + lits.map(esc).join("([\\\\s\\\\S]*?)") + "$"), len, ord, lits]);
     }
@@ -1048,6 +1081,7 @@
       const full = id.indexOf(":") >= 0 ? id : "minecraft:" + id;
       const k = ids.get(full) || ents.get(full);
       if (k && m.get(text) !== k) { m.set(text, k); cache.delete(text); }
+      if (k && !srcText.has(k)) srcText.set(k, text);
     }
     return text;
   };
@@ -1093,7 +1127,7 @@
     }).join("");
     return hit ? out : s;
   };
-  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds, keep, bake, B });
+  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds, keep, bake, B, GL });
 })();
 `;
     }
@@ -1577,6 +1611,8 @@
         const handled = new Set();     // 已作为显示参数处理过的节点（不再登记为候选）
         const exact = [];              // [原文, 键]
         const patterns = [];           // [键, [字面量片段…]]
+        const srcPats = [];            // [键, [字面量片段…]]：只用来把读回的 lore 还原成原文
+        let usesGL = false;
         let usesRuntime = false;
 
         // 流进固定长度 ASCII HUD 数据包的文字（跨文件预扫描得到）：无法本地化，不提取；
@@ -1707,6 +1743,7 @@
                     const value = partsToValue(cleaned);
                     const key = ctx.alloc(keyBase(hint), value, meta(hint));
                     const args = cleaned.filter(p => !('lit' in p));
+                    if (args.length) { const lits = ['']; for (const p of cleaned) { if ('lit' in p) lits[lits.length - 1] += p.lit; else lits.push(''); } srcPats.push([key, lits]); }
                     if (lead) els.push(JSON.stringify({ text: lead }));
                     if (args.length) {
                         usesRuntime = true;
@@ -1848,8 +1885,25 @@
                 // @minecraft/server 2.2.0 起 setLore 接受 RawMessage：按显示文字处理
                 if (name === 'setLore' && opts.rawLore && injectRuntime && n.callee.type === 'MemberExpression' && n.arguments[0] && !inDebug(n)) {
                     const a = n.arguments[0];
-                    if (a.type === 'ArrayExpression') a.elements.forEach(el => el && el.type !== 'SpreadElement' && transformSinkExpr(el, 'lore'));
+                    if (a.type === 'ArrayExpression') a.elements.forEach(el => {
+                        if (!el) return;
+                        // setLore([...old, ...lines])：展开的数组逐行按显示文字处理
+                        if (el.type === 'SpreadElement') { const x = el.argument; if (x.type !== 'ArrayExpression') { usesRuntime = true; overrides.set(x, () => `${RT}.MA(${renderOrig(x)})`); } else x.elements.forEach(y => y && y.type !== 'SpreadElement' && transformSinkExpr(y, 'lore')); return; }
+                        transformSinkExpr(el, 'lore');
+                    });
                     else if (a.type !== 'Literal' && a.type !== 'SpreadElement') { usesRuntime = true; overrides.set(a, () => `${RT}.MA(${renderOrig(a)})`); }
+                    return;
+                }
+                // 读回 lore（脚本按英文原文判断哪几行是自己加的，再整体重写）：lore 已经写成翻译键，
+                // getLore() 读到的不再是原文 → 改成按 getRawLore() 还原成原文，否则每次都会再追加一遍
+                if (name === 'getLore' && opts.rawLore && injectRuntime && !n.arguments.length && n.callee.type === 'MemberExpression' && !inDebug(n) && /\.setLore\b/.test(source)) {
+                    const obj = n.callee.object;
+                    const opt = !!(n.optional || n.callee.optional);   // x.getLore?.() / x?.getLore()：对象不存在时返回 undefined
+                    const call = () => `${RT}.GL(${renderOrig(obj)}${opt ? ', 1' : ''})`;
+                    // b.setLore(a.getLore())：复制 lore → 还原成原文后再按显示文字换成键
+                    usesRuntime = true;
+                    usesGL = true;
+                    overrides.set(n, overrides.has(n) ? () => `${RT}.MA(${call()})` : call);
                     return;
                 }
                 // 无法翻译的显示位置：记录
@@ -2311,7 +2365,8 @@
         if (debugSkipped) ctx.warn(`${file}: ${debugFile ? '调试脚本' : '调试分支'}里的 ${debugSkipped} 处文本未提取`);
 
         // ---- 生成输出 ----
-        const hasRegistrations = exact.length > 0 || patterns.length > 0;
+        if (!usesGL) srcPats.length = 0;
+        const hasRegistrations = exact.length > 0 || patterns.length > 0 || srcPats.length > 0;
         if (overrides.size === 0 && !hasRegistrations) return { content: source, changed: false };
 
         let body = renderOrig(ast);
@@ -2322,7 +2377,7 @@
                 const ex = [];
                 const seen = new Set();
                 for (const [s, k] of exact) { if (!seen.has(s)) { seen.add(s); ex.push([s, k]); } }
-                prelude += `${RT}.reg(${JSON.stringify(ex)}, ${JSON.stringify(patterns)}${joinSeps.length ? ', ' + JSON.stringify(joinSeps) : ''});\n`;
+                prelude += `${RT}.reg(${JSON.stringify(ex)}, ${JSON.stringify(patterns)}${joinSeps.length || srcPats.length ? ', ' + JSON.stringify(joinSeps) : ''}${srcPats.length ? ', ' + JSON.stringify(srcPats) : ''});\n`;
             }
             if ((opts.uiCompared && opts.uiCompared.size) || (opts.uiPrefixes && opts.uiPrefixes.size)) prelude += `${RT}.keep(${JSON.stringify([...(opts.uiCompared || [])])}, ${JSON.stringify([...(opts.uiPrefixes || [])])});\n`;
             const own = {};

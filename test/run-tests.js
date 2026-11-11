@@ -1265,6 +1265,24 @@ console.log(JSON.stringify(calls));`;
         check('自定义效果名提取，"名字 + 等级 + 时间" 只翻译名字', [...ctx.entries.values()].some(e => e.value === 'Illumination') && /"translate":"script\.br\.effect\.illumination"\},\{"text":" III \(0:44\)"\}/.test(ill), ill);
         check('界面拿来比较的标题以 s 结尾也保持原文（运行时正则转义）', rt.M('Advancements') === 'Advancements' && rt.M('§lAdvancements ') === '§lAdvancements ');
     }
+    {
+        // 脚本读回 lore（getLore）按英文判断哪些行是自己加的再重写：lore 写成键后要还原成原文，否则每次再追加一遍
+        const ctx = new NS.ExtractContext({});
+        const src = 'import { world } from "@minecraft/server";\nconst B="§r§6Ancient Bark 0/3 Repairs Left";\nfunction A(e){return typeof e=="string"&&(e.includes("Ancient Bark")||e.startsWith("§r§7Durability: §f"))}\n'
+            + 'export function f(a,m,d){let n=[];try{n=a.getComponent("x").getLore()??[]}catch{n=a.getLore?.()??[]}const r=[`§r§7Durability: §f${m} / ${d}`,B];a.setLore([...n.filter(x=>!A(x)),...r]);}\n'
+            + 'export function c(a,b){b.setLore(a.getLore());}';
+        const js = NS.processScript(src, 'scripts/lore.js', ctx, { injectRuntime: true, runtimeKey: '__lore_t', rawLore: true }).content;
+        const head = js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '');
+        const body = js.slice(js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '').replace(/export function/g, 'function');
+        const fns = new Function(head + body + ';return { f, c };')();
+        let stored = ['Custom'];
+        const item = { getComponent() { return undefined; }, getLore() { return stored.map(x => typeof x === 'string' ? x : ''); }, getRawLore() { return stored.map(x => typeof x === 'string' ? { text: x } : x); }, setLore(v) { stored = v; } };
+        for (let i = 0; i < 3; i++) fns.f(item, 2999 - i, 3000);
+        let copied = null;
+        fns.c(item, { setLore(v) { copied = v; } });
+        check('读回 lore 还原成原文：反复更新不重复追加；复制 lore 仍是翻译键', stored.length === 3 && stored[0] === 'Custom' && JSON.stringify(stored[1]).includes('"2997"')
+            && Array.isArray(copied) && copied.length === 3 && JSON.stringify(copied[1]).includes('translate'), JSON.stringify(stored).slice(0, 300));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
