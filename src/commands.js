@@ -102,7 +102,7 @@
         const finalValue = sels.length ? value : text;
         const key = ctx.alloc(baseKey, finalValue, meta);
         const node = sels.length ? { translate: key, with: { rawtext: sels } } : { translate: key };
-        const who = sender || { selector: '@s' };
+        const who = (typeof sender === 'function' ? sender() : sender) || { selector: '@s' };
         if (mode === 'tellraw') {
             // /me 的格式是“* 发送者 消息”
             const head = isMe ? [{ text: '* ' }, who, { text: ' ' }] : [{ text: '[' }, who, { text: '] ' }];

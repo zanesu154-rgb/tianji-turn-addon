@@ -1095,7 +1095,7 @@ console.log(JSON.stringify(calls));`;
         const cmds = tags.filter(c => G(c, 'id') === 'CommandBlock').map(c => G(c, 'Command'));
         check('命令方块 title / titleraw → 翻译键', cmds.filter(c => c.startsWith('/titleraw') && c.includes('"translate"')).length === 2);
         const tr = cmds.filter(c => /^\/?tellraw @a /.test(c)).map(c => JSON.parse(c.slice(c.indexOf('{'))));
-        check('命令方块 say / tell → tellraw，发送者用方块名', tr.length === 2 && tr.every(j => rr(JSON.stringify({ rawtext: [j.rawtext[3]] })) === '这是一条测试文本') && tr.some(j => j.rawtext[1].text === 'say' || j.rawtext[1].text === '@') && !cmds.some(c => /^\/?(say|tell) /.test(c)));
+        check('命令方块 say / tell → tellraw，发送者用方块名（名字也换成翻译键）', tr.length === 2 && tr.every(j => rr(JSON.stringify({ rawtext: [j.rawtext[3]] })) === '这是一条测试文本') && tr.some(j => (j.rawtext[1].translate && rr(JSON.stringify({ rawtext: [j.rawtext[1]] })) === 'say') || j.rawtext[1].text === '@') && !cmds.some(c => /^\/?(say|tell) /.test(c)));
         const npc = tags.find(c => G(c, 'identifier') === 'minecraft:npc');
         const acts = JSON.parse(G(npc, 'Actions'));
         check('NPC 名字、正文、按钮 → 翻译键', rr(G(npc, 'RawtextName')) === '你好,claude' && rr(G(npc, 'InterativeText')) === '这是一条测试文本' && rr(acts[0].button_name) === '这是一条测试文本');
