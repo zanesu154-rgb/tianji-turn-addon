@@ -200,6 +200,7 @@ function readOptions() {
         listCommandBlockNames: $('opt-cbname').checked,
         prunePacks: $('opt-prune').checked,
         removeEditorTools: $('opt-tools').checked,
+        removeSameAddon: $('opt-same').checked,
         includeHiddenItems: $('opt-hidden').checked,
         removeJunkLang: $('opt-junk').checked,
         // 固定写入简体中文：只在简体中文界面提供

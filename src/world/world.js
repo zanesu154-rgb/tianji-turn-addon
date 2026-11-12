@@ -554,6 +554,7 @@
                 }
                 p.noReg = reg == null;
                 p.regEntries = p.uuid && reg ? reg.filter(r => r && String(r.pack_id || '').toLowerCase() === p.uuid) : [];
+                p.regIndex = p.uuid && reg ? reg.findIndex(r => r && String(r.pack_id || '').toLowerCase() === p.uuid) : -1;
                 // 名字 / 描述是 pack.name 这类键时从包里的 lang 取
                 if (/^pack\.(name|description)$/.test(p.name) || /^pack\.description$/.test(p.desc)) {
                     const lf = files.find(f => /\/texts\/en_US\.lang$/.test(f)) || files.find(f => /\/texts\/[a-z]{2}_[A-Z]{2}\.lang$/.test(f));
@@ -598,6 +599,41 @@
         for (let i = 0; i < need.length; i++) {
             for (const p of packs) if (p.uuid === need[i] && p.status === 'unused') { p.status = 'enabled'; p.dependency = true; need.push(...p.deps); }
         }
+        // 疑似同一个附加包的不同版本（uuid 不同、都启用，但定义了大部分相同的实体 / 物品 / 方块）：
+        // 游戏会同时加载，脚本重复运行；保留登记列表里排最前的（优先级最高）
+        {
+            const bps = packs.filter(p => p.type === 'behavior_packs' && p.status === 'enabled' && !p.ours && !p.tool && p.regIndex >= 0);
+            for (const p of bps) {
+                const nested = p.files.filter(f => f !== p.dir + 'manifest.json' && /\/manifest\.json$/.test(f)).map(f => f.replace(/manifest\.json$/, ''));
+                p.ids = new Set();
+                for (const f of p.files) {
+                    if (!/\.json$/i.test(f) || nested.some(n => f.startsWith(n))) continue;
+                    let t; try { t = await fs.readText(f); } catch (e) { continue; }
+                    const re = /"identifier"\s*:\s*"([^"]+:[^"]+)"/g; let m;
+                    while ((m = re.exec(t))) p.ids.add(m[1]);
+                }
+            }
+            const parent = new Map(bps.map(p => [p, p]));
+            const find = (p) => { while (parent.get(p) !== p) p = parent.get(p); return p; };
+            for (let i = 0; i < bps.length; i++) for (let j = i + 1; j < bps.length; j++) {
+                const a = bps[i].ids, b = bps[j].ids;
+                if (a.size < 3 || b.size < 3) continue;
+                let n = 0; for (const x of a) if (b.has(x)) n++;
+                if (n / Math.min(a.size, b.size) >= 0.8) parent.set(find(bps[i]), find(bps[j]));
+            }
+            const groups = new Map();
+            for (const p of bps) { const r = find(p); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(p); }
+            for (const g of groups.values()) {
+                if (g.length < 2) continue;
+                const keep = g.slice().sort((a, b) => a.regIndex - b.regIndex)[0];
+                for (const p of g) if (p !== keep) { p.status = 'same'; p.sameAs = keep; }
+            }
+            // 被替下来的行为包依赖的资源包：没有别的保留行为包依赖时一起算
+            const keptDeps = new Set(packs.filter(p => p.status === 'enabled').flatMap(p => p.deps));
+            for (const bp of packs.filter(p => p.status === 'same' && p.type === 'behavior_packs')) {
+                for (const d of bp.deps) for (const rp of packs) if (rp.type === 'resource_packs' && rp.uuid === d && rp.status === 'enabled' && !keptDeps.has(d)) { rp.status = 'same'; rp.sameAs = bp.sameAs; }
+            }
+        }
         return packs;
     }
     async function prunePacks(fs, rootDir, packDir, opt, log) {
@@ -608,12 +644,13 @@
         const size = async (p) => { let n = 0; for (const f of p.files) { try { n += fs.sizeOf ? fs.sizeOf(f) : (await fs.readBytes(f)).length; } catch (e) { /* 忽略 */ } } return n; };
         const mb = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
         const why = { unused: '没有启用', duplicate: '同一个包的另一份版本', invalid: '没有有效的 manifest.json' };
-        const drop = packs.filter(p => !p.ours && (why[p.status] || (p.tool && opt.removeEditorTools)));
+        const drop = packs.filter(p => !p.ours && (why[p.status] || (p.tool && opt.removeEditorTools) || (p.status === 'same' && opt.removeSameAddon)));
+        const same = packs.filter(p => p.status === 'same' && !opt.removeSameAddon);
         const tools = packs.filter(p => p.tool && p.status === 'enabled' && !opt.removeEditorTools);
-        if (!drop.length && !tools.length) return skip();
-        const label = (p) => p.tool && !why[p.status] ? '地图编辑工具' : why[p.status];
+        if (!drop.length && !tools.length && !same.length) return skip();
+        const label = (p) => p.status === 'same' ? `和 ${p.sameAs.folder} 是同一个附加包的不同版本` : p.tool && !why[p.status] ? '地图编辑工具' : why[p.status];
         const line = async (p) => { const n = await size(p); return [n, `  ${p.type === 'behavior_packs' ? '行为包' : '资源包'} ${p.folder}（${p.name}${p.version.some(Boolean) ? ' v' + p.version.join('.') : ''}，${mb(n)}）：${label(p)}`]; };
-        const del = drop.filter(p => opt.prunePacks || p.tool);
+        const del = drop.filter(p => opt.prunePacks || p.tool || p.status === 'same');
         const keep = drop.filter(p => !del.includes(p) && why[p.status]);
         if (del.length) {
             let total = 0; const lines = [];
@@ -621,7 +658,7 @@
             for (const p of del) {
                 const [n, l] = await line(p); total += n; lines.push(l);
                 for (const f of p.files) fs.remove(f);
-                if (p.uuid && p.status === 'enabled') { if (!unreg.has(p.type)) unreg.set(p.type, new Set()); unreg.get(p.type).add(p.uuid); }
+                if (p.uuid && (p.status === 'enabled' || p.status === 'same')) { if (!unreg.has(p.type)) unreg.set(p.type, new Set()); unreg.get(p.type).add(p.uuid); }
             }
             // 删掉的重复版本：登记文件里只留下保留的那个版本
             for (const p of del) if (p.status === 'duplicate' && p.uuid) {
@@ -661,13 +698,18 @@
             for (const p of keep) { const [n, l] = await line(p); total += n; lines.push(l); }
             log(`[存档] 有 ${keep.length} 个包游戏不会加载，共 ${mb(total)}；勾选“删除存档里没启用、重复和无效的包”可以删掉：\n${lines.join('\n')}`, 'warn');
         }
+        if (same.length) {
+            const lines = [];
+            for (const p of same) lines.push((await line(p))[1]);
+            log(`[存档] 有 ${same.length} 个包疑似同一个附加包的不同版本（uuid 不同，但定义了大部分相同的实体 / 物品），游戏会同时加载；勾选“同时删除同一附加包的其他版本”只保留登记排最前的：\n${lines.join('\n')}`, 'warn');
+        }
         if (tools.length) log(`[存档] 发现地图编辑工具（已启用）：${tools.map(p => `${p.folder}（${p.name}）`).join('、')}；地图做好后通常用不到，勾选“同时删除地图编辑工具”可以删掉并取消启用`, 'warn');
         return skip();
     }
 
     // ---------------- 打开存档 ----------------
     async function openWorld(fs, userOptions = {}, log = () => {}) {
-        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: false, sayMode: 'tellraw', listCommandBlockNames: false, baseName: 'world', prunePacks: false, removeEditorTools: false, ...userOptions };
+        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: false, sayMode: 'tellraw', listCommandBlockNames: false, baseName: 'world', prunePacks: false, removeEditorTools: false, removeSameAddon: false, ...userOptions };
         let all = fs.list();
         const levelDat = all.filter(p => /(^|\/)level\.dat$/.test(p)).sort((a, b) => a.length - b.length)[0];
         if (!levelDat) throw new Error('没有找到 level.dat，这不是世界存档');
@@ -731,6 +773,12 @@
         // 游戏只加载 world_behavior_packs.json / world_resource_packs.json 里登记的包，其余只占空间
         const skipDirs = (await prunePacks(fs, rootDir, packDir, opt, log)) || [];
         all = fs.list();
+        // 包文件夹里又套着的包（Foo/Bar_behavior_pack/manifest.json）：游戏不加载，不提取
+        for (const f of all) {
+            if (!f.startsWith(rootDir)) continue;
+            const m = /^((?:behavior_packs|resource_packs)\/[^/]+\/.+\/)manifest\.json$/.exec(f.slice(rootDir.length));
+            if (m) skipDirs.push(rootDir + m[1]);
+        }
         const skipped = (f) => skipDirs.some(d => f.startsWith(d));
         if (skipDirs.length) log(`[存档] ${skipDirs.length} 个游戏不会加载的包不提取文本`);
         let existingPack = null;

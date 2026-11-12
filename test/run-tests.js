@@ -1363,6 +1363,29 @@ console.log(JSON.stringify(calls));`;
         check('包文件夹名大小写不标准（Resource_packs）：改成标准写法，正常配对不另建资源包', !keys.some(k => /(^|\/)(Resource_packs|Behavior_Packs)\//.test(k)) && keys.some(k => /(^|\/)resource_packs\/Fx_RP\/manifest\.json$/.test(k))
             && !keys.some(k => /Fx_BP_texts/.test(k)) && logs.some(l => /大小写不标准/.test(l)), logs.filter(l => /配对|新建|大小写/.test(l)).join('\n'));
     }
+    {
+        // uuid 不同、但实体大多相同的两个包：疑似同一附加包的不同版本，勾选后只留登记排最前的
+        const base = readDir(path.join(__dirname, 'world-fixture'));
+        const root = [...base.keys()].find(k => /(^|\/)level\.dat$/.test(k)).replace(/level\.dat$/, '');
+        const m = new Map(base);
+        const mk = (dir, uuid, name, ids) => {
+            m.set(root + `behavior_packs/${dir}/manifest.json`, JSON.stringify({ format_version: 2, header: { name, uuid, version: [1, 0, 0] }, modules: [{ type: 'data', uuid: uuid.replace(/.$/, 'f'), version: [1, 0, 0] }] }));
+            ids.forEach((id, n) => m.set(root + `behavior_packs/${dir}/entities/e${n}.json`, JSON.stringify({ format_version: '1.20.0', 'minecraft:entity': { description: { identifier: id }, components: {} } })));
+        };
+        mk('Mod36', 'aaaaaaaa-0000-4000-8000-000000000001', 'Mod 3.6', ['m:a', 'm:b', 'm:c', 'm:d']);
+        mk('Mod30', 'bbbbbbbb-0000-4000-8000-000000000001', 'Mod Update 3.0', ['m:a', 'm:b', 'm:c']);
+        mk('Other', 'cccccccc-0000-4000-8000-000000000001', 'Other', ['o:x', 'o:y', 'o:z']);
+        m.set(root + 'world_behavior_packs.json', JSON.stringify(['aaaaaaaa', 'bbbbbbbb', 'cccccccc'].map(u => ({ pack_id: u + '-0000-4000-8000-000000000001', version: [1, 0, 0] }))));
+        const logs = [];
+        const w0 = new MemFS(new Map(m));
+        await NS.runWorldPipeline(w0, { baseName: 'test' }, (s) => logs.push(s));
+        const w1 = new MemFS(new Map(m));
+        await NS.runWorldPipeline(w1, { baseName: 'test', removeSameAddon: true }, () => {});
+        const left = new Set([...w1.files.keys()].filter(k => k.startsWith(root + 'behavior_packs/')).map(k => k.slice(root.length + 15).split('/')[0]));
+        const reg = JSON.parse(w1.files.get(root + 'world_behavior_packs.json').toString());
+        check('疑似同一附加包的不同版本：默认只提示；勾选后只留登记排最前的并取消其余登记', logs.some(l => /Mod30.*和 Mod36 是同一个附加包的不同版本/.test(l)) && w0.files.has(root + 'behavior_packs/Mod30/manifest.json')
+            && [...left].sort().join(',') === 'Mod36,Other' && reg.length === 2, JSON.stringify([...left]));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
