@@ -535,6 +535,12 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         }
         files.set('behavior_packs/Lone/manifest.json', Buffer.from(JSON.stringify({ format_version: 2, header: { name: 'Lone', uuid: 'd0000000-0000-4000-8000-000000000001', version: [1, 0, 0], min_engine_version: [1, 20, 0] }, modules: [{ type: 'data', uuid: 'd0000000-0000-4000-8000-000000000002', version: [1, 0, 0] }] })));
         files.set('behavior_packs/Lone/dialogue/raymond.json', Buffer.from(JSON.stringify({ format_version: '1.17', 'minecraft:npc_dialogue': { scenes: [{ scene_tag: 'raymond', npc_name: '§6Raymond', text: 'Huh? Hello', buttons: [{ name: 'Who are you?', commands: [] }] }] } })));
+        // 登记成已启用（没登记的包游戏不加载，不提取）
+        for (const t of ['behavior', 'resource']) {
+            const reg = [];
+            for (const [n, b] of files) if (new RegExp(`^${t}_packs\\/[^/]+\\/manifest\\.json$`).test(n)) { const h = NS.parseJsonLenient(b.toString()).header; reg.push({ pack_id: h.uuid, version: h.version }); }
+            files.set(`world_${t}_packs.json`, Buffer.from(JSON.stringify(reg)));
+        }
         const em = new MemFS(files);
         const er = await NS.runWorldPipeline(em, {}, () => {});
         const prefix = [...em.files.keys()].find(k => k.endsWith('behavior_packs/Lone/manifest.json')).replace('behavior_packs/Lone/manifest.json', '');
@@ -1338,6 +1344,24 @@ console.log(JSON.stringify(calls));`;
         }
         check('日志译成英文后没有残留中文（玩家原文、包名除外）', left.length === 0, left.slice(0, 5).join('\n'));
         check('日志繁体：按字转换且不改玩家原文', NS.LogI18n.tr('[需人工处理] world 物品名（x）: 这个书', 'zh_TW') === '[需人工處理] world 物品名（x）: 这个书' && NS.LogI18n.tr('[脚本] a.js（静态改写 1 处，运行时登记 2 条，合并自带多语言 5 条）', 'zh_TW').includes('合併'));
+    }
+    {
+        // 资源包文件夹写成 Resource_packs：改成标准写法后正常配对，不另建资源包
+        const files = new Map(readDir(path.join(__dirname, 'world-fixture')));
+        for (const [n, b] of readDir(path.join(__dirname, 'fixture'))) {
+            if (n.startsWith('BP/')) files.set('Behavior_Packs/Fx_BP/' + n.slice(3), b);
+            else if (n.startsWith('RP/')) files.set('Resource_packs/Fx_RP/' + n.slice(3), b);
+        }
+        for (const [t, dir] of [['behavior', 'Behavior_Packs/Fx_BP'], ['resource', 'Resource_packs/Fx_RP']]) {
+            const h = NS.parseJsonLenient(files.get(dir + '/manifest.json').toString()).header;
+            files.set(`world_${t}_packs.json`, Buffer.from(JSON.stringify([{ pack_id: h.uuid, version: h.version }])));
+        }
+        const cm = new MemFS(files);
+        const logs = [];
+        await NS.runWorldPipeline(cm, {}, (s) => logs.push(s));
+        const keys = [...cm.files.keys()];
+        check('包文件夹名大小写不标准（Resource_packs）：改成标准写法，正常配对不另建资源包', !keys.some(k => /(^|\/)(Resource_packs|Behavior_Packs)\//.test(k)) && keys.some(k => /(^|\/)resource_packs\/Fx_RP\/manifest\.json$/.test(k))
+            && !keys.some(k => /Fx_BP_texts/.test(k)) && logs.some(l => /大小写不标准/.test(l)), logs.filter(l => /配对|新建|大小写/.test(l)).join('\n'));
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
