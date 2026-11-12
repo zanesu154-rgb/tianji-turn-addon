@@ -135,7 +135,7 @@ GitHub Pages caches files. Force-reload the page or clear the site's cache. The 
 
 - Obfuscated scripts (with encoded strings) cannot be extracted
 - What players type in chat does not go through lang files; chat keywords can only support other languages if the author adds those phrases to the regex
-- The processing log and the reasons in reports are currently in Chinese only
+- The reasons in the downloaded sheets are currently in Chinese only; the processing log on the page follows the interface language
 - The visit counter uses the third-party service Busuanzi; it only counts page views and never touches your files, and it is hidden if it fails to load
 
 ---
