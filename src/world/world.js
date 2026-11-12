@@ -560,6 +560,8 @@
                     const lf = files.find(f => /\/texts\/en_US\.lang$/.test(f)) || files.find(f => /\/texts\/[a-z]{2}_[A-Z]{2}\.lang$/.test(f));
                     if (lf) { try { const L = NS.parseLang(await fs.readText(lf)); if (L.get(p.name)) p.name = NS.stripFormatting(L.get(p.name)); if (L.get(p.desc)) p.desc = NS.stripFormatting(L.get(p.desc)); } catch (e) { /* 忽略 */ } }
                 }
+                // 本工具上次为行为包新建的翻译资源包（Foo_texts，名字是 pack.name 键或没有 manifest）：不当作无用包
+                if (type === 'resource_packs' && !loose && /_texts$/.test(p.folder) && (!mf || /^pack\.name$|- Texts$/.test(p.name))) p.ours = true;
                 p.tool = !p.ours && EDITOR_TOOL_RE.test(p.name + ' ' + p.desc + ' ' + p.folder);
                 packs.push(p);
             }
@@ -768,7 +770,21 @@
 
         // 之前转换生成的翻译资源包：保留其中的键和译文，新键接在后面，不覆盖
         const packFolder = /^[\x20-\x7e]+$/.test(levelName) ? `${NS.sanitizeKeyPart(levelName)}_texts` : 'world_texts';
-        const packDir = `${rootDir}resource_packs/${packFolder}/`;
+        let packDir = `${rootDir}resource_packs/${packFolder}/`;
+        // 改过世界名再转换：按名字找不到上次的翻译包时，找含 world.* 键的 *_texts 资源包沿用
+        if (!all.some(f => f.startsWith(packDir))) {
+            let best = null, bestN = 0;
+            const dirs = new Set(all.filter(f => f.startsWith(rootDir + 'resource_packs/')).map(f => f.slice(rootDir.length + 15).split('/')[0]).filter(d => /_texts$/.test(d)));
+            for (const d of dirs) {
+                let n = 0;
+                for (const f of all) {
+                    if (!f.startsWith(`${rootDir}resource_packs/${d}/texts/`) || !/\.lang$/.test(f)) continue;
+                    try { n += (String(await fs.readText(f)).match(/^world\.[^=\n]+=/mg) || []).length; } catch (e) { /* 忽略 */ }
+                }
+                if (n > bestN) { best = d; bestN = n; }
+            }
+            if (best) { packDir = `${rootDir}resource_packs/${best}/`; log(`[资源包] 没有找到 ${packFolder}/，沿用之前生成的 ${best}/（世界名可能改过）`); }
+        }
         // ---- 清理存档里的包：没启用的、同一个包的多份旧版本、无效的（没有 manifest）、地图编辑工具 ----
         // 游戏只加载 world_behavior_packs.json / world_resource_packs.json 里登记的包，其余只占空间
         const skipDirs = (await prunePacks(fs, rootDir, packDir, opt, log)) || [];
@@ -782,14 +798,16 @@
         const skipped = (f) => skipDirs.some(d => f.startsWith(d));
         if (skipDirs.length) log(`[存档] ${skipDirs.length} 个游戏不会加载的包不提取文本`);
         let existingPack = null;
-        if (all.includes(packDir + 'manifest.json')) {
-            const man = NS.parseJsonLenient(await fs.readText(packDir + 'manifest.json'));
+        // 只放回了翻译好的 texts/*.lang（没有 manifest）也算：沿用译文，生成时补上 manifest
+        if (all.includes(packDir + 'manifest.json') || all.some(f => f.startsWith(packDir + 'texts/') && /\.lang$/.test(f))) {
+            let man = null;
+            if (all.includes(packDir + 'manifest.json')) { try { man = NS.parseJsonLenient(await fs.readText(packDir + 'manifest.json')); } catch (e) { man = null; } }
             const langs = new Map();
             for (const f of all) {
                 const m = f.startsWith(packDir + 'texts/') && /\/([A-Za-z]{2}_[A-Za-z]{2})\.lang$/.exec(f);
                 if (m) { const raw = await fs.readText(f); langs.set(m[1], { path: f, raw, map: NS.parseLang(raw) }); }
             }
-            existingPack = { dir: packDir, uuid: man && man.header && man.header.uuid, langs };
+            existingPack = { dir: packDir, uuid: man && man.header && man.header.uuid, langs, noManifest: !(man && man.header && man.header.uuid) };
             log(`[资源包] 发现之前生成的 ${packDir}（${langs.size} 种语言），新提取的键会追加进去，已有译文保留`);
         }
         const knownKeys = new Set(), existingValues = new Map();
@@ -804,7 +822,14 @@
             existingValues.get(k).add(v);
         }
 
-        const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines, knownKeys, existingValues });
+        // 之前生成的翻译资源包里的键都是本工具生成的：用原始存档再次转换时按顺序认领，已有译文保留
+        const keyLangs = new Map(), prevKeys = new Set();
+        if (existingPack) for (const [lang, e] of existingPack.langs) for (const k of e.map.keys()) {
+            prevKeys.add(k);
+            if (!keyLangs.has(k)) keyLangs.set(k, new Set());
+            keyLangs.get(k).add(lang);
+        }
+        const ctx = new NS.ExtractContext({ splitNewlines: opt.splitNewlines, knownKeys, existingValues, keyLangs, prevKeys });
         ctx.sayMode = opt.sayMode;
         ctx.listCommandBlockNames = !!opt.listCommandBlockNames;
         convertRecords(ctx, records, log);
@@ -952,16 +977,25 @@
             // 追加到之前生成的资源包：已有内容（含译文）原样保留
             packDir = ex.dir;
             const langs = [...new Set([...ex.langs.keys(), ...opt.targetLangs, sourceLang, 'en_US'])];
-            const body = [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n');
+            let added = 0;
             for (const l of langs) {
                 const e = ex.langs.get(l);
+                // 这个语言文件里已有的键（含译文）不再追加，避免后写的原文覆盖译文
+                const rows = [...ctx.entries].filter(([k]) => !(e && e.map.has(k))).map(([k, en]) => `${k}=${NS.toLangValue(en.value)}`);
+                added = Math.max(added, rows.length);
                 const head = e ? e.raw.replace(/\s*$/, '\n') : `pack.name=${levelName} - Texts\npack.description=Translations for ${levelName}\n`;
-                fs.writeText(e ? e.path : `${packDir}texts/${l}.lang`, `${head}\n## ==== addon-i18n 再次提取新增（源语言 ${sourceLang}${l === sourceLang ? '' : '，待翻译'}） ====\n${body}\n`);
+                if (e && !rows.length) continue;
+                fs.writeText(e ? e.path : `${packDir}texts/${l}.lang`, rows.length ? `${head}\n## ==== addon-i18n 再次提取新增（源语言 ${sourceLang}${l === sourceLang ? '' : '，待翻译'}） ====\n${rows.join('\n')}\n` : head);
             }
             fs.writeText(`${packDir}texts/languages.json`, JSON.stringify(langs, null, 2));
+            if (ex.noManifest) {
+                const pk = textsPackFiles(ctx, opt, levelName, sourceLang);
+                fs.writeText(packDir + 'manifest.json', pk.files.get('manifest.json'));
+                ex.uuid = pk.uuid; ex.noManifest = false;
+            }
             const wrp = rootDir + 'world_resource_packs.json';
             if (ex.uuid && !session.wrpOriginal.some(p => p && p.pack_id === ex.uuid)) fs.writeText(wrp, JSON.stringify([...session.wrpOriginal, { pack_id: ex.uuid, version: [1, 0, 0] }], null, 2));
-            log(`[资源包] 追加 ${ctx.entries.size} 个新键到 ${packDir}（已有内容保留）`);
+            log(`[资源包] 追加 ${added} 个新键到 ${packDir}（已有内容保留）`);
         } else if (ctx.entries.size) {
             packDir = session.packDir;
             const pack = textsPackFiles(ctx, opt, levelName, sourceLang);

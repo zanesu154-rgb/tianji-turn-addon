@@ -121,6 +121,7 @@
         const existingValues = new Map();
         const keyLangs = new Map();
         const prevKeys = new Set();
+        const authorKeys = new Set();
         const packLangs = new Map();   // 包根 → Map(语言 → {path, map, raw})
         for (const pk of packs) {
             const langs = new Map();
@@ -134,6 +135,8 @@
                 // 上次转换写进去的键（标记行之后）：再次转换时按顺序认领，保留已有译文
                 const at = raw.indexOf(MARK);
                 if (at >= 0) for (const k of parseLang(raw.slice(at)).keys()) prevKeys.add(k);
+                // 标记行之前（或没有标记行的整个文件）是包作者自己的键：不会被当成旧键删除
+                for (const k of parseLang(at >= 0 ? raw.slice(0, at) : raw).keys()) authorKeys.add(k);
                 for (const [k, v] of map) {
                     knownKeys.add(k);
                     if (!keyLangs.has(k)) keyLangs.set(k, new Set());
@@ -505,6 +508,12 @@
                     const a = nm(bp);
                     if (a.length >= 8) { const c = rpsAll.filter(r => !used.has(r) && ![...pairOf.values()].includes(r) && lev(a, nm(r)) <= 2); if (c.length === 1) rp = c[0]; }
                 }
+                // 本工具上次为它新建的翻译资源包（Foo_texts / Foo_texts_RP）又放回来了
+                if (!rp) {
+                    const want = NS.sanitizeKeyPart(bp.root.split('/').pop() || opt.baseName);
+                    rp = rpsAll.find(r => { const n = r.root.split('/').pop(); return n === `${want}_texts` || n === `${want}_texts_RP`; });
+                    if (rp) rp.reusedTexts = true;
+                }
                 if (!rp && bpsAll.length === 1 && rpsAll.length === 1) rp = rpsAll[0];
                 if (rp) pairOf.set(bp.root, rp);
             }
@@ -554,6 +563,41 @@
                 : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
                     const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
                 });
+            // 上次转换为它新建的翻译资源包又放回来了（用原包再次转换）：沿用它和里面的译文
+            const prevRp = packs.find(p => p.type === 'RP' && p.root === rpRoot);
+            if (prevRp || fs.list().some(f => f.startsWith(rpRoot + '/texts/') && /\.lang$/i.test(f))) {
+                let reuse = prevRp;
+                if (!reuse) {
+                    let man = null;
+                    if (fs.list().includes(`${rpRoot}/manifest.json`)) { try { man = parseJsonLenient(await fs.readText(`${rpRoot}/manifest.json`)); } catch (e) { man = null; } }
+                    reuse = { root: rpRoot, type: 'RP', manifestPath: `${rpRoot}/manifest.json`, manifest: man && man.header && man.header.uuid ? man : null };
+                }
+                if (!packLangs.has(rpRoot) || !packLangs.get(rpRoot).size) {
+                    const lm = new Map();
+                    for (const f of fs.list()) {
+                        const m = f.startsWith(rpRoot + '/texts/') && /\/([A-Za-z]{2}_[A-Za-z]{2})\.lang$/.exec(f);
+                        if (m) { const raw = await fs.readText(f); lm.set(m[1], { path: f, map: parseLang(raw), raw }); }
+                    }
+                    packLangs.set(rpRoot, lm);
+                }
+                if (reuse.manifest) {
+                    if (!prevRp) packs.push(reuse);
+                    for (const bp of bps) {
+                        const m = bp.manifest;
+                        m.dependencies = Array.isArray(m.dependencies) ? m.dependencies : [];
+                        if (!m.dependencies.some(d => String(d.uuid || '').toLowerCase() === String(reuse.manifest.header.uuid).toLowerCase())) {
+                            m.dependencies.push({ uuid: reuse.manifest.header.uuid, version: reuse.manifest.header.version || [1, 0, 0] });
+                            pending.set(bp.manifestPath, JSON.stringify(m, null, 2));
+                        }
+                    }
+                    createdRP = reuse;
+                    createdRPs.push(reuse);
+                    pairOf.set(bpNeedingRp.root, reuse);
+                    rps = packs.filter(p => p.type === 'RP');
+                    log(`[沿用] ${bpNeedingRp.root} 的翻译资源包 ${rpRoot}/ 已存在，沿用其中的译文`);
+                    continue;
+                }
+            }
             const minEngine = (bps[0] && bps[0].manifest.header.min_engine_version) || [1, 20, 0];
             const manifest = {
                 format_version: 2,
@@ -563,7 +607,7 @@
             pending.set(`${rpRoot}/manifest.json`, JSON.stringify(manifest, null, 2));
             createdRP = { root: rpRoot, type: 'RP', manifestPath: `${rpRoot}/manifest.json`, manifest };
             packs.push(createdRP);
-            packLangs.set(rpRoot, new Map());
+            if (!packLangs.has(rpRoot)) packLangs.set(rpRoot, new Map());
             ctx.setPackEntry(rpRoot, 'pack.name', `${realBpName} - Texts`);
             ctx.setPackEntry(rpRoot, 'pack.description', `Translations for ${realBpName}`);
             // 行为包依赖新资源包，保证一起启用
@@ -577,6 +621,19 @@
             pairOf.set(bpNeedingRp.root, createdRP);
             rps = packs.filter(p => p.type === 'RP');
             log(`[新建] ${bpNeedingRp.root || '行为包'} 没有资源包，翻译只能放在资源包里 → 已新建 ${rpRoot}/ 并让行为包依赖它`, 'warn');
+        }
+        // 沿用的旧翻译资源包：行为包依赖它，并当作新建的包交给存档登记
+        for (const [bpRoot, rp] of pairOf) {
+            if (!rp.reusedTexts || createdRPs.includes(rp) || !rp.manifest || !rp.manifest.header) continue;
+            const bp = packs.find(p => p.root === bpRoot);
+            const m = bp.manifest;
+            m.dependencies = Array.isArray(m.dependencies) ? m.dependencies : [];
+            if (!m.dependencies.some(d => String(d.uuid || '').toLowerCase() === String(rp.manifest.header.uuid).toLowerCase())) {
+                m.dependencies.push({ uuid: rp.manifest.header.uuid, version: rp.manifest.header.version || [1, 0, 0] });
+                pending.set(bp.manifestPath, JSON.stringify(m, null, 2));
+            }
+            createdRPs.push(rp);
+            log(`[沿用] ${bpRoot} 的翻译资源包 ${rp.root}/ 已存在，沿用其中的译文`);
         }
         // 键 → 要写入的资源包
         const rpTargets = (k) => {
@@ -628,7 +685,7 @@
         {
             const cand = new Set();
             for (const langs of packLangs.values()) for (const e of langs.values()) for (const k of e.map.keys()) {
-                if (!(prevKeys.has(k) || /^script\./.test(k))) continue;
+                if (!(prevKeys.has(k) || /^script\./.test(k)) || authorKeys.has(k)) continue;
                 if (ctx.entries.has(k) || ctx.claimed.has(k) || ctx.referenced.has(k)) continue;
                 if (/^(item|tile|entity|action|pack|potion|enchantment|effect|biome|container|commands|death|chat|gui|options|menu|key|block|accessibility|tooltip|record|structure_block|hbui|xbox|selectWorld|createWorld)\./.test(k)) continue;
                 cand.add(k);
