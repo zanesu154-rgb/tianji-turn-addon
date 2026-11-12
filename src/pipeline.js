@@ -394,7 +394,7 @@
                 else if (lower.startsWith('dialogue/')) changed = NS.processDialogue(data, p, ctx, info);
                 else if (lower.startsWith('animation_controllers/')) changed = NS.processAnimationCommands(data, p, ctx, 'animctrl');
                 else if (lower.startsWith('animations/')) changed = NS.processAnimationCommands(data, p, ctx, 'animation');
-                else if (lower.startsWith('loot_tables/') || lower.startsWith('trading/')) NS.reportLootNames(data, p, ctx);
+                else if (lower.startsWith('loot_tables/') || lower.startsWith('trading/')) changed = NS.reportLootNames(data, p, ctx);
             } else if (pk.type === 'RP') {
                 if (lower.startsWith('ui/')) changed = NS.processUI(data, p, ctx, info);
                 else if (lower === 'splashes.json') NS.reportSplashes(data, p, ctx);

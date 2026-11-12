@@ -1420,6 +1420,19 @@ console.log(JSON.stringify(calls));`;
         const j = JSON.parse(r.cmd.slice(r.cmd.indexOf('{')));
         check('旧版转换的 say → tellraw 再次转换：发送者用 world.sender，不占用正文的键', j.rawtext[1].translate === 'world.sender' && j.rawtext[3].translate === k && !ctx.entries.has(k), r.cmd);
     }
+    {
+        // 战利品表 set_book_contents：页面换成 rawtext 翻译键，标题列进需人工翻译
+        const lm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        lm.files.set('BP/loot_tables/guide.json', Buffer.from(JSON.stringify({ pools: [{ rolls: 1, entries: [{ type: 'item', name: 'minecraft:written_book', functions: [
+            { function: 'set_name', name: 'Levitation Staff Guide' },
+            { function: 'set_book_contents', title: 'Guide Book #123', author: 'Forsaken Odyssey', pages: ['§7Guide Book #123§r\n§lLevitation Staff§r\n•§lRarity§r: Uncommon', '§lCooldown§r: 4 sec'] }] }] }] })));
+        const lr = await NS.runPipeline(lm, { baseName: 'fixture' }, () => {});
+        const fn = JSON.parse(lm.files.get('BP/loot_tables/guide.json').toString()).pools[0].entries[0].functions[1];
+        const en = NS.parseLang(lm.files.get('RP/texts/en_US.lang').toString());
+        const p1 = JSON.parse(fn.pages[0]);
+        check('战利品表成书：页面换成翻译键，标题 / 名称列进需人工翻译，作者不动', p1.rawtext.some(e => e.translate && en.has(e.translate)) && fn.author === 'Forsaken Odyssey'
+            && lr.ctx.untranslatable.some(u => u.text === 'Guide Book #123') && lr.ctx.untranslatable.some(u => u.text === 'Levitation Staff Guide'), fn.pages[0]);
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

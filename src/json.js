@@ -312,7 +312,12 @@
     //  游戏不会对其做本地化，替换成键会直接显示键名，所以只记录
     // ---------------------------------------------------------------
 
+    // set_book_contents 的页面和存档里的成书一样，可以写成 {"rawtext":[{"translate":"键"}]}（每页最多 256 字符）
+    const BOOK_PAGE_MAX = 256;
     function reportLootNames(data, file, ctx) {
+        let changed = false, book = 0;
+        const fb = NS.sanitizeKeyPart(file.split('/').pop().replace(/\.json$/i, ''));
+        const dir = file.toLowerCase().includes('trading/') ? 'trade' : 'loot';
         (function walk(node) {
             if (Array.isArray(node)) { node.forEach(walk); return; }
             if (!node || typeof node !== 'object') return;
@@ -320,10 +325,32 @@
                 ctx.report(file, 'set_name', node.name, '物品自定义名称不会被游戏翻译');
             } else if (node.function === 'set_lore' && Array.isArray(node.lore)) {
                 node.lore.forEach(l => typeof l === 'string' && ctx.report(file, 'set_lore', l, '物品描述不会被游戏翻译'));
+            } else if (node.function === 'set_book_contents') {
+                book++;
+                if (typeof node.title === 'string' && node.title.trim()) ctx.report(file, 'set_book_contents title', node.title, '成书标题暂不确定是否支持翻译键');
+                if (Array.isArray(node.pages)) node.pages.forEach((pg, j) => {
+                    if (typeof pg !== 'string' || !pg.trim() || !NS.hasLetters(NS.stripFormatting(pg))) return;
+                    const meta = { file, kind: 'book', scope: dir };
+                    const base = `${dir}.${fb}.book${book}.p${j + 1}`;
+                    // 先估算按行拆开后的长度，超出就直接整页一个键（避免分配用不到的键）
+                    const nLines = pg.split('\n').length;
+                    const est = 16 + nLines * (base.length + 26) + (nLines - 1) * 14;
+                    let parts = ctx.rawParts(pg, base, est > BOOK_PAGE_MAX - 10 ? { ...meta, noSplit: true } : meta);
+                    if (!parts) return;
+                    let raw = JSON.stringify({ rawtext: parts });
+                    if (raw.length > BOOK_PAGE_MAX) {
+                        // 行太多、按行拆开的 JSON 太长：整页用一个键（换行在 lang 中写作 \n）
+                        const one = ctx.rawParts(pg, base, { ...meta, noSplit: true });
+                        raw = one ? JSON.stringify({ rawtext: one }) : raw;
+                    }
+                    if (raw.length > BOOK_PAGE_MAX) { ctx.report(file, `set_book_contents 第 ${j + 1} 页`, pg, '成书页面过长，无法改为翻译键'); return; }
+                    node.pages[j] = raw;
+                    changed = true;
+                });
             }
             Object.values(node).forEach(walk);
         })(data);
-        return false;
+        return changed;
     }
 
     // ---------------------------------------------------------------
