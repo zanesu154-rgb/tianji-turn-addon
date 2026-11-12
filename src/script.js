@@ -51,6 +51,9 @@
         'getBlockAbove', 'setPermutation', 'withState', 'getState', 'registerCommand', 'registerEnum',
         'Error', 'TypeError', 'RangeError', 'RegExp', 'ItemStack', 'BlockPermutation', 'MolangVariableMap',
         'test', 'exec', 'Symbol', 'parseInt', 'parseFloat', 'Number', 'Date', 'setItem', 'getItem', 'querySelector',
+        // 装备栏位（"Mainhand"、"Offhand"、"Head"…）、方块状态、游戏规则等枚举值
+        'getEquipment', 'getEquipmentSlot', 'setEquipment', 'getBlockState', 'setBlockState', 'getStates',
+        'getEntities', 'getPlayers', 'getEntitiesAtBlockLocation', 'createExplosion',
     ]);
 
     // 这些属性名对应的值是技术数据
@@ -2135,9 +2138,17 @@
                     return ['===', '==', '!==', '!=', 'in', 'instanceof'].includes(p.operator);
                 case 'ExpressionStatement':
                     return !!p.directive;
-                case 'ArrayExpression':
+                case 'ArrayExpression': {
                     // [/正则/, "替换成的内部标记"] —— 输入归一化表，不是显示文本
-                    return p.elements.some(e => e && e.type === 'Literal' && e.regex);
+                    if (p.elements.some(e => e && e.type === 'Literal' && e.regex)) return true;
+                    // { command: ["function a", …], tags: ["x"] }：技术字段的数组值
+                    const pp = p.parent;
+                    if (pp && pp.type === 'Property' && pp.value === p && !pp.computed) {
+                        const k = pp.key && (pp.key.name || pp.key.value);
+                        if (typeof k === 'string' && TECH_PROPS.test(k)) return true;
+                    }
+                    return false;
+                }
                 case 'CallExpression': case 'NewExpression': {
                     if (p.callee === node) return false;
                     const nm = p.type === 'NewExpression'
