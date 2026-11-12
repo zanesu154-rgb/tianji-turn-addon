@@ -1386,6 +1386,22 @@ console.log(JSON.stringify(calls));`;
         check('疑似同一附加包的不同版本：默认只提示；勾选后只留登记排最前的并取消其余登记', logs.some(l => /Mod30.*和 Mod36 是同一个附加包的不同版本/.test(l)) && w0.files.has(root + 'behavior_packs/Mod30/manifest.json')
             && [...left].sort().join(',') === 'Mod36,Other' && reg.length === 2, JSON.stringify([...left]));
     }
+    {
+        // 存档二次转换：原始存档 + 放回翻译好的 lang（只放 texts/zh_CN.lang）→ 译文不被原文覆盖
+        const src = path.join(__dirname, 'world-fixture');
+        const m1 = new MemFS(readDir(src));
+        await NS.runWorldPipeline(m1, { baseName: 'w' }, () => {});
+        const zhPath = [...m1.files.keys()].find(p => /resource_packs\/[^/]+\/texts\/zh_CN\.lang$/.test(p));
+        const tr = m1.files.get(zhPath).toString().replace(/^([^#\s=][^=\n]*)=.*$/mg, (l, k) => `${k}=译:${k}`);
+        const b = readDir(src); b.set(zhPath, Buffer.from(tr));
+        const m2 = new MemFS(b);
+        await NS.runWorldPipeline(m2, { baseName: 'w' }, () => {});
+        const L = NS.parseLang(m2.files.get(zhPath).toString());
+        const lost = [...NS.parseLang(tr).keys()].filter(k => !String(L.get(k) || '').startsWith('译:'));
+        const man = m2.files.get(zhPath.replace(/texts\/zh_CN\.lang$/, 'manifest.json'));
+        const wrp = JSON.parse(m2.files.get([...m2.files.keys()].find(p => p.endsWith('world_resource_packs.json'))).toString());
+        check('存档二次转换：用原始存档 + 放回的译文 lang，译文保留、补上 manifest 并登记', lost.length === 0 && man && wrp.some(x => x.pack_id === JSON.parse(man.toString()).header.uuid), lost.slice(0, 3).join(','));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
