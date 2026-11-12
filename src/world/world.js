@@ -770,7 +770,21 @@
 
         // 之前转换生成的翻译资源包：保留其中的键和译文，新键接在后面，不覆盖
         const packFolder = /^[\x20-\x7e]+$/.test(levelName) ? `${NS.sanitizeKeyPart(levelName)}_texts` : 'world_texts';
-        const packDir = `${rootDir}resource_packs/${packFolder}/`;
+        let packDir = `${rootDir}resource_packs/${packFolder}/`;
+        // 改过世界名再转换：按名字找不到上次的翻译包时，找含 world.* 键的 *_texts 资源包沿用
+        if (!all.some(f => f.startsWith(packDir))) {
+            let best = null, bestN = 0;
+            const dirs = new Set(all.filter(f => f.startsWith(rootDir + 'resource_packs/')).map(f => f.slice(rootDir.length + 15).split('/')[0]).filter(d => /_texts$/.test(d)));
+            for (const d of dirs) {
+                let n = 0;
+                for (const f of all) {
+                    if (!f.startsWith(`${rootDir}resource_packs/${d}/texts/`) || !/\.lang$/.test(f)) continue;
+                    try { n += (String(await fs.readText(f)).match(/^world\.[^=\n]+=/mg) || []).length; } catch (e) { /* 忽略 */ }
+                }
+                if (n > bestN) { best = d; bestN = n; }
+            }
+            if (best) { packDir = `${rootDir}resource_packs/${best}/`; log(`[资源包] 没有找到 ${packFolder}/，沿用之前生成的 ${best}/（世界名可能改过）`); }
+        }
         // ---- 清理存档里的包：没启用的、同一个包的多份旧版本、无效的（没有 manifest）、地图编辑工具 ----
         // 游戏只加载 world_behavior_packs.json / world_resource_packs.json 里登记的包，其余只占空间
         const skipDirs = (await prunePacks(fs, rootDir, packDir, opt, log)) || [];

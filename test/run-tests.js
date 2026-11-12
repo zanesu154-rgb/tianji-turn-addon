@@ -1400,6 +1400,16 @@ console.log(JSON.stringify(calls));`;
         const lost = [...NS.parseLang(tr).keys()].filter(k => !String(L.get(k) || '').startsWith('译:'));
         const man = m2.files.get(zhPath.replace(/texts\/zh_CN\.lang$/, 'manifest.json'));
         const wrp = JSON.parse(m2.files.get([...m2.files.keys()].find(p => p.endsWith('world_resource_packs.json'))).toString());
+        // 改了世界名再转换：仍找到上次的翻译包
+        const c = readDir(src); c.set(zhPath, Buffer.from(tr));
+        const lnPath = [...c.keys()].find(p => p.endsWith('levelname.txt'));
+        c.set(lnPath || 'levelname.txt', Buffer.from('Renamed World'));
+        const m3 = new MemFS(c);
+        await NS.runWorldPipeline(m3, { baseName: 'w' }, () => {});
+        const L3 = NS.parseLang(m3.files.get(zhPath).toString());
+        const lost3 = [...NS.parseLang(tr).keys()].filter(k => !String(L3.get(k) || '').startsWith('译:'));
+        const newPacks = [...m3.files.keys()].filter(p => /resource_packs\/[^/]+\/manifest\.json$/.test(p));
+        check('存档二次转换：改了世界名也沿用上次的翻译包，不另建', lost3.length === 0 && newPacks.length === 1, JSON.stringify(newPacks));
         check('存档二次转换：用原始存档 + 放回的译文 lang，译文保留、补上 manifest 并登记', lost.length === 0 && man && wrp.some(x => x.pack_id === JSON.parse(man.toString()).header.uuid), lost.slice(0, 3).join(','));
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
