@@ -211,7 +211,7 @@
                     const dn = getStr(display.v, 'Name');
                     if (dn) report([...path, i, 'tag', 'display', 'Name'], `物品名（${name}）`, dn, '物品自定义名称不支持翻译键');
                     const lore = child(display.v, 'Lore');
-                    if (lore && lore.t === T.LIST && lore.v.et === T.STRING) lore.v.items.forEach((l, j) => l.s && report([...path, i, 'tag', 'display', 'Lore', j], `物品描述（${name}）`, l.s, '物品描述不支持翻译键'));
+                    if (lore && lore.t === T.LIST && lore.v.et === T.STRING) lore.v.items.forEach((l, j) => l.s && !/^(?:\u00a7.)*\(\+DATA\)(?:\u00a7.)*$/.test(l.s.trim()) && report([...path, i, 'tag', 'display', 'Lore', j], `物品描述（${name}）`, l.s, '物品描述不支持翻译键'));
                 }
                 const title = getStr(tag.v, 'title');
                 if (title) report([...path, i, 'tag', 'title'], '成书标题', title, '成书标题暂不确定是否支持翻译键');
