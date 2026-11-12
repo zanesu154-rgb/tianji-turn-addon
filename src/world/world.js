@@ -514,10 +514,119 @@
         };
     }
 
+    // ---------------- 清理存档里的附加包 ----------------
+    const EDITOR_TOOL_RE = /world\s*edit|worldedit|\bw\s*edit\b|axiom|structure\s*(tool|wand|builder)|builder'?s?\s*wand|terrain\s*(editor|tool)|map\s*(editor|maker)\s*tool|editor\s*tools?|creative\s*tools?|build\s*tools?/i;
+    async function scanWorldPacks(fs, rootDir, packDir) {
+        const all = fs.list();
+        const verOf = (v) => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split(/[.-]/).slice(0, 3).map(Number) : [0, 0, 0]);
+        const cmp = (a, b) => { for (let i = 0; i < 3; i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
+        const packs = [];
+        for (const type of ['behavior_packs', 'resource_packs']) {
+            const dirs = new Set();
+            for (const f of all) {
+                if (!f.startsWith(rootDir + type + '/')) continue;
+                const rest = f.slice(rootDir.length + type.length + 1);
+                if (rest.includes('/')) dirs.add(rest.split('/')[0]);
+                else dirs.add('\u0000' + rest);     // 直接放在 behavior_packs/ 下的零散文件
+            }
+            const regPath = rootDir + (type === 'behavior_packs' ? 'world_behavior_packs.json' : 'world_resource_packs.json');
+            let reg = [];
+            if (all.includes(regPath)) { try { const d = NS.parseJsonLenient(await fs.readText(regPath)); if (Array.isArray(d)) reg = d; } catch (e) { /* 坏的登记文件当作空 */ } }
+            for (const d of dirs) {
+                const loose = d.startsWith('\u0000');
+                const dir = rootDir + type + '/' + (loose ? '' : d + '/');
+                const files = loose ? [rootDir + type + '/' + d.slice(1)] : all.filter(f => f.startsWith(dir));
+                const p = { type, dir, folder: loose ? d.slice(1) : d, files, uuid: null, version: [0, 0, 0], name: loose ? d.slice(1) : d, desc: '', deps: [], status: null, ours: !loose && dir === packDir };
+                const mf = loose ? null : (files.find(f => f === dir + 'manifest.json') || files.filter(f => /\/manifest\.json$/.test(f)).sort((a, b) => a.length - b.length)[0]);   // 多套一层文件夹的也认
+                if (!mf) p.status = 'invalid';
+                else {
+                    let man = null;
+                    try { man = NS.parseJsonLenient(await fs.readText(mf)); } catch (e) { man = null; }
+                    if (!man || !man.header || !man.header.uuid) p.status = 'invalid';
+                    else {
+                        p.uuid = String(man.header.uuid).toLowerCase();
+                        p.version = verOf(man.header.version);
+                        p.name = NS.stripFormatting(String(man.header.name || d));
+                        p.desc = NS.stripFormatting(String(man.header.description || ''));
+                        p.deps = (man.dependencies || []).map(x => x && x.uuid && String(x.uuid).toLowerCase()).filter(Boolean);
+                    }
+                }
+                p.regEntry = p.uuid ? reg.find(r => r && String(r.pack_id || '').toLowerCase() === p.uuid) : null;
+                // 名字 / 描述是 pack.name 这类键时从包里的 lang 取
+                if (/^pack\.(name|description)$/.test(p.name) || /^pack\.description$/.test(p.desc)) {
+                    const lf = files.find(f => /\/texts\/en_US\.lang$/.test(f)) || files.find(f => /\/texts\/[a-z]{2}_[A-Z]{2}\.lang$/.test(f));
+                    if (lf) { try { const L = NS.parseLang(await fs.readText(lf)); if (L.get(p.name)) p.name = NS.stripFormatting(L.get(p.name)); if (L.get(p.desc)) p.desc = NS.stripFormatting(L.get(p.desc)); } catch (e) { /* 忽略 */ } }
+                }
+                p.tool = !p.ours && EDITOR_TOOL_RE.test(p.name + ' ' + p.desc + ' ' + p.folder);
+                packs.push(p);
+            }
+        }
+        // 已启用：登记了 uuid。同一 uuid 有多份时保留版本和登记一致的那份，否则保留版本最高的
+        const byUuid = new Map();
+        for (const p of packs) if (p.uuid) { const k = p.type + '|' + p.uuid; if (!byUuid.has(k)) byUuid.set(k, []); byUuid.get(k).push(p); }
+        const kept = new Set();
+        for (const [, list] of byUuid) {
+            const reg = list[0].regEntry;
+            let keep = null;
+            if (reg) keep = list.find(p => cmp(p.version, verOf(reg.version)) === 0) || list.slice().sort((a, b) => cmp(b.version, a.version))[0];
+            for (const p of list) {
+                if (p.status) continue;
+                if (!reg) p.status = p.ours ? 'enabled' : 'unused';
+                else if (p === keep) { p.status = 'enabled'; kept.add(p); }
+                else p.status = 'duplicate';
+            }
+        }
+        // 已启用的包依赖的包（依赖不一定登记）：保留
+        const need = [...kept].flatMap(p => p.deps);
+        for (let i = 0; i < need.length; i++) {
+            for (const p of packs) if (p.uuid === need[i] && p.status === 'unused') { p.status = 'enabled'; p.dependency = true; need.push(...p.deps); }
+        }
+        return packs;
+    }
+    async function prunePacks(fs, rootDir, packDir, opt, log) {
+        if (!fs.remove) return;
+        const packs = await scanWorldPacks(fs, rootDir, packDir);
+        if (!packs.length) return;
+        const size = async (p) => { let n = 0; for (const f of p.files) { try { n += fs.sizeOf ? fs.sizeOf(f) : (await fs.readBytes(f)).length; } catch (e) { /* 忽略 */ } } return n; };
+        const mb = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+        const why = { unused: '没有启用', duplicate: '同一个包的另一份版本', invalid: '没有有效的 manifest.json' };
+        const drop = packs.filter(p => !p.ours && (why[p.status] || (p.tool && opt.removeEditorTools)));
+        const tools = packs.filter(p => p.tool && p.status === 'enabled' && !opt.removeEditorTools);
+        if (!drop.length && !tools.length) return;
+        const label = (p) => p.tool && !why[p.status] ? '地图编辑工具' : why[p.status];
+        const line = async (p) => { const n = await size(p); return [n, `  ${p.type === 'behavior_packs' ? '行为包' : '资源包'} ${p.folder}（${p.name}${p.version.some(Boolean) ? ' v' + p.version.join('.') : ''}，${mb(n)}）：${label(p)}`]; };
+        const del = drop.filter(p => opt.prunePacks || p.tool);
+        const keep = drop.filter(p => !del.includes(p) && why[p.status]);
+        if (del.length) {
+            let total = 0; const lines = [];
+            const unreg = new Map();
+            for (const p of del) {
+                const [n, l] = await line(p); total += n; lines.push(l);
+                for (const f of p.files) fs.remove(f);
+                if (p.uuid && p.status === 'enabled') { if (!unreg.has(p.type)) unreg.set(p.type, new Set()); unreg.get(p.type).add(p.uuid); }
+            }
+            // 删掉的已启用包（编辑工具）从 world_*_packs.json 里去掉登记
+            for (const [type, set] of unreg) {
+                const regPath = rootDir + (type === 'behavior_packs' ? 'world_behavior_packs.json' : 'world_resource_packs.json');
+                try {
+                    const d = NS.parseJsonLenient(await fs.readText(regPath));
+                    if (Array.isArray(d)) fs.writeText(regPath, JSON.stringify(d.filter(r => !(r && set.has(String(r.pack_id || '').toLowerCase()))), null, 2));
+                } catch (e) { /* 没有登记文件 */ }
+            }
+            log(`[存档] 已删除 ${del.length} 个包，省下 ${mb(total)}：\n${lines.join('\n')}`, 'warn');
+        }
+        if (keep.length) {
+            let total = 0; const lines = [];
+            for (const p of keep) { const [n, l] = await line(p); total += n; lines.push(l); }
+            log(`[存档] 有 ${keep.length} 个包游戏不会加载，共 ${mb(total)}；勾选“删除存档里没启用、重复和无效的包”可以删掉：\n${lines.join('\n')}`, 'warn');
+        }
+        if (tools.length) log(`[存档] 发现地图编辑工具（已启用）：${tools.map(p => `${p.folder}（${p.name}）`).join('、')}；地图做好后通常用不到，勾选“同时删除地图编辑工具”可以删掉并取消启用`, 'warn');
+    }
+
     // ---------------- 打开存档 ----------------
     async function openWorld(fs, userOptions = {}, log = () => {}) {
-        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: false, sayMode: 'tellraw', listCommandBlockNames: false, baseName: 'world', ...userOptions };
-        const all = fs.list();
+        const opt = { sourceLang: 'auto', targetLangs: ['en_US', 'zh_CN'], splitNewlines: false, sayMode: 'tellraw', listCommandBlockNames: false, baseName: 'world', prunePacks: false, removeEditorTools: false, ...userOptions };
+        let all = fs.list();
         const levelDat = all.filter(p => /(^|\/)level\.dat$/.test(p)).sort((a, b) => a.length - b.length)[0];
         if (!levelDat) throw new Error('没有找到 level.dat，这不是世界存档');
         const rootDir = levelDat.replace(/level\.dat$/, '');
@@ -558,6 +667,10 @@
         // 之前转换生成的翻译资源包：保留其中的键和译文，新键接在后面，不覆盖
         const packFolder = /^[\x20-\x7e]+$/.test(levelName) ? `${NS.sanitizeKeyPart(levelName)}_texts` : 'world_texts';
         const packDir = `${rootDir}resource_packs/${packFolder}/`;
+        // ---- 清理存档里的包：没启用的、同一个包的多份旧版本、无效的（没有 manifest）、地图编辑工具 ----
+        // 游戏只加载 world_behavior_packs.json / world_resource_packs.json 里登记的包，其余只占空间
+        await prunePacks(fs, rootDir, packDir, opt, log);
+        all = fs.list();
         let existingPack = null;
         if (all.includes(packDir + 'manifest.json')) {
             const man = NS.parseJsonLenient(await fs.readText(packDir + 'manifest.json'));

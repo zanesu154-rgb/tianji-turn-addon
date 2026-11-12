@@ -20,6 +20,8 @@ class MemFS {
     async readBytes(p) { const v = this.files.get(p); return typeof v === 'string' ? new TextEncoder().encode(v) : new Uint8Array(v); }
     writeBytes(p, b) { this.files.set(p, b); }
     move(a, b) { const v = this.files.get(a); this.files.delete(a); this.files.set(b, v); }
+    remove(p) { this.files.delete(p); }
+    sizeOf(p) { const v = this.files.get(p); return v == null ? 0 : v.length; }
 }
 
 function readDir(dir, prefix = '') {
