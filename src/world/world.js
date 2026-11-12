@@ -247,7 +247,11 @@
                 if (old) { const raw = textToRaw(ctx, old, `${kp}.sign.${pos}`, meta); if (raw) setS(P('Text'), raw); }
             }
             // 命令方块执行 say 时，发送者名是它自己的名字（没起名时为 @）
-            if (id === 'CommandBlock') cmd(P('Command'), `${kp}.command.${pos}`, { text: getStr(c, 'CustomName') || '@' });
+            // 发送者名：say / me 转成 tellraw 后它在 rawtext 里，可以用翻译键（同名的命令方块共用一个键）
+            if (id === 'CommandBlock') cmd(P('Command'), `${kp}.command.${pos}`, () => {
+                const nm = getStr(c, 'CustomName') || '@';
+                return nm !== '@' && NS.hasLetters(NS.stripFormatting(nm)) ? { translate: ctx.alloc(`${kp}.sender`, nm, meta) } : { text: nm };
+            });
             const cn = getStr(c, 'CustomName');
             if (cn && id === 'CommandBlock') { if (ctx.listCommandBlockNames) report(P('CustomName'), '命令方块名称', cn, '命令方块名称（say 等命令输出时显示的发送者名）不支持翻译键'); }
             else if (cn) report(P('CustomName'), '方块名称', cn, '容器/方块的自定义名称不支持翻译键');
