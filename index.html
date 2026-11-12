@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>栈主的附加包汉化工具</title>
-    <link rel="stylesheet" href="style.css?v=2026.11.12-27">
+    <link rel="stylesheet" href="style.css?v=2026.11.12-28">
 </head>
 <body>
     <!-- 顶栏：标题 · 访问计数 · 界面语言 -->
@@ -15,6 +15,10 @@
                 <span class="brand-name" data-i18n="title">栈主的附加包汉化工具</span>
             </div>
             <div class="topbar-right">
+                <button id="sponsor-btn" class="sponsor-btn" type="button" data-i18n-title="sponsor" title="赞助作者">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 21s-7.5-4.6-10-9.3C.4 8.5 2.2 4.5 6 4.5c2.2 0 3.6 1.2 4.5 2.5h3c.9-1.3 2.3-2.5 4.5-2.5 3.8 0 5.6 4 4 7.2C19.5 16.4 12 21 12 21z"/></svg>
+                    <span data-i18n="sponsor">赞助作者</span>
+                </button>
                 <label class="lang-switch" data-i18n-title="ui_lang" title="界面语言">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                     <select id="ui-lang"></select>
@@ -170,6 +174,11 @@
         <!-- 编辑器（需人工翻译 / NBT），占满宽度 -->
         <section id="nbt-editor" class="nbt-editor" hidden></section>
 
+        <dialog id="sponsor-dialog" class="sponsor-dialog">
+            <form method="dialog" class="sponsor-close-row"><button class="sponsor-close" aria-label="close">×</button></form>
+            <img id="sponsor-img" alt="" decoding="async">
+            <p class="sponsor-hint" data-i18n="sponsor_hint">扫码赞赏，感谢支持！</p>
+        </dialog>
         <footer class="footer">
             <p><span id="footer-by"></span> · <span data-i18n="footer_local">纯前端处理，文件不上传</span> · <span id="app-version">v2026.11.11-18</span></p>
         </footer>
@@ -177,22 +186,22 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js"></script>
-    <script src="src/ui-i18n.js?v=2026.11.12-27"></script>
-    <script src="vendor/acorn.js?v=2026.11.12-27"></script>
-    <script src="src/util.js?v=2026.11.12-27"></script>
-    <script src="src/lang-blacklist.js?v=2026.11.12-27"></script>
-    <script src="src/minversion.js?v=2026.11.12-27"></script>
-    <script src="src/vanilla-names.js?v=2026.11.12-27"></script>
-    <script src="src/context.js?v=2026.11.12-27"></script>
-    <script src="src/commands.js?v=2026.11.12-27"></script>
-    <script src="src/json.js?v=2026.11.12-27"></script>
-    <script src="src/script.js?v=2026.11.12-27"></script>
-    <script src="src/pipeline.js?v=2026.11.12-27"></script>
-    <script src="src/world/nbt.js?v=2026.11.12-27"></script>
-    <script src="src/world/leveldb.js?v=2026.11.12-27"></script>
-    <script src="src/world/world.js?v=2026.11.12-27"></script>
-    <script src="src/world/editor.js?v=2026.11.12-27"></script>
-    <script src="app.js?v=2026.11.12-27"></script>
+    <script src="src/ui-i18n.js?v=2026.11.12-28"></script>
+    <script src="vendor/acorn.js?v=2026.11.12-28"></script>
+    <script src="src/util.js?v=2026.11.12-28"></script>
+    <script src="src/lang-blacklist.js?v=2026.11.12-28"></script>
+    <script src="src/minversion.js?v=2026.11.12-28"></script>
+    <script src="src/vanilla-names.js?v=2026.11.12-28"></script>
+    <script src="src/context.js?v=2026.11.12-28"></script>
+    <script src="src/commands.js?v=2026.11.12-28"></script>
+    <script src="src/json.js?v=2026.11.12-28"></script>
+    <script src="src/script.js?v=2026.11.12-28"></script>
+    <script src="src/pipeline.js?v=2026.11.12-28"></script>
+    <script src="src/world/nbt.js?v=2026.11.12-28"></script>
+    <script src="src/world/leveldb.js?v=2026.11.12-28"></script>
+    <script src="src/world/world.js?v=2026.11.12-28"></script>
+    <script src="src/world/editor.js?v=2026.11.12-28"></script>
+    <script src="app.js?v=2026.11.12-28"></script>
     <!-- 访问计数（不蒜子，第三方服务；加载失败时不显示） -->
     <script async src="https://busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
 </body>
