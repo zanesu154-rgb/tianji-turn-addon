@@ -292,10 +292,6 @@ body {
     }
 }
 
-.log-note {
-    font-weight: 400;
-    color: var(--text-muted);
-}
 
 /* ---- 上传区 ---- */
 .drop-zone {
