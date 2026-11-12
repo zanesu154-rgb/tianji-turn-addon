@@ -118,6 +118,8 @@ class ZipFS {
         return v.async('uint8array');
     }
     writeBytes(p, b) { this.entries.set(p, b); }
+    remove(p) { this.entries.delete(p); }
+    sizeOf(p) { const v = this.entries.get(p); if (v == null) return 0; if (typeof v === 'string') return v.length; if (v instanceof Uint8Array) return v.length; return (v._data && v._data.uncompressedSize) || 0; }
     move(a, b) {
         const v = this.entries.get(a);
         this.entries.delete(a);
@@ -194,6 +196,8 @@ function readOptions() {
         splitNewlines: $('opt-split').checked,
         sayMode: $('opt-say').value,
         listCommandBlockNames: $('opt-cbname').checked,
+        prunePacks: $('opt-prune').checked,
+        removeEditorTools: $('opt-tools').checked,
         includeHiddenItems: $('opt-hidden').checked,
         removeJunkLang: $('opt-junk').checked,
         // 固定写入简体中文：只在简体中文界面提供

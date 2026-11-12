@@ -373,7 +373,8 @@ body {
     margin: 0 4px 16px;
 }
 
-body.mode-world .addon-only {
+body.mode-world .addon-only,
+body:not(.mode-world) .world-only {
     display: none;
 }
 

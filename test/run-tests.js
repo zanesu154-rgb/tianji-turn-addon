@@ -1296,6 +1296,32 @@ console.log(JSON.stringify(calls));`;
         check('名字键带说明行：另建只有名字的键给拼名函数用（各语言取第一行）', /"tianji:altar":"tile\.tianji:altar\.name\.short"/.test(js)
             && en2.get('tile.tianji:altar.name.short') === 'Altar' && zh2.get('tile.tianji:altar.name.short') === '祭坛', JSON.stringify([en2.get('tile.tianji:altar.name.short'), zh2.get('tile.tianji:altar.name.short')]));
     }
+    {
+        // 存档里的包：没启用 / 同一个包多份 / 没有 manifest / 地图编辑工具
+        const base = readDir(path.join(__dirname, 'world-fixture'));
+        const root = [...base.keys()].find(k => /(^|\/)level\.dat$/.test(k)).replace(/level\.dat$/, '');
+        const man = (uuid, ver, name) => JSON.stringify({ format_version: 2, header: { name, uuid, version: ver, min_engine_version: [1, 20, 0] }, modules: [{ type: 'data', uuid: uuid.replace(/.$/, 'f'), version: ver }] });
+        const add = (m) => {
+            m.set(root + 'behavior_packs/main_v1/manifest.json', man('11111111-1111-1111-1111-111111111111', [1, 0, 0], 'Main'));
+            m.set(root + 'behavior_packs/main_v1/big.bin', Buffer.alloc(300000));
+            m.set(root + 'behavior_packs/main_v2/manifest.json', man('11111111-1111-1111-1111-111111111111', [2, 0, 0], 'Main'));
+            m.set(root + 'behavior_packs/old_unused/manifest.json', man('22222222-2222-2222-2222-222222222222', [1, 0, 0], 'Old Stuff'));
+            m.set(root + 'behavior_packs/junk/readme.txt', 'nothing');
+            m.set(root + 'behavior_packs/we/manifest.json', man('33333333-3333-3333-3333-333333333333', [1, 0, 0], 'WorldEdit for Bedrock'));
+            m.set(root + 'world_behavior_packs.json', JSON.stringify([{ pack_id: '11111111-1111-1111-1111-111111111111', version: [2, 0, 0] }, { pack_id: '33333333-3333-3333-3333-333333333333', version: [1, 0, 0] }]));
+        };
+        const m0 = new Map(base); add(m0);
+        const logs0 = [];
+        const w0 = new MemFS(m0);
+        await NS.runWorldPipeline(w0, { baseName: 'test' }, (s) => logs0.push(s));
+        check('存档清理：默认不删，只在日志里列出', w0.files.has(root + 'behavior_packs/main_v1/manifest.json') && logs0.some(l => /3 个包游戏不会加载/.test(l)) && logs0.some(l => /地图编辑工具（已启用）/.test(l)), logs0.filter(l => /存档\]/.test(l)).join('\n'));
+        const m1 = new Map(base); add(m1);
+        const w1 = new MemFS(m1);
+        await NS.runWorldPipeline(w1, { baseName: 'test', prunePacks: true, removeEditorTools: true }, () => {});
+        const left = [...w1.files.keys()].filter(k => k.startsWith(root + 'behavior_packs/')).map(k => k.slice(root.length + 15).split('/')[0]);
+        const reg = JSON.parse(w1.files.get(root + 'world_behavior_packs.json').toString());
+        check('存档清理：删掉旧版本、没启用、没有 manifest 的包和编辑工具，并取消工具的登记', [...new Set(left)].join(',') === 'main_v2' && reg.length === 1 && reg[0].pack_id.startsWith('1111'), JSON.stringify([...new Set(left)]));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
