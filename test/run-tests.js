@@ -1314,7 +1314,7 @@ console.log(JSON.stringify(calls));`;
             m.set(root + 'behavior_packs/old_unused/manifest.json', man('22222222-2222-2222-2222-222222222222', [1, 0, 0], 'Old Stuff'));
             m.set(root + 'behavior_packs/junk/readme.txt', 'nothing');
             m.set(root + 'behavior_packs/we/manifest.json', man('33333333-3333-3333-3333-333333333333', [1, 0, 0], 'WorldEdit for Bedrock'));
-            m.set(root + 'world_behavior_packs.json', JSON.stringify([{ pack_id: '11111111-1111-1111-1111-111111111111', version: [2, 0, 0] }, { pack_id: '33333333-3333-3333-3333-333333333333', version: [1, 0, 0] }]));
+            m.set(root + 'world_behavior_packs.json', JSON.stringify([{ pack_id: '11111111-1111-1111-1111-111111111111', version: [2, 0, 0] }, { pack_id: '33333333-3333-3333-3333-333333333333', version: [1, 0, 0] }, { pack_id: '11111111-1111-1111-1111-111111111111', version: [1, 0, 0] }]));
         };
         const m0 = new Map(base); add(m0);
         const logs0 = [];
@@ -1326,7 +1326,7 @@ console.log(JSON.stringify(calls));`;
         await NS.runWorldPipeline(w1, { baseName: 'test', prunePacks: true, removeEditorTools: true }, () => {});
         const left = [...w1.files.keys()].filter(k => k.startsWith(root + 'behavior_packs/')).map(k => k.slice(root.length + 15).split('/')[0]);
         const reg = JSON.parse(w1.files.get(root + 'world_behavior_packs.json').toString());
-        check('存档清理：删掉旧版本、没启用、没有 manifest 的包和编辑工具，并取消工具的登记', [...new Set(left)].join(',') === 'main_v2' && reg.length === 1 && reg[0].pack_id.startsWith('1111'), JSON.stringify([...new Set(left)]));
+        check('存档清理：同一 uuid 登记多个版本只留排最前的；删掉没启用、没有 manifest 的包和编辑工具，登记文件同步清理', [...new Set(left)].join(',') === 'main_v2' && reg.length === 1 && reg[0].pack_id.startsWith('1111'), JSON.stringify([...new Set(left)]));
     }
     {
         // 日志按界面语言翻译：真实转换的日志译成英文后，除了玩家原文、包名，不应再有中文

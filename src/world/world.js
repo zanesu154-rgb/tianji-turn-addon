@@ -516,10 +516,10 @@
 
     // ---------------- 清理存档里的附加包 ----------------
     const EDITOR_TOOL_RE = /world\s*edit|worldedit|\bw\s*edit\b|axiom|structure\s*(tool|wand|builder)|builder'?s?\s*wand|terrain\s*(editor|tool)|map\s*(editor|maker)\s*tool|editor\s*tools?|creative\s*tools?|build\s*tools?/i;
+    const verOf = (v) => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split(/[.-]/).slice(0, 3).map(Number) : [0, 0, 0]);
+    const cmp = (a, b) => { for (let i = 0; i < 3; i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
     async function scanWorldPacks(fs, rootDir, packDir) {
         const all = fs.list();
-        const verOf = (v) => Array.isArray(v) ? v.map(Number) : (typeof v === 'string' ? v.split(/[.-]/).slice(0, 3).map(Number) : [0, 0, 0]);
-        const cmp = (a, b) => { for (let i = 0; i < 3; i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
         const packs = [];
         for (const type of ['behavior_packs', 'resource_packs']) {
             const dirs = new Set();
@@ -536,7 +536,7 @@
                 const loose = d.startsWith('\u0000');
                 const dir = rootDir + type + '/' + (loose ? '' : d + '/');
                 const files = loose ? [rootDir + type + '/' + d.slice(1)] : all.filter(f => f.startsWith(dir));
-                const p = { type, dir, folder: loose ? d.slice(1) : d, files, uuid: null, version: [0, 0, 0], name: loose ? d.slice(1) : d, desc: '', deps: [], status: null, ours: !loose && dir === packDir };
+                const p = { type, dir, folder: loose ? d.slice(1) : d, files, uuid: null, version: [0, 0, 0], name: loose ? d.slice(1) : d, desc: '', deps: [], depList: [], status: null, ours: !loose && dir === packDir };
                 const mf = loose ? null : (files.find(f => f === dir + 'manifest.json') || files.filter(f => /\/manifest\.json$/.test(f)).sort((a, b) => a.length - b.length)[0]);   // 多套一层文件夹的也认
                 if (!mf) p.status = 'invalid';
                 else {
@@ -549,6 +549,7 @@
                         p.name = NS.stripFormatting(String(man.header.name || d));
                         p.desc = NS.stripFormatting(String(man.header.description || ''));
                         p.deps = (man.dependencies || []).map(x => x && x.uuid && String(x.uuid).toLowerCase()).filter(Boolean);
+                        p.depList = (man.dependencies || []).filter(x => x && x.uuid).map(x => ({ uuid: String(x.uuid).toLowerCase(), version: verOf(x.version) }));
                     }
                 }
                 p.noReg = reg == null;
@@ -562,27 +563,35 @@
                 packs.push(p);
             }
         }
-        // 已启用：登记了 uuid。同一 uuid 有多份时保留版本和登记一致的那份，否则保留版本最高的
+        // 已启用：登记了 uuid。同一 uuid 只能加载一份：
+        // 行为包保留登记列表里排在最前面的版本（游戏里优先级最高）；资源包优先保留已保留的行为包依赖的那个版本
         const byUuid = new Map();
         for (const p of packs) if (p.uuid) { const k = p.type + '|' + p.uuid; if (!byUuid.has(k)) byUuid.set(k, []); byUuid.get(k).push(p); }
         const kept = new Set();
-        for (const [, list] of byUuid) {
+        const depWant = new Map();   // uuid → [依赖要求的版本]
+        const groups = [...byUuid.values()].sort((a, b) => (a[0].type === 'behavior_packs' ? 0 : 1) - (b[0].type === 'behavior_packs' ? 0 : 1));
+        for (const list of groups) {
             const valid = list.filter(p => !p.status);
             if (!valid.length) continue;
-            // 没有登记文件：都当作启用，只把同一 uuid、同一版本的多份算重复
+            const pickOne = (cands) => cands.slice().sort((a, b) => (/\(\d+\)$/.test(a.folder) ? 1 : 0) - (/\(\d+\)$/.test(b.folder) ? 1 : 0))[0];
+            let keep = null;
             if (valid[0].noReg) {
-                const seen = new Set();
-                for (const p of valid.sort((a, b) => cmp(b.version, a.version))) { const v = p.version.join('.'); if (seen.has(v)) p.status = 'duplicate'; else { seen.add(v); p.status = 'enabled'; kept.add(p); } }
-                continue;
+                // 没有登记文件：不判断启用与否，同一 uuid 保留版本最高的
+                const top = valid.slice().sort((a, b) => cmp(b.version, a.version))[0];
+                keep = pickOne(valid.filter(p => cmp(p.version, top.version) === 0));
+            } else {
+                const regs = valid[0].regEntries;
+                if (!regs.length) { for (const p of valid) p.status = p.ours ? 'enabled' : 'unused'; continue; }
+                const order = [...(depWant.get(valid[0].uuid) || []), ...regs.map(r => verOf(r.version))];
+                for (const v of order) { const c = valid.filter(p => cmp(p.version, v) === 0); if (c.length) { keep = pickOne(c); break; } }
+                if (!keep) keep = valid.slice().sort((a, b) => cmp(b.version, a.version))[0];
             }
-            const regs = valid[0].regEntries;
-            if (!regs.length) { for (const p of valid) p.status = p.ours ? 'enabled' : 'unused'; continue; }
-            // 登记了哪个（或哪几个）版本就保留哪份；都对不上时保留版本最高的
-            let keep = valid.filter(p => regs.some(r => cmp(p.version, verOf(r.version)) === 0));
-            const seen = new Set();
-            keep = keep.filter(p => { const v = p.version.join('.'); if (seen.has(v)) return false; seen.add(v); return true; });
-            if (!keep.length) keep = [valid.slice().sort((a, b) => cmp(b.version, a.version))[0]];
-            for (const p of valid) { if (keep.includes(p)) { p.status = 'enabled'; kept.add(p); } else p.status = 'duplicate'; }
+            for (const p of valid) {
+                if (p === keep) {
+                    p.status = 'enabled'; kept.add(p);
+                    for (const d of p.depList) { if (!depWant.has(d.uuid)) depWant.set(d.uuid, []); depWant.get(d.uuid).push(d.version); }
+                } else p.status = 'duplicate';
+            }
         }
         // 已启用的包依赖的包（依赖不一定登记）：保留
         const need = [...kept].flatMap(p => p.deps);
@@ -608,11 +617,34 @@
         const keep = drop.filter(p => !del.includes(p) && why[p.status]);
         if (del.length) {
             let total = 0; const lines = [];
-            const unreg = new Map();
+            const unreg = new Map(), unregVer = new Map();
             for (const p of del) {
                 const [n, l] = await line(p); total += n; lines.push(l);
                 for (const f of p.files) fs.remove(f);
                 if (p.uuid && p.status === 'enabled') { if (!unreg.has(p.type)) unreg.set(p.type, new Set()); unreg.get(p.type).add(p.uuid); }
+            }
+            // 删掉的重复版本：登记文件里只留下保留的那个版本
+            for (const p of del) if (p.status === 'duplicate' && p.uuid) {
+                if (!unregVer.has(p.type)) unregVer.set(p.type, new Map());
+                const keepV = packs.find(q => q.type === p.type && q.uuid === p.uuid && q.status === 'enabled');
+                if (keepV) unregVer.get(p.type).set(p.uuid, keepV.version);
+            }
+            for (const [type, m] of unregVer) {
+                const regPath = rootDir + (type === 'behavior_packs' ? 'world_behavior_packs.json' : 'world_resource_packs.json');
+                try {
+                    const d = NS.parseJsonLenient(await fs.readText(regPath));
+                    if (!Array.isArray(d)) continue;
+                    const seen = new Set();
+                    const out = d.filter(r => {
+                        const id = r && String(r.pack_id || '').toLowerCase();
+                        if (!m.has(id)) return true;
+                        if (seen.has(id)) return false;
+                        if (r.version && cmp(verOf(r.version), m.get(id)) !== 0) return false;
+                        seen.add(id); return true;
+                    });
+                    for (const [id, v] of m) if (!seen.has(id)) out.push({ pack_id: d.find(r => r && String(r.pack_id || '').toLowerCase() === id)?.pack_id || id, version: v });
+                    if (out.length !== d.length) fs.writeText(regPath, JSON.stringify(out, null, 2));
+                } catch (e) { /* 没有登记文件 */ }
             }
             // 删掉的已启用包（编辑工具）从 world_*_packs.json 里去掉登记
             for (const [type, set] of unreg) {
