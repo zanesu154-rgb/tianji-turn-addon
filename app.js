@@ -590,3 +590,22 @@ dropZone.addEventListener('drop', async (e) => {
         } else if (++tries > 30) clearInterval(timer);
     }, 500);
 })();
+
+// ================================================================
+//  赞助：简体中文显示赞赏码，其他语言显示 Buy me a coffee
+// ================================================================
+(() => {
+    const SPONSOR_ZH = 'https://raw.githubusercontent.com/zanesu154-rgb/My-sponsor-picture/refs/heads/main/%E8%B5%9E%E8%B5%8F%E7%A0%81.png';
+    const SPONSOR_EN = 'https://raw.githubusercontent.com/zanesu154-rgb/My-sponsor-picture/refs/heads/main/Buy%20me%20a%20coffee.jpg';
+    const btn = $('sponsor-btn'), dlg = $('sponsor-dialog'), img = $('sponsor-img');
+    if (!btn || !dlg) return;
+    btn.addEventListener('click', () => {
+        const zh = NS.UI.lang === 'zh_CN';
+        const src = zh ? SPONSOR_ZH : SPONSOR_EN;
+        if (img.getAttribute('src') !== src) img.src = src;
+        img.alt = t('sponsor');
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else window.open(src, '_blank', 'noopener');
+    });
+    // 点遮罩关闭
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+})();
