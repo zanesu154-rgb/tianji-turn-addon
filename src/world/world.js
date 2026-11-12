@@ -530,8 +530,8 @@
                 else dirs.add('\u0000' + rest);     // 直接放在 behavior_packs/ 下的零散文件
             }
             const regPath = rootDir + (type === 'behavior_packs' ? 'world_behavior_packs.json' : 'world_resource_packs.json');
-            let reg = [];
-            if (all.includes(regPath)) { try { const d = NS.parseJsonLenient(await fs.readText(regPath)); if (Array.isArray(d)) reg = d; } catch (e) { /* 坏的登记文件当作空 */ } }
+            let reg = null;   // null：没有登记文件（或读不了）→ 不判断启用与否
+            if (all.includes(regPath)) { try { const d = NS.parseJsonLenient(await fs.readText(regPath)); if (Array.isArray(d)) reg = d; } catch (e) { /* 坏的登记文件：不判断 */ } }
             for (const d of dirs) {
                 const loose = d.startsWith('\u0000');
                 const dir = rootDir + type + '/' + (loose ? '' : d + '/');
@@ -551,7 +551,8 @@
                         p.deps = (man.dependencies || []).map(x => x && x.uuid && String(x.uuid).toLowerCase()).filter(Boolean);
                     }
                 }
-                p.regEntry = p.uuid ? reg.find(r => r && String(r.pack_id || '').toLowerCase() === p.uuid) : null;
+                p.noReg = reg == null;
+                p.regEntries = p.uuid && reg ? reg.filter(r => r && String(r.pack_id || '').toLowerCase() === p.uuid) : [];
                 // 名字 / 描述是 pack.name 这类键时从包里的 lang 取
                 if (/^pack\.(name|description)$/.test(p.name) || /^pack\.description$/.test(p.desc)) {
                     const lf = files.find(f => /\/texts\/en_US\.lang$/.test(f)) || files.find(f => /\/texts\/[a-z]{2}_[A-Z]{2}\.lang$/.test(f));
@@ -566,15 +567,22 @@
         for (const p of packs) if (p.uuid) { const k = p.type + '|' + p.uuid; if (!byUuid.has(k)) byUuid.set(k, []); byUuid.get(k).push(p); }
         const kept = new Set();
         for (const [, list] of byUuid) {
-            const reg = list[0].regEntry;
-            let keep = null;
-            if (reg) keep = list.find(p => cmp(p.version, verOf(reg.version)) === 0) || list.slice().sort((a, b) => cmp(b.version, a.version))[0];
-            for (const p of list) {
-                if (p.status) continue;
-                if (!reg) p.status = p.ours ? 'enabled' : 'unused';
-                else if (p === keep) { p.status = 'enabled'; kept.add(p); }
-                else p.status = 'duplicate';
+            const valid = list.filter(p => !p.status);
+            if (!valid.length) continue;
+            // 没有登记文件：都当作启用，只把同一 uuid、同一版本的多份算重复
+            if (valid[0].noReg) {
+                const seen = new Set();
+                for (const p of valid.sort((a, b) => cmp(b.version, a.version))) { const v = p.version.join('.'); if (seen.has(v)) p.status = 'duplicate'; else { seen.add(v); p.status = 'enabled'; kept.add(p); } }
+                continue;
             }
+            const regs = valid[0].regEntries;
+            if (!regs.length) { for (const p of valid) p.status = p.ours ? 'enabled' : 'unused'; continue; }
+            // 登记了哪个（或哪几个）版本就保留哪份；都对不上时保留版本最高的
+            let keep = valid.filter(p => regs.some(r => cmp(p.version, verOf(r.version)) === 0));
+            const seen = new Set();
+            keep = keep.filter(p => { const v = p.version.join('.'); if (seen.has(v)) return false; seen.add(v); return true; });
+            if (!keep.length) keep = [valid.slice().sort((a, b) => cmp(b.version, a.version))[0]];
+            for (const p of valid) { if (keep.includes(p)) { p.status = 'enabled'; kept.add(p); } else p.status = 'duplicate'; }
         }
         // 已启用的包依赖的包（依赖不一定登记）：保留
         const need = [...kept].flatMap(p => p.deps);
@@ -584,15 +592,16 @@
         return packs;
     }
     async function prunePacks(fs, rootDir, packDir, opt, log) {
-        if (!fs.remove) return;
         const packs = await scanWorldPacks(fs, rootDir, packDir);
-        if (!packs.length) return;
+        // 游戏不会加载的包（留在存档里时）：不提取文本
+        const skip = () => packs.filter(p => !p.ours && /^(unused|duplicate|invalid)$/.test(p.status) && fs.list().some(f => f.startsWith(p.dir))).map(p => p.dir);
+        if (!fs.remove || !packs.length) return skip();
         const size = async (p) => { let n = 0; for (const f of p.files) { try { n += fs.sizeOf ? fs.sizeOf(f) : (await fs.readBytes(f)).length; } catch (e) { /* 忽略 */ } } return n; };
         const mb = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
         const why = { unused: '没有启用', duplicate: '同一个包的另一份版本', invalid: '没有有效的 manifest.json' };
         const drop = packs.filter(p => !p.ours && (why[p.status] || (p.tool && opt.removeEditorTools)));
         const tools = packs.filter(p => p.tool && p.status === 'enabled' && !opt.removeEditorTools);
-        if (!drop.length && !tools.length) return;
+        if (!drop.length && !tools.length) return skip();
         const label = (p) => p.tool && !why[p.status] ? '地图编辑工具' : why[p.status];
         const line = async (p) => { const n = await size(p); return [n, `  ${p.type === 'behavior_packs' ? '行为包' : '资源包'} ${p.folder}（${p.name}${p.version.some(Boolean) ? ' v' + p.version.join('.') : ''}，${mb(n)}）：${label(p)}`]; };
         const del = drop.filter(p => opt.prunePacks || p.tool);
@@ -621,6 +630,7 @@
             log(`[存档] 有 ${keep.length} 个包游戏不会加载，共 ${mb(total)}；勾选“删除存档里没启用、重复和无效的包”可以删掉：\n${lines.join('\n')}`, 'warn');
         }
         if (tools.length) log(`[存档] 发现地图编辑工具（已启用）：${tools.map(p => `${p.folder}（${p.name}）`).join('、')}；地图做好后通常用不到，勾选“同时删除地图编辑工具”可以删掉并取消启用`, 'warn');
+        return skip();
     }
 
     // ---------------- 打开存档 ----------------
@@ -630,6 +640,24 @@
         const levelDat = all.filter(p => /(^|\/)level\.dat$/.test(p)).sort((a, b) => a.length - b.length)[0];
         if (!levelDat) throw new Error('没有找到 level.dat，这不是世界存档');
         const rootDir = levelDat.replace(/level\.dat$/, '');
+        // 包文件夹 / 登记文件名大小写不标准（Resource_packs、Behavior_Packs…）：Windows 上游戏照样认，
+        // 手机等区分大小写的系统上认不到；统一改成标准写法，否则也会被当成没有资源包而另建一个
+        {
+            const CANON = ['behavior_packs', 'resource_packs', 'world_behavior_packs.json', 'world_resource_packs.json'];
+            const renamed = new Set();
+            for (const f of all) {
+                if (!f.startsWith(rootDir)) continue;
+                const rest = f.slice(rootDir.length);
+                const head = rest.split('/')[0];
+                const c = CANON.find(x => x.toLowerCase() === head.toLowerCase());
+                if (!c || c === head) continue;
+                const to = rootDir + c + rest.slice(head.length);
+                if (c.endsWith('.json') && all.includes(to)) continue;   // 标准名的登记文件已经有了，保留它
+                fs.move(f, to);
+                renamed.add(`${head} → ${c}`);
+            }
+            if (renamed.size) { all = fs.list(); log(`[存档] 文件夹名大小写不标准，已改为标准写法：${[...renamed].join('、')}`, 'warn'); }
+        }
         const dbDir = rootDir + 'db/';
         const dbFiles = new Map();
         for (const p of all) if (p.startsWith(dbDir) && !p.slice(dbDir.length).includes('/')) dbFiles.set(p.slice(dbDir.length), await fs.readBytes(p));
@@ -669,8 +697,10 @@
         const packDir = `${rootDir}resource_packs/${packFolder}/`;
         // ---- 清理存档里的包：没启用的、同一个包的多份旧版本、无效的（没有 manifest）、地图编辑工具 ----
         // 游戏只加载 world_behavior_packs.json / world_resource_packs.json 里登记的包，其余只占空间
-        await prunePacks(fs, rootDir, packDir, opt, log);
+        const skipDirs = (await prunePacks(fs, rootDir, packDir, opt, log)) || [];
         all = fs.list();
+        const skipped = (f) => skipDirs.some(d => f.startsWith(d));
+        if (skipDirs.length) log(`[存档] ${skipDirs.length} 个游戏不会加载的包不提取文本`);
         let existingPack = null;
         if (all.includes(packDir + 'manifest.json')) {
             const man = NS.parseJsonLenient(await fs.readText(packDir + 'manifest.json'));
@@ -701,10 +731,10 @@
 
         // ---- 存档自带的行为包 / 资源包（地图常把对话、函数、脚本放在这里）：按附加包流程处理 ----
         let embedded = null;
-        const embeddedManifests = all.filter(f => f.startsWith(rootDir) && /^(behavior_packs|resource_packs)\/[^/]+\/manifest\.json$/.test(f.slice(rootDir.length)) && !f.startsWith(packDir));
+        const embeddedManifests = all.filter(f => f.startsWith(rootDir) && /^(behavior_packs|resource_packs)\/[^/]+\/manifest\.json$/.test(f.slice(rootDir.length)) && !f.startsWith(packDir) && !skipped(f));
         if (embeddedManifests.length && NS.runPipeline) {
             const sub = {
-                list: () => fs.list().filter(f => f.startsWith(rootDir) && /^(behavior_packs|resource_packs)\//.test(f.slice(rootDir.length)) && !f.startsWith(packDir)).map(f => f.slice(rootDir.length)),
+                list: () => fs.list().filter(f => f.startsWith(rootDir) && /^(behavior_packs|resource_packs)\//.test(f.slice(rootDir.length)) && !f.startsWith(packDir) && !skipped(f)).map(f => f.slice(rootDir.length)),
                 readText: (p) => fs.readText(rootDir + p),
                 readBytes: (p) => fs.readBytes(rootDir + p),
                 writeText: (p, t) => fs.writeText(rootDir + p, t),

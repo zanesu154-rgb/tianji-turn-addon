@@ -475,9 +475,36 @@
         const pairOf = new Map();   // BP.root → RP
         {
             const bpsAll = packs.filter(p => p.type === 'BP'), rpsAll = packs.filter(p => p.type === 'RP');
+            const verOf = (v) => Array.isArray(v) ? v.join('.') : String(v || '');
+            const lastSeg = (pk) => pk.root.split('/').pop().toLowerCase();
+            const used = new Set();
+            // 同一个资源包有多份（存档里常见：Foo、Foo(1)、Foo(2)）：优先版本和依赖一致的，再优先同名文件夹、还没配上的
+            const best = (bp, cands, wantVer) => {
+                if (cands.length <= 1) return cands[0];
+                const score = (r) => (wantVer && verOf(r.manifest.header && r.manifest.header.version) === wantVer ? 4 : 0)
+                    + (lastSeg(r) === lastSeg(bp) ? 2 : 0) + (baseName(r) === baseName(bp) ? 1 : 0) + (used.has(r) ? 0 : 0.5);
+                return cands.slice().sort((a, b) => score(b) - score(a))[0];
+            };
             for (const bp of bpsAll) {
-                let rp = rpsAll.find(r => depsOf(bp).includes(uuidOf(r))) || rpsAll.find(r => depsOf(r).includes(uuidOf(bp)));
+                const deps = Array.isArray(bp.manifest.dependencies) ? bp.manifest.dependencies : [];
+                let rp = null;
+                for (const d of deps) {
+                    const id = String(d.uuid || '').toLowerCase();
+                    const c = rpsAll.filter(r => uuidOf(r) === id);
+                    if (c.length) { rp = best(bp, c, verOf(d.version)); break; }
+                }
+                if (!rp) { const c = rpsAll.filter(r => depsOf(r).includes(uuidOf(bp))); if (c.length) rp = best(bp, c, null); }
+                // 行为包和资源包误用了同一个 uuid（作者复制 manifest 忘了改）
+                if (!rp) { const c = rpsAll.filter(r => uuidOf(r) && uuidOf(r) === uuidOf(bp)); if (c.length) rp = best(bp, c, verOf(bp.manifest.header && bp.manifest.header.version)); }
+                if (rp) used.add(rp);
                 if (!rp) { const n = baseName(bp); if (n) rp = rpsAll.find(r => baseName(r) === n); }
+                // 包名只差一两个字（Keyyards Floating Texts ↔ Keyyard Floating Texts）：唯一一个相近且还没配上的资源包
+                if (!rp) {
+                    const nm = (pk) => stripKind(NS.stripFormatting(String((ctx.packEntries.get(pk.root) && ctx.packEntries.get(pk.root).get('pack.name')) || (pk.manifest.header && pk.manifest.header.name) || ''))).replace(/[^a-z0-9\u00c0-\uffff]+/g, '');
+                    const lev = (a, b) => { if (Math.abs(a.length - b.length) > 2) return 9; let prev = Array.from({ length: b.length + 1 }, (_, i) => i); for (let i = 1; i <= a.length; i++) { const cur = [i]; for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; } return prev[b.length]; };
+                    const a = nm(bp);
+                    if (a.length >= 8) { const c = rpsAll.filter(r => !used.has(r) && ![...pairOf.values()].includes(r) && lev(a, nm(r)) <= 2); if (c.length === 1) rp = c[0]; }
+                }
                 if (!rp && bpsAll.length === 1 && rpsAll.length === 1) rp = rpsAll[0];
                 if (rp) pairOf.set(bp.root, rp);
             }
