@@ -38,7 +38,7 @@ function logMany(items, fmt, type = 'warn') {
     items.forEach((u, i) => {
         const line = `[${new Date().toLocaleTimeString()}] ${fmt(u)}`;
         if (i < SHOW) log(fmt(u), type);
-        else state.logContent += line + '\n';
+        else state.logContent += (NS.LogI18n ? NS.LogI18n.tr(line, NS.UI.lang) : line) + '\n';
     });
     if (items.length > SHOW) log(`……另有 ${items.length - SHOW} 条未在页面显示（见“下载日志”或下方编辑器 / 翻译表）`, type);
 }
@@ -63,6 +63,8 @@ function flushLog() {
     logEl.scrollTop = logEl.scrollHeight;
 }
 function log(msg, type = 'info') {
+    // 日志在代码里按简体中文写，按当前界面语言翻译后显示 / 写入下载的日志
+    if (NS.LogI18n) msg = NS.LogI18n.tr(msg, NS.UI.lang);
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
     state.logContent += line + '\n';
     if (!logAutoExpanded) {

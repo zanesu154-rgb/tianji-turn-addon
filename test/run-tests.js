@@ -1322,6 +1322,23 @@ console.log(JSON.stringify(calls));`;
         const reg = JSON.parse(w1.files.get(root + 'world_behavior_packs.json').toString());
         check('存档清理：删掉旧版本、没启用、没有 manifest 的包和编辑工具，并取消工具的登记', [...new Set(left)].join(',') === 'main_v2' && reg.length === 1 && reg[0].pack_id.startsWith('1111'), JSON.stringify([...new Set(left)]));
     }
+    {
+        // 日志按界面语言翻译：真实转换的日志译成英文后，除了玩家原文、包名，不应再有中文
+        const logs = [];
+        const m = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const r = await NS.runPipeline(m, { baseName: 'fixture' }, (s) => logs.push(s));
+        for (const w of r.summary.warnings) logs.push('⚠ ' + w);
+        for (const l of NS.MinVersion.describe(r.summary.minVersion, r.summary.packVersions)) logs.push(l);
+        for (const u of r.ctx.untranslatable) logs.push(`[无法本地化] ${u.file} ${u.where}: ${u.text}（${u.reason}）`);
+        const left = [];
+        for (const l of logs) for (const x of NS.LogI18n.tr(l, 'en_US').split('\n')) {
+            if (/^\s*\[(Not localizable|Manual)\] .*?: /.test(x)) { const reason = /\(([^()]*(?:\([^()]*\)[^()]*)*)\)$/.exec(x); if (reason && /[一-鿿]/.test(reason[1])) left.push(x); continue; }
+            if (/^\[Pack\]/.test(x)) continue;
+            if (/[一-鿿]/.test(x)) left.push(x);
+        }
+        check('日志译成英文后没有残留中文（玩家原文、包名除外）', left.length === 0, left.slice(0, 5).join('\n'));
+        check('日志繁体：按字转换且不改玩家原文', NS.LogI18n.tr('[需人工处理] world 物品名（x）: 这个书', 'zh_TW') === '[需人工處理] world 物品名（x）: 这个书' && NS.LogI18n.tr('[脚本] a.js（静态改写 1 处，运行时登记 2 条，合并自带多语言 5 条）', 'zh_TW').includes('合併'));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
