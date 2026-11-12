@@ -1412,6 +1412,14 @@ console.log(JSON.stringify(calls));`;
         check('存档二次转换：改了世界名也沿用上次的翻译包，不另建', lost3.length === 0 && newPacks.length === 1, JSON.stringify(newPacks));
         check('存档二次转换：用原始存档 + 放回的译文 lang，译文保留、补上 manifest 并登记', lost.length === 0 && man && wrp.some(x => x.pack_id === JSON.parse(man.toString()).header.uuid), lost.slice(0, 3).join(','));
     }
+    {
+        // 旧版把 /say 转成的 tellraw 再次转换：发送者换成 world.sender 键，不会认领正文的键
+        const k = 'world.command.41_-43_2';
+        const ctx = new NS.ExtractContext({ knownKeys: new Set([k]), existingValues: new Map([[k, new Set(['你获得了成就'])]]), keyLangs: new Map([[k, new Set(['zh_CN', 'en_US'])]]), prevKeys: new Set([k]) });
+        const r = NS.translateCommand(`tellraw @a {"rawtext":[{"text":"["},{"text":"§aAchievement!"},{"text":"] "},{"translate":"${k}"}]}`, ctx, k, 'f');
+        const j = JSON.parse(r.cmd.slice(r.cmd.indexOf('{')));
+        check('旧版转换的 say → tellraw 再次转换：发送者用 world.sender，不占用正文的键', j.rawtext[1].translate === 'world.sender' && j.rawtext[3].translate === k && !ctx.entries.has(k), r.cmd);
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

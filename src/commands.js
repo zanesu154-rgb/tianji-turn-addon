@@ -156,7 +156,15 @@
             let data;
             try { data = JSON.parse(jsonText); } catch (e) { data = undefined; }
             if (data && typeof data === 'object') {
-                if (!ctx.processRawMessage(data, baseKey, meta)) return { cmd, changed: false };
+                // 旧版把 /say 转成的 tellraw：[{"text":"["},{"text":"发送者"},{"text":"] "},…] → 发送者用 world.sender 键（同名共用）
+                let senderChanged = false;
+                const rt = data.rawtext;
+                if (Array.isArray(rt) && rt.length >= 4 && rt[0] && rt[0].text === '[' && rt[2] && rt[2].text === '] ' && rt[1] && Object.keys(rt[1]).length === 1
+                    && typeof rt[1].text === 'string' && rt[1].text !== '@' && NS.hasLetters(NS.stripFormatting(rt[1].text)) && /\.command\.[^.]+$/.test(baseKey)) {
+                    rt[1] = { translate: ctx.alloc(baseKey.replace(/\.command\.[^.]+$/, '.sender'), rt[1].text, meta) };
+                    senderChanged = true;
+                }
+                if (!ctx.processRawMessage(data, baseKey, meta) && !senderChanged) return { cmd, changed: false };
                 return { cmd: head + JSON.stringify(data), changed: true };
             }
             // JSON 不合法（比如模板字符串把结构拆开了）→ 只替换完整的 "text":"..." 字面量

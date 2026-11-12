@@ -82,7 +82,7 @@
                 series.push(k);
             }
             if (series.length > 1 || (series.length === 1 && this.keyLangs.size)) {
-                const free = (k) => !this.claimed.has(k) && !this.entries.has(k);
+                const free = (k) => !this.claimed.has(k) && !this.entries.has(k) && !this.referenced.has(k);
                 let hit = series.find(k => free(k) && (() => { const e = this.existingValues.get(k); return e instanceof Set ? e.has(text) : e === text; })());
                 if (!hit && this.keyLangs.size) {
                     const cjk = NS.hasCJK(text);
@@ -107,7 +107,7 @@
             const evList = ev instanceof Set ? [...ev] : (ev != null ? [ev] : []);
             if (evList.includes(text)) {
                 key = base;
-            } else if (evList.length && evList.every(v => NS.hasCJK(v) !== NS.hasCJK(text)) && !this.entries.has(base)) {
+            } else if (evList.length && evList.every(v => NS.hasCJK(v) !== NS.hasCJK(text)) && !this.entries.has(base) && !this.referenced.has(base)) {
                 // 已有键的值是另一种文字（如 en_US 的 "Altar" 对应 "祭坛"）→ 视为同一条的译文，复用键，
                 // 原文只会补进缺少该键的语言文件
                 key = base;
@@ -208,6 +208,13 @@
          */
         processRawMessage(msg, baseKey, meta = {}) {
             if (!msg || typeof msg !== 'object') return false;
+            // 先登记这条消息里已经在用的键（旧版转换过的 tellraw 里 {"translate":"world.command.x"}），
+            // 免得给同一条里的其他文字分配键时把它当成“上次生成、可以认领”的键
+            if (!meta._scanned) {
+                const walkRefs = (o) => { if (!o || typeof o !== 'object') return; if (typeof o.translate === 'string') this.ref(o.translate, meta.file); for (const v of Array.isArray(o) ? o : Object.values(o)) walkRefs(v); };
+                walkRefs(msg);
+                meta = { ...meta, _scanned: true };
+            }
             let changed = false;
             if (typeof msg.translate === 'string') this.ref(msg.translate, meta.file);
             if (msg.with && typeof msg.with === 'object' && !Array.isArray(msg.with)) {
