@@ -54,10 +54,12 @@
         // 装备栏位（"Mainhand"、"Offhand"、"Head"…）、方块状态、游戏规则等枚举值
         'getEquipment', 'getEquipmentSlot', 'setEquipment', 'getBlockState', 'setBlockState', 'getStates',
         'getEntities', 'getPlayers', 'getEntitiesAtBlockLocation', 'createExplosion',
+        // 状态机切换：fsm.transition("Attacking")、setState("Idle")
+        'transition', 'setState', 'changeState', 'goto', 'gotoState',
     ]);
 
     // 这些属性名对应的值是技术数据
-    const TECH_PROPS = /^(patterns?|keywords?|triggers?|aliases|synonyms|regex(es)?|regexp|match(es)?|intent|intents|id|typeId|identifier|type|icon|iconPath|texture|image|path|sound|event|tag|tags|objective|permission|defaultValue|key|namespace|entity|item|block|dimension|mode|command|cmd|url|uuid|color|font|username|userName|playerName|gamertag|xuid)$/i;
+    const TECH_PROPS = /^(controller|debug_?name|fsm_?name|state|patterns?|keywords?|triggers?|aliases|synonyms|regex(es)?|regexp|match(es)?|intent|intents|id|typeId|identifier|type|icon|iconPath|texture|image|path|sound|event|tag|tags|objective|permission|defaultValue|key|namespace|entity|item|block|dimension|mode|command|cmd|url|uuid|color|font|username|userName|playerName|gamertag|xuid)$/i;
     // 这些字段的值不带空格时（"Ready"、"melee"）是内部取值；带空格的（role: "Arcane caster"）照常当文字
     const TECH_PROPS_WORD = /^(kind|phase|clip|role|playback|policy|stat)$/i;
     // retailId、skillKey、hitSound、trailParticle 这类驼峰后缀：内部标识，不是显示文本
@@ -2132,6 +2134,13 @@
                 }
                 case 'SwitchCase':
                     return p.test === node;
+                case 'AssignmentExpression': {
+                    if (p.right !== node || p.left.type !== 'MemberExpression') return false;
+                    // TypeScript 枚举：l[l.NOOP = 0] = "NOOP"（数字枚举的反向映射）、e.Consume = "Consume"（字符串枚举）
+                    if (p.left.computed && p.left.property.type === 'AssignmentExpression') return true;
+                    const pn = !p.left.computed ? p.left.property.name : (isStr(p.left.property) ? p.left.property.value : null);
+                    return isStr(node) && pn === node.value;
+                }
                 case 'MemberExpression':
                     return p.property === node;
                 case 'BinaryExpression':
@@ -2163,6 +2172,13 @@
             }
         };
 
+        // 状态机等用对象键当名字：{ Idle: {…}, Freeze: { onEnter() {} } }，代码里再写 transition("Idle") / e("Idle")
+        const stateKeys = new Set();
+        walk(ast, (n) => {
+            if ((n.type === 'Property' || n.type === 'MethodDefinition') && !n.computed && n.key && n.key.type === 'Identifier' && /^[A-Z]/.test(n.key.name)
+                && n.value && (/^(FunctionExpression|ArrowFunctionExpression)$/.test(n.value.type)
+                    || (n.value.type === 'ObjectExpression' && (!n.value.properties.length || n.value.properties.some(q => q.type === 'Property' && (q.method || /Function/.test(q.value.type))))))) stateKeys.add(n.key.name);
+        });
         // 打包进脚本的库带来的文字：许可证全文、编译器辅助函数的报错、模拟实现的提示、日志前缀等
         const isCodeNoise = (line) => {
             const t = String(line).trim();
@@ -2178,13 +2194,14 @@
         const registerExact = (text, fromSplit = false) => {
             if (opts.uiCompared && opts.uiCompared.has(String(text).replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) return;
             if (opts.refSyntax && (DICT_REF.lastIndex = 0, DICT_REF.test(text))) { DICT_REF.lastIndex = 0; registerPattern([{ lit: text }]); return; }
+            if (isCodeNoise(text)) return;
             const lines = ctx.splitNewlines ? text.split(/\r?\n/) : [text];
             for (const line of lines) {
                 if (!looksLikeText(line, 'strict')) continue;
                 if (ctx.isKey(line)) continue;
                 // WaterGun、MeleeAttack 这种没有空格的驼峰词：代码里的标识符
                 if (/^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+$/.test(line.trim())) continue;
-                if (isCodeNoise(line)) continue;
+                if (isCodeNoise(line) || stateKeys.has(line.trim())) continue;
                 // 拆行时每行去掉代码缩进；原样和去空白后的写法都登记
                 const multi = lines.length > 1 || fromSplit || line.indexOf('\n') >= 0;
                 const t = (lines.length > 1 || fromSplit || !multi) ? line.trim() : line;
@@ -2239,6 +2256,7 @@
 
         const registerPattern = (parts, relaxed = false) => {
             if (isKeyTemplate(parts)) return;
+            if (isCodeNoise(parts.map(x => 'lit' in x ? x.lit : '%s').join(''))) return;
             // 字典带 @引用 的包：代码里的 "@common.exp: §g" + n 这类拼接，引用部分当占位
             if (opts.refSyntax && !parts.refSplit) {
                 const sp = splitDictRefs(parts);
