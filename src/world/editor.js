@@ -174,6 +174,23 @@
             }));
         const kw = el('input', { class: 'nbt-filter', type: 'search', placeholder: L('e_filter_ph'), spellcheck: 'false' });
         const onlyTodo = el('input', { type: 'checkbox' });
+        // 原文相同的条目合并成一行：改一次，所有位置一起改
+        const mergeSame = el('input', { type: 'checkbox', checked: true });
+        const grouped = (items) => {
+            const out = [], map = new Map();
+            for (const u of items) {
+                const lim = session.limitOf ? session.limitOf(u.ref) : null;
+                const key = !mergeSame.checked || (lim && lim.auto) ? '\u0001' + u.ref : `${u.text}\u0000${u.reason || ''}\u0000${catOf(u)}`;
+                let g = map.get(key);
+                if (!g) { g = { u, refs: [], files: [] }; map.set(key, g); out.push(g); }
+                g.refs.push(u.ref);
+                if (!g.files.includes(u.file)) g.files.push(u.file);
+            }
+            return out;
+        };
+        const groupSession = (g) => g.refs.length < 2 ? session : Object.assign(Object.create(session), {
+            setValue(ref, v) { let first; for (const r of g.refs) { const x = session.setValue(r, v); if (first === undefined) first = x; } return first; },
+        });
         const pager = el('div', { class: 'nbt-pager' });
         const MPAGE = 50;
         let page = 0;
@@ -190,17 +207,20 @@
             list.innerHTML = '';
             pager.innerHTML = '';
             if (!untr.length) { list.append(el('p', { class: 'nbt-empty', text: L('e_none') })); return; }
-            const items = filtered();
+            const items = grouped(filtered());
             const pages = Math.max(1, Math.ceil(items.length / MPAGE));
             page = Math.min(page, pages - 1);
-            for (const u of items.slice(page * MPAGE, page * MPAGE + MPAGE)) {
+            for (const g of items.slice(page * MPAGE, page * MPAGE + MPAGE)) {
+                const u = g.u;
                 const cur = session.getText(u.ref);
                 if (cur == null) continue;
                 const r = session.resolve(u.ref);
+                const more = g.files.length > 1 ? ` ${L('e_more_files', g.files.length - 1)}` : '';
                 list.append(el('div', { class: 'nbt-row' },
-                    el('div', { class: 'nbt-loc' }, el('b', { text: u.where }), el('span', { text: ` · ${u.file}` })),
+                    el('div', { class: 'nbt-loc' }, el('b', { text: u.where }), el('span', { text: ` · ${g.files[0]}${more}` }),
+                        g.refs.length > 1 ? el('span', { class: 'nbt-tag-dup', text: L('e_dup', g.refs.length) }) : null),
                     el('div', { class: 'nbt-orig', text: L('e_orig', u.text) }),
-                    valueEditor(session, u.ref, r.node.t, cur, changed, u.text),
+                    valueEditor(groupSession(g), u.ref, r.node.t, cur, changed, u.text),
                 ));
             }
             if (!items.length) list.append(el('p', { class: 'nbt-empty', text: L('e_no_match') }));
@@ -212,6 +232,7 @@
         };
         let ft;
         onlyTodo.addEventListener('change', () => { page = 0; renderManual(); });
+        mergeSame.addEventListener('change', () => { page = 0; renderManual(); });
         kw.addEventListener('input', () => { clearTimeout(ft); ft = setTimeout(() => { page = 0; renderManual(); }, 200); });
         manual.append(
             el('div', { class: 'nbt-tools' },
@@ -220,7 +241,7 @@
                 fileIn, importMsg),
             el('p', { class: 'nbt-hint', text: L('e_csv_hint') }),
             catBox,
-            el('div', { class: 'nbt-filters' }, kw, el('label', { class: 'opt-check' }, onlyTodo, L('e_only_todo'))),
+            el('div', { class: 'nbt-filters' }, kw, el('label', { class: 'opt-check' }, onlyTodo, L('e_only_todo')), el('label', { class: 'opt-check' }, mergeSame, L('e_merge'))),
             list,
             pager,
         );
