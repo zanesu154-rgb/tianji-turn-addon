@@ -1631,6 +1631,14 @@ console.log(JSON.stringify(calls));`;
         const ok = Object.entries(ZH).every(([e, z]) => pairs.some(([v, t]) => v === e && t === z)) && pairs.every(([v, t]) => !ZH[v] || t === ZH[v]);
         check('只放回译文、前面新增了句子：按占位符 / 格式代码对齐，不错配', ok, JSON.stringify(pairs));
     }
+    {
+        // ID 列表经“拼英文名”函数做成下拉选项（new RegExp 存变量再 split 的写法）：拼好的 Public / Private 登记翻译
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/privacy.js', Buffer.from('import { ModalFormData } from "@minecraft/server-ui";\nconst C = {}; C.PRIVACY_MODES = ["public", "private", "whitelist"];\nclass U { static pretty(t){ let a = new RegExp("^[\\\\w]+:"), i = new RegExp("(?<=\\\\w)[\\\\s_.]+(?=\\\\w)"), n = t.replace(a, "").split(i); for (let r = 0; r < n.length; r++) n[r] = n[r].charAt(0).toUpperCase() + n[r].slice(1); return n.join(" "); } }\nexport function show(p){ new ModalFormData().dropdown("Mode", C.PRIVACY_MODES.map(r => U.pretty(r))).show(p); }\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const vals = [...NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString())].filter(([k]) => /script\.privacy\./.test(k)).map(([, v]) => v);
+        check('ID 列表经拼名函数做成的选项（Public / Private / Whitelist）登记翻译', ['Public', 'Private', 'Whitelist'].every(v => vals.includes(v)), JSON.stringify(vals));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

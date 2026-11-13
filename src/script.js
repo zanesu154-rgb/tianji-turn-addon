@@ -1654,11 +1654,14 @@
         // 文字在运行时才生成，没有可提取的原文；给返回值套上 H(id, 文字)，运行时按 ID 记下对应的翻译键
         // （原版用游戏自带键，包里自定义的物品 / 方块 / 实体用 item.<id>.name 等），之后显示时就能翻译
         let humanizers = 0, bakeSites = 0;
+        const humanizerNames = new Set();
         walk(ast, (n) => {
             if (!/Function/.test(n.type) || !n.params.length || n.params[0].type !== 'Identifier') return;
             const body = src.slice(n.body.start, n.body.end);
             // 下划线 → 空格：split("_") 或 replace(/[._\-]+/g, " ") 这类；首字母大写：toUpperCase 或 .map(某个函数)
-            const underscore = /\.split\(\s*(?:"_"|'_'|\/[^/]*_[^/]*\/g?)\s*\)/.test(body) || /\.replace(?:All)?\(\s*\/[^/]*_[^/]*\/g?\s*,\s*(?:" "|' ')\s*\)/.test(body);
+            const underscore = /\.split\(\s*(?:"_"|'_'|\/[^/]*_[^/]*\/g?)\s*\)/.test(body) || /\.replace(?:All)?\(\s*\/[^/]*_[^/]*\/g?\s*,\s*(?:" "|' ')\s*\)/.test(body)
+                // new RegExp("(?<=\\w)[\\s_.]+(?=\\w)") 存进变量再 .split(i)
+                || (/new RegExp\(\s*(?:"[^"]*_[^"]*"|'[^']*_[^']*')/.test(body) && /\.split\(\s*[A-Za-z_$][\w$]*\s*\)/.test(body));
             const capital = /toUpperCase\(\)/.test(body) || /\.map\(\s*[A-Za-z_$][\w$]*\s*\)/.test(body);
             // 也认按单词替换首字母的写法：.replace(/\w\S*/g, t => t.charAt(0).toUpperCase() + …)、.replace(/\b\w/g, …)
             const joined = /\.join\(\s*(?:" "|' ')\s*\)/.test(body) || /\.replace\(\s*\/\\[bw][^/]*\/g\s*,/.test(body);
@@ -1674,6 +1677,11 @@
             });
             humanizers++;
             usesRuntime = true;
+            const par = n.parent;
+            const nm = n.type === 'FunctionDeclaration' && n.id ? n.id.name
+                : par && par.type === 'VariableDeclarator' && par.id.type === 'Identifier' ? par.id.name
+                : par && (par.type === 'MethodDefinition' || par.type === 'Property') && par.key ? (par.key.name || par.key.value) : null;
+            if (nm) humanizerNames.add(nm);
         });
         if (humanizers) ctx.warn(`${file}: 发现 ${humanizers} 个把 ID 拼成英文名的函数，运行时按 ID 换成翻译键`);
 
@@ -2388,6 +2396,33 @@
                 for (const e of c) { forceText(e.value); handled.add(e); }
             }
         });
+        // 固定 ID 列表经“ID 拼英文名”函数变成选项：PRIVACY_MODES.map(r => prettier(r)) → Public / Private / Whitelist
+        // 运行时才拼出文字、也查不到物品键：按同样规则先拼好登记翻译
+        if (humanizerNames.size) {
+            const pretty = (id) => String(id).replace(/^[^:]*:/, '').split(/(?<=\w)[\s_.]+(?=\w)/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            const arrays = new Map();   // 名字 → 字符串数组字面量
+            walk(ast, (n) => {
+                let name = null, arr = null;
+                if (n.type === 'AssignmentExpression' && n.right.type === 'ArrayExpression') { name = n.left.type === 'MemberExpression' ? propName(n.left) : n.left.type === 'Identifier' ? n.left.name : null; arr = n.right; }
+                else if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && n.init.type === 'ArrayExpression') { name = n.id.name; arr = n.init; }
+                else if (n.type === 'Property' && n.value && n.value.type === 'ArrayExpression' && n.key) { name = n.key.name || n.key.value; arr = n.value; }
+                if (name && arr.elements.length && arr.elements.every(e => isStr(e) && /^[a-z][\w.:-]*$/.test(e.value))) arrays.set(name, arr.elements.map(e => e.value));
+            });
+            const isHum = (c) => c && c.type === 'CallExpression' && humanizerNames.has(c.callee.type === 'Identifier' ? c.callee.name : propName(c.callee) || '');
+            const addIds = (ids) => { for (const id of ids || []) { const t = pretty(id); if (/[A-Za-z]{2,}/.test(t) && !ctx.isKey(t)) forceText(t); } };
+            walk(ast, (n) => {
+                if (inDebug(n)) return;
+                if (isHum(n) && isStr(n.arguments[0])) { addIds([n.arguments[0].value]); return; }
+                if (n.type !== 'CallExpression' || propName(n.callee) !== 'map' || n.callee.type !== 'MemberExpression') return;
+                const f = n.arguments[0];
+                const viaHum = f && ((/Function/.test(f.type) && (isHum(f.body) || (f.body.type === 'BlockStatement' && f.body.body.length === 1 && f.body.body[0].type === 'ReturnStatement' && isHum(f.body.body[0].argument))))
+                    || ((f.type === 'Identifier' || f.type === 'MemberExpression') && humanizerNames.has(f.type === 'Identifier' ? f.name : propName(f))));
+                if (!viaHum) return;
+                const o = n.callee.object;
+                if (o.type === 'ArrayExpression') addIds(o.elements.filter(isStr).map(e => e.value));
+                else addIds(arrays.get(o.type === 'Identifier' ? o.name : propName(o)));
+            });
+        }
         // names.join("§7 or §f")：带文字的分隔符登记翻译，运行时据此拆分列表
         const joinSeps = [];
         walk(ast, (n) => {
