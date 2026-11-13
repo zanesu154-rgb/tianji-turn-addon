@@ -114,6 +114,17 @@
                 } catch (e) { /* 读不了的文件跳过 */ }
             }
             minVersion = NS.MinVersion.estimateAddon({ manifests: packs.map(pk => ({ path: pk.manifestPath, manifest: pk.manifest })), formats });
+            // 可能的版本上限：已知在新版本里失效的写法
+            const cfiles = [];
+            for (const p of allFiles) {
+                const pk = packOf(p);
+                if (!pk || pk.type !== 'BP') continue;
+                const m = /^(blocks|items|biomes)\/.+\.json$/i.exec(relOf(p, pk));
+                if (!m) continue;
+                try { cfiles.push({ file: p, kind: m[1].toLowerCase().replace(/s$/, ''), data: parseJsonLenient(await fs.readText(p)) }); } catch (e) { /* 坏文件跳过 */ }
+            }
+            const ceiling = NS.MinVersion.checkCeiling({ manifests: packs.map(pk => ({ path: pk.manifestPath, manifest: pk.manifest })), files: cfiles });
+            if (ceiling.length) { if (!minVersion) minVersion = { version: null, label: '', basis: [], beta: null }; minVersion.ceiling = ceiling; }
         }
 
         // ---------------- 2. 读取已有 lang ----------------

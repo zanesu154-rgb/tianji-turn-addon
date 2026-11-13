@@ -108,6 +108,55 @@
         return { version: best, label: label(best), basis, beta: beta ? { label: label(beta.game), mod: beta.mod } : null };
     }
 
+    /**
+     * 可能的版本上限：查找已知在新版本里失效的写法（只做提示）
+     * @param {{manifests:{path:string,manifest:object}[], files:{file:string, kind:string, data:object}[]}} input
+     * @returns {{v:number[], label:string, why:string, files:string[]}[]}
+     */
+    function checkCeiling({ manifests, files }) {
+        const out = [];
+        const add = (game, why, file) => {
+            const v = parse(game);
+            let e = out.find(x => x.why === why);
+            if (!e) { e = { v, label: label(v), why, files: [] }; out.push(e); }
+            if (file && !e.files.includes(file)) e.files.push(file);
+        };
+        // 1. 旧脚本模块名（mojang-minecraft 等）：改名为 @minecraft/server 后新版本不再识别
+        for (const { path, manifest } of manifests) {
+            for (const d of (manifest && manifest.dependencies) || []) {
+                if (d && typeof d.module_name === 'string' && /^mojang-(minecraft|gametest|minecraft-ui|minecraft-server-admin|net)$/.test(d.module_name)) add('1.19.70', `旧脚本模块名 ${d.module_name}（已改名为 @minecraft/*）`, path);
+            }
+            for (const m of (manifest && manifest.modules) || []) {
+                if (m && m.type === 'client_data') add('1.16.200', '早期实验性脚本（client_data / server scripts，已移除）', path);
+            }
+        }
+        // 2. 假日创作者功能（Holiday Creator Features）：方块 / 物品的 events 与 on_* 事件组件
+        const hasOnEvent = (o, d = 0) => {
+            if (!o || typeof o !== 'object' || d > 4) return false;
+            for (const [k, v] of Object.entries(o)) {
+                if (/^on_[a-z_]+$/.test(k) && v && typeof v === 'object' && typeof v.event === 'string') return true;
+                if (hasOnEvent(v, d + 1)) return true;
+            }
+            return false;
+        };
+        for (const { file, kind, data } of files) {
+            if (kind === 'block' || kind === 'item') {
+                const root = data && data[kind === 'block' ? 'minecraft:block' : 'minecraft:item'];
+                if (!root || typeof root !== 'object') continue;
+                const comps = root.components || {};
+                const hcf = (root.events && typeof root.events === 'object' && Object.keys(root.events).length)
+                    || Object.keys(comps).some(k => /^minecraft:on_/.test(k))
+                    || ['minecraft:unit_cube', 'minecraft:block_light_absorption', 'minecraft:breakonpush', 'minecraft:immovable', 'minecraft:onlypistonpush', 'minecraft:preventsjumping', 'minecraft:rotation', 'minecraft:creative_category'].some(k => k in comps)
+                    || hasOnEvent(comps);
+                if (hcf) add('1.21.20', '依赖已移除的“假日创作者功能”实验：方块 / 物品的 events、on_* 事件不再触发', file);
+            } else if (kind === 'biome') {
+                const fv = parse(data && data.format_version);
+                if (fv && cmp(fv, [1, 21, 110]) < 0) add('1.21.110', `服务端生物群系 format_version ${data.format_version}（1.21.110 起要求 1.21.110 或更高）`, file);
+            }
+        }
+        return out.sort((a, b) => cmp(a.v, b.v));
+    }
+
     /** level.dat 根复合标签 → { version, label, lastOpened } */
     function estimateWorld(levelCompound) {
         const NBT = NS.NBT;
@@ -128,7 +177,8 @@
     function mergeWorld(world, packs) {
         if (!world) return packs;
         if (!packs) return world;
-        const out = { ...world, basis: [...world.basis], beta: packs.beta };
+        if (!packs.version) return { ...world, ceiling: packs.ceiling };
+        const out = { ...world, basis: [...world.basis], beta: packs.beta, ceiling: packs.ceiling };
         out.basis.push({ k: 'packs', v: packs.label });
         if (cmp(packs.version, world.version) > 0) { out.version = packs.version; out.label = packs.label; }
         return out;
@@ -145,15 +195,19 @@
             const kind = p.type === 'BP' ? '行为包' : p.type === 'RP' ? '资源包' : '包';
             lines.push(`[版本] ${kind}${multi ? ' ' + (p.name || p.root || '(根目录)') : ''}：manifest 版本号 ${p.version || '未填写'}`);
         }
-        if (mv) {
+        if (mv && mv.version) {
             const why = mv.basis.map(b => b.k === 'engine' ? `min_engine_version ${b.v}` : b.k === 'format' ? `format_version 最高 ${b.v}（${b.file}）`
                 : b.k === 'world' ? `level.dat MinimumCompatibleClientVersion ${b.v}` : b.k === 'worldLast' ? `level.dat lastOpenedWithVersion ${b.v}`
                 : b.k === 'packs' ? `存档自带包 ${b.v}` : b.k === 'beta' ? `测试版 API ${b.mod} → 仅 ${b.v}` : `${b.mod} → ${b.v}${b.k === 'newer' ? ' 以上' : ''}`).join('；');
             lines.push(`[版本] 最低可用版本：${mv.label}（${why}${mv.lastOpened ? `；上次用 ${mv.lastOpened} 打开` : ''}）`);
             if (mv.beta) lines.push(`[版本] ⚠ 使用了测试版脚本 API ${mv.beta.mod}：只能在 ${mv.beta.label} 开启“测试版 API”实验性玩法后运行`);
         }
+        for (const c of (mv && mv.ceiling) || []) {
+            const f = c.files.slice(0, 3).join('、') + (c.files.length > 3 ? ` 等 ${c.files.length} 个文件` : '');
+            lines.push(`[版本] ⚠ 可能的版本上限：${c.label} 起失效——${c.why}${f ? `：${f}` : ''}`);
+        }
         return lines;
     }
 
-    NS.MinVersion = { describe, parse, cmp, label, serverModuleGame, estimateAddon, estimateWorld, mergeWorld, SERVER_STABLE };
+    NS.MinVersion = { describe, parse, cmp, label, serverModuleGame, estimateAddon, estimateWorld, mergeWorld, checkCeiling, SERVER_STABLE };
 })(globalThis.AddonI18n = globalThis.AddonI18n || {});

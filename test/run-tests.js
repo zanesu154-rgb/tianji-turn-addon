@@ -1459,6 +1459,19 @@ console.log(JSON.stringify(calls));`;
         const out = JSON.stringify(rt.M('§e[ Warning! ]\n§7UtilityCraft has dependency problems.§r\n§cMissing:§r\n- §eFoo§r\n  §7Requires: §e1.2.0§r'));
         check('push 进数组拼成的消息：标签行、带 §r 的句子都能找到', (out.match(/"translate"/g) || []).length === 4 && out.includes('"text":"UtilityCraft"') && out.includes('"text":"1.2.0"'), out);
     }
+    {
+        // 可能的版本上限：假日创作者功能、旧脚本模块名、旧格式生物群系
+        const mf = [{ path: 'BP/manifest.json', manifest: { dependencies: [{ module_name: 'mojang-minecraft', version: '0.1.0' }] } }];
+        const files = [
+            { file: 'BP/items/a.json', kind: 'item', data: { 'minecraft:item': { components: { 'minecraft:on_use': { on_use: { event: 'x' } } }, events: { x: {} } } } },
+            { file: 'BP/items/b.json', kind: 'item', data: { 'minecraft:item': { components: { 'minecraft:icon': 'b' } } } },
+            { file: 'BP/biomes/c.json', kind: 'biome', data: { format_version: '1.20.60' } },
+        ];
+        const c = NS.MinVersion.checkCeiling({ manifests: mf, files });
+        const lines = NS.MinVersion.describe({ version: null, ceiling: c }, []);
+        check('可能的版本上限：假日创作者功能 / 旧模块名 / 旧生物群系格式，正常文件不报', c.length === 3 && c.find(x => /假日/.test(x.why)).files.join() === 'BP/items/a.json'
+            && lines.length === 3 && lines.every(l => /可能的版本上限/.test(l)), lines.join('\n'));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
