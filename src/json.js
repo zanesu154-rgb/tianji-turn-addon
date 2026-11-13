@@ -261,7 +261,9 @@
 
         for (const scene of dlg.scenes) {
             if (!scene || typeof scene !== 'object') continue;
-            const tag = sanitizeKeyPart(scene.scene_tag || fileBase);
+            let tag = sanitizeKeyPart(scene.scene_tag || fileBase);
+            // 场景标签写得特别长（作者重复粘贴）：截短 + 哈希，避免几千字符的键名
+            if (tag.length > 48) tag = `${tag.slice(0, 40)}_${NS.hash6 ? NS.hash6(tag) : tag.length}`;
             const base = `dialogue.${tag}`;
             const meta = { file, kind: 'dialogue', scope: 'dialogue' };
             if (replaceRawtextField(scene, 'npc_name', `${base}.npc_name`, ctx, meta)) changed = true;
