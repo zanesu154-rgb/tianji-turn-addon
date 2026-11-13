@@ -1492,7 +1492,7 @@ console.log(JSON.stringify(calls));`;
             const logs = [];
             const out = new MemFS(new Map(wm.files));
             await ws.build(out, (x) => logs.push(x));
-            check('存档：改了实体名，命令方块里的 name= 同步', ws.getText(cmd.ref) === 'tp @e[name="Renamed One"] ~ ~1 ~' && logs.some(l => /name= 选择器同步修改 1 处/.test(l)), ws.getText(cmd.ref));
+            check('存档：改了实体名，命令方块里的 name= 同步', ws.getText(cmd.ref) === 'tp @e[name="Renamed One"] ~ ~1 ~' && logs.some(l => /按名字找实体的地方同步修改 1 处/.test(l)), ws.getText(cmd.ref));
         } else check('存档：改了实体名，命令方块里的 name= 同步（样例存档缺少实体名或命令）', false);
     }
     {
@@ -1544,6 +1544,30 @@ console.log(JSON.stringify(calls));`;
         const a = await mk(false), b = await mk(true);
         check('弹射物：默认不生成占位名，同 ID 物品名照样沿用，勾选隐藏物品时生成', !a.en.has('entity.tz:magic_bolt.name') && a.en.get('entity.tz:thrown_rose.name') === 'Thrown Rose'
             && a.logs.some(l => /跳过 1 个弹射物/.test(l)) && b.en.has('entity.tz:magic_bolt.name'), JSON.stringify([...a.en.keys()].filter(k => /tz:/.test(k))));
+    }
+    {
+        // 脚本 nameTag 改名：本文件和其他文件里按名字找实体的地方同步（nameTag ===、getEntities({ name })、@e[name=]），普通提示文字不动
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/boss.js', Buffer.from('import { world } from "@minecraft/server";\nexport function spawn(e){ e.nameTag = "Old Guard"; }\n'));
+        mm.files.set('BP/scripts/check.js', Buffer.from('import { world } from "@minecraft/server";\nexport function f(d, e){\n  if (e.nameTag === "Old Guard") d.runCommand("effect @e[name=\\"Old Guard\\"] glowing");\n  const xs = d.getEntities({ name: "Old Guard" });\n  world.sendMessage("Old Guard");\n}\n'));
+        mm.files.set('BP/functions/g.mcfunction', Buffer.from('kill @e[name="Old Guard"]\n'));
+        const res = await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const ms = res.manualSession;
+        const it = ms && ms.ctx.untranslatable.find(u => u.where === '.nameTag =' && u.text === 'Old Guard');
+        let ok = false, dbg = '';
+        if (it) {
+            ms.setValue(it.ref, '老守卫');
+            const r = await ms.applyTo(mm);
+            const chk = mm.files.get('BP/scripts/check.js').toString(), fn = mm.files.get('BP/functions/g.mcfunction').toString();
+            dbg = JSON.stringify([r, chk, fn]);
+            ok = r.renamed === 4 && chk.includes('e.nameTag === "老守卫"') && chk.includes('name: "老守卫"') && chk.includes('@e[name=\\"老守卫\\"]')
+                && chk.includes('["Old Guard","script.boss.str"]') && fn.includes('@e[name="老守卫"]');
+            // 再改一次：从上次写进去的名字接着改
+            ms.setValue(it.ref, '守卫');
+            const r2 = await ms.applyTo(mm);
+            ok = ok && r2.renamed === 4 && mm.files.get('BP/functions/g.mcfunction').toString().includes('@e[name="守卫"]');
+        }
+        check('脚本 nameTag 改名：其他文件里按名字找实体的地方同步，普通文字不动，可重复修改', ok, dbg || 'no item');
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);

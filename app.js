@@ -471,6 +471,7 @@ async function rebuildAddonIfEdited() {
     const outZip = await state.addonFs.toZip();
     state.resultBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
     log(`✅ 已重新打包（手动修改 ${state.addonSession.edits} 处，写回结构 ${r.structures} 个、文件 ${r.files} 个）`);
+    if (r.renamed) log(`[实体名] 命令和脚本里按名字找实体的地方同步修改 ${r.renamed} 处`);
     if (r.missed) log(`⚠ 有 ${r.missed} 条没有在文件里找到原文（可能已被转换改写），未写回`, 'warn');
     setProgress(100, 'done');
 }
