@@ -402,7 +402,13 @@ async function processFile(file) {
         const res = await NS.runPipeline(fs, options, (m, t) => log(m, t || 'info'));
         const s = res.summary;
 
-        for (const w of s.warnings) log(`⚠ ${w}`, 'warn');
+        // “含换行，已写成 \n” 一类提示往往有几百条：页面上只显示一行汇总，明细放进下载的日志
+        const nlWarn = s.warnings.filter(w => / 含换行，已写成 \\n$/.test(w));
+        for (const w of s.warnings) if (!nlWarn.includes(w)) log(`⚠ ${w}`, 'warn');
+        if (nlWarn.length) {
+            log(`⚠ ${nlWarn.length} 处文字含换行，已写成 \\n（明细见“下载日志”）`, 'warn');
+            for (const w of nlWarn) { const line = `[${new Date().toLocaleTimeString()}] ⚠ ${w}`; state.logContent += (NS.LogI18n ? NS.LogI18n.tr(line, NS.UI.lang) : line) + '\n'; }
+        }
         logMany(res.ctx.untranslatable, u => `[无法本地化] ${u.file} ${u.where}: ${u.text}（${u.reason}）`);
         log(`新增翻译键 ${s.newKeys} 条，包名/描述 ${s.packKeys} 条，修改文件 ${s.processedFiles} 个`);
 

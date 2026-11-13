@@ -455,6 +455,7 @@
                 return null;
             };
             const sourceLangGuess = 'en_US';
+            let skippedProjectiles = 0;
             const addPh = (key, id, kind, file = '') => {
                 if (knownKeys.has(key) || ctx.entries.has(key)) return;
                 const same = kind === 'entity' || kind === 'spawn_egg' ? sameItemName(id) : null;
@@ -472,7 +473,12 @@
                 placeholders.push(key);
             };
             for (const b of info.defs.blocks) if (!b.hasName && !b.hidden) addPh(`tile.${b.id}.name`, b.id, 'block', b.file);
-            for (const e of info.defs.entities) addPh(`entity.${e.id}.name`, e.id, 'entity', e.file);
+            for (const e of info.defs.entities) {
+                // 不能生成的弹射物：名字只会出现在“没有发射者”的死亡消息里，不值得翻译；同 ID 物品已有名称的照样沿用（不用另翻）
+                if (e.projectile && !e.spawnable && !ctx.includeHiddenItems && !sameItemName(e.id)) { skippedProjectiles++; continue; }
+                addPh(`entity.${e.id}.name`, e.id, 'entity', e.file);
+            }
+            if (skippedProjectiles) log(`[实体] 跳过 ${skippedProjectiles} 个弹射物的占位名（玩家基本看不到；勾选“提取创造物品栏里不显示的物品”可生成）`);
             for (const id of info.defs.spawnEggs) if (!ctx.hiddenKeys.has(`item.spawn_egg.entity.${id}.name`)) addPh(`item.spawn_egg.entity.${id}.name`, id, 'spawn_egg', (info.defs.entities.find(e => e.id === id) || {}).file);
             for (const it of info.defs.items) {
                 if (it.hasName || !it.isDataDriven || it.hidden) continue;   // 创造栏隐藏的物品多为技术用途，不生成占位名
