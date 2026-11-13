@@ -381,6 +381,7 @@
      *  - 顶层控件索引（用于沿 @模板 继承查找 localize）
      * uiFiles: [{ path, data }]
      */
+    const TTS_PROPS = /^(text_tts|tts|tts_name|tts_value_override|tts_control_header)$/;
     function collectUiVarUsage(uiFiles) {
         const textVars = new Set(BUILTIN_TEXT_VARS);
         const nonText = new Set();
@@ -408,7 +409,7 @@
                                 if (!consumers.has(exact[1])) consumers.set(exact[1], []);
                                 consumers.get(exact[1]).push({ obj: node, key: nodeKey, ns, path });
                             } else if (k.startsWith('$')) alias.push([varNameOf(k), exact[1]]);
-                            else nonText.add(exact[1]);
+                            else if (!TTS_PROPS.test(k)) nonText.add(exact[1]);
                             continue;
                         }
                         const re = /\$([A-Za-z0-9_]+)/g;
@@ -469,7 +470,8 @@
                 if (typeof v === 'string') {
                     if (!re.test(v)) continue;
                     const exact = v.trim() === '$' + name;
-                    if (exact && k === 'text') continue;
+                    // "text_tts": "$c1"：朗读用的同一段文字，和 text 一样会按键翻译
+                    if (exact && (k === 'text' || TTS_PROPS.test(k))) continue;
                     if (exact && k.startsWith('$')) {        // 透传给另一个变量 → 看那个变量怎么用
                         if (varMisused(node, '', curNs, varNameOf(k), elements, seen)) return true;
                         continue;

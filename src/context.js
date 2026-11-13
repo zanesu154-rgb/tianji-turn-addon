@@ -75,7 +75,7 @@
             let key;
             // 脚本里的文字正好是某个物品 / 方块 / 实体的现成名称（音乐唱片名、物品名）：直接用那个名称键，不另建一条
             const npcName = kind === 'dialogue' && /\.npc_name$/.test(base);
-            if ((/^(script|item|block|entity)$/.test(kind) || npcName) && !this.entries.has(base)) {
+            if ((/^(script|item|block|entity|ui)$/.test(kind) || npcName) && !this.entries.has(base)) {
                 if (!this._nameIdx) {
                     this._nameIdx = new Map();
                     for (const [k, ev] of this.existingValues) {
@@ -90,7 +90,7 @@
                 const ks = this._nameIdx.get(text) || [];
                 // 脚本：任何现成名称都可以；NPC 名字：实体名；物品 / 方块 / 实体：只用同一个 ID 的（大小写不同、带不带 .name）
                 const idOf = (k) => k.replace(/^(item|tile|entity)\./, '').replace(/\.name$/, '').toLowerCase();
-                const nk = kind === 'script' ? ks[0] : npcName ? ks.find(k => k.startsWith('entity.')) : ks.find(k => idOf(k) === idOf(base));
+                const nk = kind === 'script' || kind === 'ui' ? ks[0] : npcName ? ks.find(k => k.startsWith('entity.')) : ks.find(k => idOf(k) === idOf(base));
                 if (nk) { if (scope) this.dedupe.set(scope + '\u0000' + text, nk); return nk; }
             }
             // 物品 / 方块 / 实体自己的默认名称键（item.x.name、tile.x.name）已在 lang 里、但 display_name 写的是另一段文字：

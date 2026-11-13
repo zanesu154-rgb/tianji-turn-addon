@@ -1569,6 +1569,18 @@ console.log(JSON.stringify(calls));`;
         }
         check('脚本 nameTag 改名：其他文件里按名字找实体的地方同步，普通文字不动，可重复修改', ok, dbg || 'no item');
     }
+    {
+        // 界面表格：模板里 "text": "$c1" 同时 "text_tts": "$c1"，调用处的 $c1 照样提取；和物品名相同的直接用物品名称键
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('RP/ui/htp_test.json', Buffer.from(JSON.stringify({ namespace: 'htp_test',
+            row: { type: 'panel', '$c1|default': '', controls: [{ col_1: { type: 'label', text: '$c1', text_tts: '$c1' } }] },
+            sec: { type: 'panel', controls: [{ 'r1@htp_test.row': { $c1: 'Sand Handful' } }, { 'r2@htp_test.row': { $c1: 'Mud Ball' } }, { 'r3@htp_test.row': { $c1: '20%%' } }] } })));
+        mm.files.set('RP/texts/en_US.lang', Buffer.from(mm.files.get('RP/texts/en_US.lang').toString() + '\nitem.tz:mud_ball.name=Mud Ball\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const ui = JSON.parse(mm.files.get('RP/ui/htp_test.json').toString()).sec.controls;
+        const en = NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString());
+        check('界面：text_tts 同时引用的变量照样提取；和物品名相同的用物品名称键', en.get(ui[0]['r1@htp_test.row'].$c1) === 'Sand Handful' && ui[1]['r2@htp_test.row'].$c1 === 'item.tz:mud_ball.name' && ui[2]['r3@htp_test.row'].$c1 === '20%%', JSON.stringify(ui));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
