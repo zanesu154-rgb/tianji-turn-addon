@@ -1529,6 +1529,22 @@ console.log(JSON.stringify(calls));`;
         check('重复名称键合并：item.x 与 item.x.name 只留一个，译文保留', en.length === 1 && zh.length === 1 && en[0].startsWith('item.tz:deep_dark_lore.name=Deep Dark') && zh[0] === 'item.tz:deep_dark_lore.name=深邃黑暗\\n§8一片繁荣的土地'
             && logs.some(l => /合并重复名称键 1/.test(l)), JSON.stringify([en, zh]));
     }
+    {
+        // 不能生成的弹射物不生成占位名；同 ID 物品有名称的照样沿用；勾选隐藏物品时仍生成
+        const mk = async (hidden) => {
+            const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+            const ent = (id, extra) => Buffer.from(JSON.stringify({ format_version: '1.21.0', 'minecraft:entity': { description: { identifier: id, is_spawnable: false, is_summonable: true }, components: { 'minecraft:projectile': { power: 1 }, ...extra } } }));
+            mm.files.set('BP/entities/p1.json', ent('tz:magic_bolt'));
+            mm.files.set('BP/entities/p2.json', ent('tz:thrown_rose'));
+            mm.files.set('BP/items/p2.json', Buffer.from(JSON.stringify({ format_version: '1.21.0', 'minecraft:item': { description: { identifier: 'tz:thrown_rose' }, components: { 'minecraft:display_name': { value: 'Thrown Rose' } } } })));
+            const logs = [];
+            await NS.runPipeline(mm, { baseName: 'fixture', includeHiddenItems: hidden }, (x) => logs.push(x));
+            return { en: NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString()), logs };
+        };
+        const a = await mk(false), b = await mk(true);
+        check('弹射物：默认不生成占位名，同 ID 物品名照样沿用，勾选隐藏物品时生成', !a.en.has('entity.tz:magic_bolt.name') && a.en.get('entity.tz:thrown_rose.name') === 'Thrown Rose'
+            && a.logs.some(l => /跳过 1 个弹射物/.test(l)) && b.en.has('entity.tz:magic_bolt.name'), JSON.stringify([...a.en.keys()].filter(k => /tz:/.test(k))));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

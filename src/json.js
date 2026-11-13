@@ -236,7 +236,9 @@
         // 刷怪蛋只有 is_spawnable 为 true 时才出现在创造物品栏
         const spawnable = entity.description.is_spawnable === true;
         if (!spawnable && !ctx.includeHiddenItems) hideKeys(ctx, [`item.spawn_egg.entity.${id}.name`]);
-        info.defs.entities.push({ id, file, spawnable });
+        // 弹射物（箭、雪球、法术弹……）：玩家几乎看不到它的名字（只在没有发射者的死亡消息里出现）
+        const projectile = [entity.components, ...Object.values(entity.component_groups || {})].some(c => c && typeof c === 'object' && c['minecraft:projectile']);
+        info.defs.entities.push({ id, file, spawnable, projectile });
         return changed;
     }
 
