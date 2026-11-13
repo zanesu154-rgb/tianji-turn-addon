@@ -33,6 +33,7 @@
             this.keyLangs = options.keyLangs || new Map();           // 键 → Set(有这个键的语言)
             this.prevKeys = options.prevKeys || new Set();           // 上次转换写进 lang 的键（标记行之后）
             this.claimed = new Set();      // 本次转换已认领的已有键（上次转换生成的）
+            this.sourceOverride = new Map(); // 键 → { value: 新原文, olds: [旧原文] }：沿用默认名称键并更新原文
             this.reusedPrev = 0;
             this.splitNewlines = options.splitNewlines !== false;
             this.entries = new Map();      // 新键 → { value, file, kind }
@@ -71,6 +72,53 @@
                 if (d) return d;
             }
             let key;
+            // 脚本里的文字正好是某个物品 / 方块 / 实体的现成名称（音乐唱片名、物品名）：直接用那个名称键，不另建一条
+            const npcName = kind === 'dialogue' && /\.npc_name$/.test(base);
+            if ((/^(script|item|block|entity)$/.test(kind) || npcName) && !this.entries.has(base)) {
+                if (!this._nameIdx) {
+                    this._nameIdx = new Map();
+                    for (const [k, ev] of this.existingValues) {
+                        if (!/^(item|tile|entity)\.[^.]+(\.name)?$/.test(k)) continue;
+                        for (const v of (ev instanceof Set ? ev : [ev])) {
+                            if (typeof v !== 'string') continue;
+                            // 也按去掉首尾颜色码的写法登记（显示位置会把开头的 §b 拆出去）
+                            for (const x of new Set([v, v.replace(/^(?:\u00a7.)+|(?:\u00a7.)+$/g, '')])) { if (!x) continue; if (!this._nameIdx.has(x)) this._nameIdx.set(x, []); this._nameIdx.get(x).push(k); }
+                        }
+                    }
+                }
+                const ks = this._nameIdx.get(text) || [];
+                // 脚本：任何现成名称都可以；NPC 名字：实体名；物品 / 方块 / 实体：只用同一个 ID 的（大小写不同、带不带 .name）
+                const idOf = (k) => k.replace(/^(item|tile|entity)\./, '').replace(/\.name$/, '').toLowerCase();
+                const nk = kind === 'script' ? ks[0] : npcName ? ks.find(k => k.startsWith('entity.')) : ks.find(k => idOf(k) === idOf(base));
+                if (nk) { if (scope) this.dedupe.set(scope + '\u0000' + text, nk); return nk; }
+            }
+            // 物品 / 方块 / 实体自己的默认名称键（item.x.name、tile.x.name）已在 lang 里、但 display_name 写的是另一段文字：
+            // display_name 会盖过 lang 里那条，它已经没用了 → 直接沿用这个键，把原文更新成 display_name 的文字（不另建 _1）
+            // lang 里的同一个名称键（大小写不同、没带 .name 的写法也算）
+            let own = null;
+            if (/^(item|block|entity)$/.test(kind) && /^(item|tile|entity)\.[^.]+\.name$/.test(base) && base.indexOf(':') > 0) {
+                if (this.knownKeys.has(base)) own = base;
+                else {
+                    const want = new Set([base.toLowerCase(), base.replace(/\.name$/, '').toLowerCase()]);
+                    if (!this._lowerKeys) { this._lowerKeys = new Map(); for (const k of this.knownKeys) if (!this._lowerKeys.has(k.toLowerCase())) this._lowerKeys.set(k.toLowerCase(), k); }
+                    for (const w of want) if (this._lowerKeys.has(w)) { own = this._lowerKeys.get(w); break; }
+                }
+            }
+            if (own && !this.entries.has(own) && !this.claimed.has(own) && !this.referenced.has(own)) {
+                const base0 = base;
+                const ev = this.existingValues.get(own);
+                const olds = ev instanceof Set ? [...ev] : ev != null ? [ev] : [];
+                // 只有旧值和新文字是同一种文字（都是英文 / 都是中文）才算过时的原文；不同文字是译文，交给下面的逻辑
+                if (olds.includes(text) && own !== base0) { this.claimed.add(own); if (scope) this.dedupe.set(scope + '\u0000' + text, own); return own; }
+                if (!olds.includes(text) && olds.some(o => NS.hasCJK(o) === NS.hasCJK(text))) {
+                    // 旧原文只算和新文字同一种文字的（另一种文字的是译文，要保留）
+                    this.sourceOverride.set(own, { value: text, olds: olds.filter(o => NS.hasCJK(o) === NS.hasCJK(text)) });
+                    this.entries.set(own, { value: text, file, kind });
+                    this.claimed.add(own);
+                    if (scope) this.dedupe.set(scope + '\u0000' + text, own);
+                    return own;
+                }
+            }
             // 上次转换生成的同系列键（base、base_1、base_2……）：
             // 1) 原文相同（把上次输出的 en_US.lang 一起放回来）→ 直接复用
             // 2) 只有译文、没有原文这一侧的语言（只放回了翻译好的 zh_CN.lang）→ 按顺序认领，

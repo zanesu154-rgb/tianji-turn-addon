@@ -1495,6 +1495,26 @@ console.log(JSON.stringify(calls));`;
             check('存档：改了实体名，命令方块里的 name= 同步', ws.getText(cmd.ref) === 'tp @e[name="Renamed One"] ~ ~1 ~' && logs.some(l => /name= 选择器同步修改 1 处/.test(l)), ws.getText(cmd.ref));
         } else check('存档：改了实体名，命令方块里的 name= 同步（样例存档缺少实体名或命令）', false);
     }
+    {
+        // 已有名称条目合并：display_name 和 lang 里的默认名称不同 → 沿用默认名称键并更新原文；大小写不同的键也认；
+        // 脚本里写的物品名用现成的物品名称键；同 ID 的投掷物实体名沿用物品名的译文
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/items/rose.json', Buffer.from(JSON.stringify({ format_version: '1.21.0', 'minecraft:item': { description: { identifier: 'tz:Rose_Water' }, components: { 'minecraft:display_name': { value: 'Rose Water\n§2Healing' } } } })));
+        mm.files.set('BP/items/disc.json', Buffer.from(JSON.stringify({ format_version: '1.21.0', 'minecraft:item': { description: { identifier: 'tz:disc' }, components: { 'minecraft:icon': 'disc' } } })));
+        mm.files.set('BP/entities/rose.json', Buffer.from(JSON.stringify({ format_version: '1.21.0', 'minecraft:entity': { description: { identifier: 'tz:disc', is_spawnable: false, is_summonable: true }, components: {} } })));
+        mm.files.set('BP/scripts/disc.js', Buffer.from('import { world } from "@minecraft/server";\nexport function f(p){ p.onScreenDisplay.setActionBar("§bCalm Disc Song"); }\n'));
+        const en0 = mm.files.get('RP/texts/en_US.lang').toString();
+        mm.files.set('RP/texts/en_US.lang', Buffer.from(en0 + '\nitem.tz:rose_water=Rose Water\nitem.tz:disc.name=§bCalm Disc Song\n'));
+        mm.files.set('RP/texts/zh_CN.lang', Buffer.from((mm.files.get('RP/texts/zh_CN.lang') || '').toString() + '\nitem.tz:rose_water=玫瑰水\nitem.tz:disc.name=§b宁静唱片\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const en = NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString()), zh = NS.parseLang(mm.files.get('RP/texts/zh_CN.lang').toString());
+        const rose = JSON.parse(mm.files.get('BP/items/rose.json').toString())['minecraft:item'].components['minecraft:display_name'].value;
+        const js = mm.files.get('BP/scripts/disc.js').toString();
+        check('已有名称合并：display_name 不同 → 沿用默认键更新原文（大小写不同也认）；脚本物品名用现成键；同 ID 实体名沿用物品译文',
+            rose === 'item.tz:rose_water' && en.get('item.tz:rose_water') === 'Rose Water\\n§2Healing' && zh.get('item.tz:rose_water') === '玫瑰水' && ![...en.keys()].some(k => /Rose_Water/.test(k))
+            && /"item\.tz:disc\.name"/.test(js) && ![...en.keys()].some(k => /^script\.disc\./.test(k))
+            && zh.get('entity.tz:disc.name') === '§b宁静唱片', JSON.stringify([rose, en.get('item.tz:rose_water'), zh.get('item.tz:rose_water'), zh.get('entity.tz:disc.name'), [...en.keys()].filter(k => /tz:|script\.disc/.test(k))]));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

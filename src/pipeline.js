@@ -444,8 +444,28 @@
         // ---------------- 5. 缺失的默认名称 ----------------
         const placeholders = [];
         if (opt.placeholderNames) {
+            // 同 ID 的物品已有名字（投掷物实体 ↔ 物品）：实体名直接用物品的名字和各语言译文，不用再翻一遍
+            const sameItemName = (id) => {
+                const per = new Map();
+                for (const k of [`item.${id}.name`, `item.${id}`]) {
+                    if (ctx.entries.has(k)) per.set(sourceLangGuess, ctx.entries.get(k).value);
+                    for (const langs of packLangs.values()) for (const [l, e] of langs) if (e.map.has(k) && !per.has(l)) per.set(l, NS.fromLangValue ? NS.fromLangValue(e.map.get(k)) : e.map.get(k));
+                    if (per.size) return per;
+                }
+                return null;
+            };
+            const sourceLangGuess = 'en_US';
             const addPh = (key, id, kind, file = '') => {
                 if (knownKeys.has(key) || ctx.entries.has(key)) return;
+                const same = kind === 'entity' || kind === 'spawn_egg' ? sameItemName(id) : null;
+                if (same) {
+                    const src = same.get('en_US') || [...same.values()][0];
+                    ctx.entries.set(key, { value: src, file, kind: 'name' });
+                    for (const [l, v] of same) if (v !== src) ctx.addTranslation(key, l, v);
+                    if (file) ctx.keyFiles.set(key, new Set([file]));
+                    ctx.used.add(key);
+                    return;
+                }
                 ctx.entries.set(key, { value: humanizeIdentifier(id), file, kind: 'placeholder' });
                 if (file) ctx.keyFiles.set(key, new Set([file]));
                 ctx.used.add(key);
@@ -458,6 +478,16 @@
                 if (it.hasName || !it.isDataDriven || it.hidden) continue;   // 创造栏隐藏的物品多为技术用途，不生成占位名
                 const cands = [`item.${it.id}.name`, `item.${it.id}`, `tile.${it.id}.name`];
                 if (cands.some(k => knownKeys.has(k))) continue;
+                // lang 里的键名和 ID 大小写不一致（item.x:decitem_mold_bud ↔ ID decitem_Mold_bud）：游戏找不到它，
+                // 用 display_name 指向这个现成的键，沿用已有译文，不另建
+                const lower = new Set(cands.map(k => k.toLowerCase()));
+                const ci = [...knownKeys].find(k => lower.has(k.toLowerCase()));
+                if (ci) {
+                    it.data['minecraft:item'].components['minecraft:display_name'] = { value: ci };
+                    pending.set(it.file, JSON.stringify(it.data, null, 2));
+                    ctx.ref(ci, it.file);
+                    continue;
+                }
                 const key = `item.${it.id}.name`;
                 it.data['minecraft:item'].components['minecraft:display_name'] = { value: key };
                 pending.set(it.file, JSON.stringify(it.data, null, 2));
@@ -781,6 +811,18 @@
                     ctx.warn(`${e.path}: ${k.slice(0, -1)} 混用了 %1$s 和 %s，已改为 ${f}`);
                     return k + f;
                 });
+                // 沿用的默认名称键：值还是旧原文的语言（源语言、还没翻译的）换成 display_name 的新原文
+                let overN = 0;
+                if (e && ctx.sourceOverride.size) raw = raw.replace(/^([^#\s=][^=\r\n]*)=([^\r\n]*)$/gm, (line, k, v) => {
+                    const o = ctx.sourceOverride.get(k.trim());
+                    if (!o || !entries.has(k.trim())) return line;
+                    const nv = toLangValue(o.value);
+                    if (v === nv) return line;
+                    // 只替换还是旧原文的（源语言、还没翻译的语言）；已经翻好的译文保留
+                    if (!o.olds.some(x => toLangValue(x) === v || x === v)) return line;
+                    overN++;
+                    return `${k}=${nv}`;
+                });
                 let junkN = 0;
                 if (e && junk.size) raw = raw.split('\n').filter((line) => {
                     const t = line.trimStart();
@@ -790,14 +832,14 @@
                     junkN++;
                     return false;
                 }).join('\n');
-                if (!added.length && !filled.length && !fixedN && !junkN) { if (e) written.push(lang); continue; }
+                if (!added.length && !filled.length && !fixedN && !junkN && !overN) { if (e) written.push(lang); continue; }
                 let out = e ? raw.replace(/\s*$/, '\n') : '';
                 if (added.length) out += `\n${MARK} 自动提取（源语言 ${sourceLang}${lang === sourceLang ? '' : '，待翻译'}）\n${added.join('\n')}\n`;
                 if (filled.length) out += `\n${MARK} 从其他语言补全（待翻译）\n${filled.join('\n')}\n`;
                 const path = e ? e.path : `${texts}/${lang}.lang`;
                 pending.set(path, out);
                 written.push(lang);
-                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN ? `，修正占位符 ${fixedN}` : ''}${junkN ? `，删除无效条目 ${junkN}` : ''}`);
+                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN ? `，修正占位符 ${fixedN}` : ''}${junkN ? `，删除无效条目 ${junkN}` : ''}${overN ? `，名称按 display_name 更新 ${overN}` : ''}`);
             }
             return written;
         };
