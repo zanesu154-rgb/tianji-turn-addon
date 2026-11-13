@@ -846,6 +846,14 @@
                     overN++;
                     return `${k}=${nv}`;
                 });
+                let tagN = 0;
+                // 界面标识移到译文外以后：旧值开头的 "dingUI:quota_blue§z" 去掉
+                if (e && ctx.tagStrip.size) raw = raw.replace(/^([^#\s=][^=\r\n]*)=([^\r\n]*)$/gm, (line, k, v) => {
+                    const t = ctx.tagStrip.get(k.trim());
+                    if (!t || !entries.has(k.trim()) || !v.startsWith(t)) return line;
+                    tagN++;
+                    return `${k}=${v.slice(t.length)}`;
+                });
                 let junkN = 0;
                 if (e && junk.size) raw = raw.split('\n').filter((line) => {
                     const t = line.trimStart();
@@ -855,14 +863,14 @@
                     junkN++;
                     return false;
                 }).join('\n');
-                if (!added.length && !filled.length && !fixedN && !junkN && !overN && !aliasN) { if (e) written.push(lang); continue; }
+                if (!added.length && !filled.length && !fixedN && !junkN && !overN && !aliasN && !tagN) { if (e) written.push(lang); continue; }
                 let out = e ? raw.replace(/\s*$/, '\n') : '';
                 if (added.length) out += `\n${MARK} 自动提取（源语言 ${sourceLang}${lang === sourceLang ? '' : '，待翻译'}）\n${added.join('\n')}\n`;
                 if (filled.length) out += `\n${MARK} 从其他语言补全（待翻译）\n${filled.join('\n')}\n`;
                 const path = e ? e.path : `${texts}/${lang}.lang`;
                 pending.set(path, out);
                 written.push(lang);
-                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN ? `，修正占位符 ${fixedN}` : ''}${junkN ? `，删除无效条目 ${junkN}` : ''}${overN ? `，名称按 display_name 更新 ${overN}` : ''}${aliasN ? `，合并重复名称键 ${aliasN}` : ''}`);
+                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN ? `，修正占位符 ${fixedN}` : ''}${junkN ? `，删除无效条目 ${junkN}` : ''}${overN ? `，名称按 display_name 更新 ${overN}` : ''}${aliasN ? `，合并重复名称键 ${aliasN}` : ''}${tagN ? `，界面标识移出译文 ${tagN}` : ''}`);
             }
             return written;
         };

@@ -1581,6 +1581,29 @@ console.log(JSON.stringify(calls));`;
         const en = NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString());
         check('界面：text_tts 同时引用的变量照样提取；和物品名相同的用物品名称键', en.get(ui[0]['r1@htp_test.row'].$c1) === 'Sand Handful' && ui[1]['r2@htp_test.row'].$c1 === 'item.tz:mud_ball.name' && ui[2]['r3@htp_test.row'].$c1 === '20%%', JSON.stringify(ui));
     }
+    {
+        // 命令字符串（time set night、music play x.y、function camelCase）不提取；界面标识前缀留在译文外
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/shipSystems.js', Buffer.from('import { world } from "@minecraft/server";\nconst run = (c) => world.getDimension("overworld").runCommand(c);\nexport function tick(days){\n  for (const c of ["music play music.stinger.all_players_dead", "time set night"]) run(c);\n  run("function playerInitialize");\n  world.getDimension("overworld").runCommand(`title @a actionbar dingUI:quota_blue§z距达成利润配额还剩${days}天`);\n}\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const en = NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString());
+        const vals = [...en].filter(([k]) => /shipSystems/.test(k)).map(([, v]) => v);
+        const js = mm.files.get('BP/scripts/shipSystems.js').toString();
+        check('命令字符串不提取；界面标识前缀（dingUI:xxx§z）留在译文外', vals.length === 1 && vals[0] === '距达成利润配额还剩%1$s天' && js.includes('{"text":"dingUI:quota_blue§z"}'), JSON.stringify(vals));
+    }
+    {
+        // 以前连同界面标识一起写进 lang 的：沿用键，各语言去掉开头的标识，译文保留
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/shipSystems.js', Buffer.from('import { world } from "@minecraft/server";\nexport function tick(days){ world.getDimension("overworld").runCommand(`title @a actionbar dingUI:quota_blue§z距达成利润配额还剩${days}天`); }\n'));
+        const add = (f, t) => mm.files.set(f, Buffer.from(((mm.files.get(f) || '').toString()) + '\n' + t + '\n'));
+        add('RP/texts/zh_CN.lang', 'script.shipSystems.command=dingUI:quota_blue§z距达成利润配额还剩%1$s天');
+        add('RP/texts/en_US.lang', 'script.shipSystems.command=dingUI:quota_blue§zDays left: %1$s');
+        const logs = [];
+        await NS.runPipeline(mm, { baseName: 'fixture' }, (x) => logs.push(x));
+        const g = (f) => mm.files.get(f).toString().split('\n').filter(x => /shipSystems/.test(x));
+        check('旧值里的界面标识移出译文，沿用原键、译文保留', JSON.stringify(g('RP/texts/zh_CN.lang')) === JSON.stringify(['script.shipSystems.command=距达成利润配额还剩%1$s天'])
+            && JSON.stringify(g('RP/texts/en_US.lang')) === JSON.stringify(['script.shipSystems.command=Days left: %1$s']) && logs.some(l => /界面标识移出译文/.test(l)), JSON.stringify([g('RP/texts/zh_CN.lang'), g('RP/texts/en_US.lang')]));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

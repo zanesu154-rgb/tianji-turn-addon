@@ -224,13 +224,18 @@
         const t = s.trim();
         if (STRONG_COMMANDS.test(t) || WEAK_COMMANDS.test(t)) return true;
         // function 文件路径：function ants_spawner1、/function quests/start
-        if (/^\/?function\s+[\w./-]+$/.test(t) && /[_\/\d]/.test(t.split(/\s+/)[1])) return true;
+        if (/^\/?function\s+[\w./-]+$/.test(t) && /[_\/\d]|[a-z][A-Z]/.test(t.split(/\s+/)[1])) return true;
         const m = ALL_COMMANDS.exec(t);
         if (!m) return false;
         // 子命令关键字：event entity …、camera @s set …、loot spawn …、time set …
         const first = m[2].split(/\s+/)[0];
         const sub = SUBCOMMANDS[m[1].replace(/^\//, '')];
         if (sub && sub.test(first) && ARG_TOKEN.test(m[2].slice(first.length))) return true;
+        // time set night、music play music.stinger.xxx：子命令后面是时间名或带点 / 下划线的 ID
+        if (sub && sub.test(first)) {
+            const rest = m[2].slice(first.length).trim().split(/\s+/);
+            if (rest[0] && rest.every(w => /^[a-z0-9_.:\-]+$/.test(w)) && (/[._:]/.test(rest[0]) || /^(day|night|noon|midnight|sunrise|sunset)$/.test(rest[0]))) return true;
+        }
         // 同时是英文单词的命令名：要求第一个参数就像命令参数（避免 "list of items: 3 swords"）
         if (AMBIGUOUS.test(m[1])) return ARG_TOKEN.test(first + ' ');
         return ARG_TOKEN.test(m[2]);

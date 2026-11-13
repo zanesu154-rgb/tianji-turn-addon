@@ -34,7 +34,8 @@
             this.prevKeys = options.prevKeys || new Set();           // 上次转换写进 lang 的键（标记行之后）
             this.claimed = new Set();      // 本次转换已认领的已有键（上次转换生成的）
             this.nameAliases = new Map();    // 同一个名称的另一种写法的键（item.x / item.x.name / 大小写不同）→ 沿用的键
-            this.sourceOverride = new Map(); // 键 → { value: 新原文, olds: [旧原文] }：沿用默认名称键并更新原文
+            this.sourceOverride = new Map();
+            this.tagStrip = new Map();       // 键 → 旧译文开头要去掉的界面标识（"dingUI:quota_blue§z"） // 键 → { value: 新原文, olds: [旧原文] }：沿用默认名称键并更新原文
             this.reusedPrev = 0;
             this.splitNewlines = options.splitNewlines !== false;
             this.entries = new Map();      // 新键 → { value, file, kind }
@@ -230,8 +231,29 @@
             if (!hasSentinel && this.isKey(text)) { this.ref(text.trim(), meta.file); return null; }
 
             const nodes = [];
+            // 以前整段（连同界面标识）写进 lang 的：沿用那个键，各语言值里开头的标识去掉，译文保留
+            const allocT = (value) => {
+                if (tagged) {
+                    const full = tagged + value;
+                    for (const [k, ev] of this.existingValues) {
+                        if (!(ev instanceof Set ? ev.has(full) : ev === full)) continue;
+                        if (this.entries.has(k) || this.claimed.has(k) || this.referenced.has(k)) continue;
+                        this.claimed.add(k);
+                        this.entries.set(k, { value, file: meta.file, kind: meta.kind });
+                        if (meta.scope) this.dedupe.set(meta.scope + '\u0000' + value, k);
+                        this.tagStrip.set(k, tagged);
+                        return k;
+                    }
+                }
+                return this.alloc(baseKey, value, meta);
+            };
             const m = /^((?:§.|\s)*)([\s\S]*?)((?:§.|\s)*)$/.exec(text);
-            const lead = m[1], body = m[2], tail = m[3];
+            let lead = m[1], body = m[2];
+            const tail = m[3];
+            // 开头是给自定义界面认的内部标识（"dingUI:quota_blue§z剩余天数…"）：原样保留在译文外，只翻后面的文字
+            const tag = /^([A-Za-z_][\w-]*(?::[\w.\/-]+|_[\w.\/-]*)(?:§.)+)(?=[\s\S])/.exec(body);
+            let tagged = null;
+            if (tag && textOk(body.slice(tag[1].length).replace(SENTINEL_RE, ' '))) { lead += tag[1]; body = body.slice(tag[1].length); tagged = tag[1]; }
             if (lead) nodes.push({ text: lead });
 
             if (hasSentinel) {
@@ -241,7 +263,7 @@
                     args.push({ text: s });
                     return `%${++n}$s`;
                 });
-                const key = this.alloc(baseKey, value, meta);
+                const key = allocT(value);
                 nodes.push({ translate: key, with: { rawtext: args } });
             } else {
                 const lines = this.splitNewlines && !meta.noSplit ? body.split(/\r?\n/) : [body];
@@ -249,7 +271,7 @@
                     if (i > 0) nodes.push({ text: '\n' });
                     if (!line) return;
                     if (textOk(line)) {
-                        nodes.push({ translate: this.alloc(baseKey, line, meta) });
+                        nodes.push({ translate: lines.length === 1 ? allocT(line) : this.alloc(baseKey, line, meta) });
                     } else {
                         nodes.push({ text: line });
                     }
