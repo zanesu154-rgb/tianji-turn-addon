@@ -2163,6 +2163,18 @@
             }
         };
 
+        // 打包进脚本的库带来的文字：许可证全文、编译器辅助函数的报错、模拟实现的提示、日志前缀等
+        const isCodeNoise = (line) => {
+            const t = String(line).trim();
+            if (/^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/.test(t)) return true;                       // MELEE、BACKSTEP、NOOP：枚举值
+            if (/^\[[^\]]*\]$/.test(t)) return true;                                          // [SPARK LOG]、[karthuul fsm (root)]：日志标签
+            if (/^\/\*|\*\/$|^\/\//.test(t)) return true;                                  // /* class：代码注释片段
+            if (/^[A-Za-z_$][\w$]*<[^<>]*>$/.test(t)) return true;                               // Vector2<%1$s, %2$s>：toString
+            if (/Copyright \(c\)|Permission is hereby granted|THE SOFTWARE IS PROVIDED|All rights reserved\.|\bMIT License\b|Licensed under the/i.test(t)) return true;
+            if (/^(?:Object expected|Object not disposable|An error was suppressed during disposal|Symbol\.(?:async)?[Dd]ispose is not defined\.?|Cannot (?:add|read|write) private member.*|Private (?:field|method|accessor) .*|Class extends value .*|Generator is already executing\.?|Iterator result .* is not an object|Super constructor .*)$/.test(t)) return true;
+            if (/\bis being mocked\b|\bit is a noop\b|\bnot implemented\b|\bis deprecated\b/i.test(t)) return true;
+            return false;
+        };
         const registerExact = (text, fromSplit = false) => {
             if (opts.uiCompared && opts.uiCompared.has(String(text).replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) return;
             if (opts.refSyntax && (DICT_REF.lastIndex = 0, DICT_REF.test(text))) { DICT_REF.lastIndex = 0; registerPattern([{ lit: text }]); return; }
@@ -2172,6 +2184,7 @@
                 if (ctx.isKey(line)) continue;
                 // WaterGun、MeleeAttack 这种没有空格的驼峰词：代码里的标识符
                 if (/^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+$/.test(line.trim())) continue;
+                if (isCodeNoise(line)) continue;
                 // 拆行时每行去掉代码缩进；原样和去空白后的写法都登记
                 const multi = lines.length > 1 || fromSplit || line.indexOf('\n') >= 0;
                 const t = (lines.length > 1 || fromSplit || !multi) ? line.trim() : line;
