@@ -1218,12 +1218,12 @@ console.log(JSON.stringify(calls));`;
         const m1 = new MemFS(readDir(fx));
         await NS.runPipeline(m1, { baseName: 'fixture' }, () => {});
         const en1 = NS.parseLang(m1.files.get('RP/texts/en_US.lang').toString());
-        const tr = m1.files.get('RP/texts/en_US.lang').toString().replace(/^([^#\s=][^=\n]*)=.*$/mg, (l, k) => `${k}=EN:${k}`);
+        const tr = m1.files.get('RP/texts/en_US.lang').toString().replace(/^([^#\s=][^=\n]*)=(.*)$/mg, (l, k, v) => `${k}=${/[\u4e00-\u9fff]/.test(v) ? v.replace(/[\u4e00-\u9fff]/g, 'e') : 'EN:' + v}`);
         const o = readDir(fx); o.set('RP/texts/en_US.lang', Buffer.from(tr + '\nscript.main.str_999=EN:old line that was removed\n'));
         const m2 = new MemFS(o);
         await NS.runPipeline(m2, { baseName: 'fixture' }, () => {});
         const en2 = NS.parseLang(m2.files.get('RP/texts/en_US.lang').toString());
-        const lost = [...en2.keys()].filter(k => !String(en2.get(k)).startsWith('EN:'));
+        const lost = [...en2.keys()].filter(k => { const v = String(en2.get(k)); return !v.startsWith('EN:') && /[\u4e00-\u9fff]/.test(v); });
         check('再次转换：沿用放回的译文 lang，键名一致、不新建重复键', en2.size === en1.size && lost.length === 0, JSON.stringify({ n1: en1.size, n2: en2.size, lost: lost.slice(0, 5) }));
         const zh2 = NS.parseLang(m2.files.get('RP/texts/zh_CN.lang').toString());
         check('再次转换：放回的 lang 里已用不到的旧键被删除', !en2.has('script.main.str_999') && !zh2.has('script.main.str_999'));
@@ -1611,6 +1611,25 @@ console.log(JSON.stringify(calls));`;
         await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
         const vals = [...NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString())].filter(([k]) => /script\.ids\./.test(k)).map(([, v]) => v);
         check('只用来拼 ID 的参数值不提取', !vals.includes('right') && !vals.includes('left') && !vals.includes('chisel') && vals.includes('traveler'), JSON.stringify(vals));
+    }
+    {
+        // 只放回译文 lang、新版本在前面多提取了几条：序号错开后按占位符 / 格式代码核对认领，不把译文错配到别的句子
+        const body = (extra) => 'import { world } from "@minecraft/server";\nexport function f(p, a, b, c){\n' + extra
+            + '  p.sendMessage(`Time: ${a} (${b}:${c} PM)`);\n  p.sendMessage(`§r§7Drinks Left: §b${a}§r`);\n  p.sendMessage(`§r§7Durability: §f${a} / ${b}`);\n  p.sendMessage(`Saving ${a} volcano tiles to disk...`);\n}\n';
+        const m1 = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        m1.files.set('BP/scripts/shift.js', Buffer.from(body('')));
+        await NS.runPipeline(m1, { baseName: 'fixture' }, () => {});
+        const ZH = { 'Time: %1$s (%2$s:%3$s PM)': '时间：%1$s（%2$s:%3$s PM）', 'Drinks Left: §b%1$s§r': '剩余饮用次数：§b%1$s§r', 'Durability: §f%1$s / %2$s': '耐久度：§f%1$s / %2$s', 'Saving %1$s volcano tiles to disk...': '正在将%1$s个火山区块保存到磁盘……' };
+        const en1 = NS.parseLang(m1.files.get('RP/texts/en_US.lang').toString());
+        const zhLines = [...en1].filter(([k]) => /script\.shift\./.test(k)).map(([k, v]) => `${k}=${ZH[v]}`);
+        const m2 = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        m2.files.set('BP/scripts/shift.js', Buffer.from(body('  p.sendMessage(`§r§7Health: ${a}`);\n  p.sendMessage(`UID: ${a}\\n`);\n')));
+        m2.files.set('RP/texts/zh_CN.lang', Buffer.from(((m2.files.get('RP/texts/zh_CN.lang') || '').toString()) + '\n' + zhLines.join('\n') + '\n'));
+        await NS.runPipeline(m2, { baseName: 'fixture' }, () => {});
+        const en2 = NS.parseLang(m2.files.get('RP/texts/en_US.lang').toString()), zh2 = NS.parseLang(m2.files.get('RP/texts/zh_CN.lang').toString());
+        const pairs = [...en2].filter(([k]) => /script\.shift\./.test(k)).map(([k, v]) => [v, zh2.get(k)]);
+        const ok = Object.entries(ZH).every(([e, z]) => pairs.some(([v, t]) => v === e && t === z)) && pairs.every(([v, t]) => !ZH[v] || t === ZH[v]);
+        check('只放回译文、前面新增了句子：按占位符 / 格式代码对齐，不错配', ok, JSON.stringify(pairs));
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);

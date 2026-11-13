@@ -26,6 +26,151 @@
     }
     NS.dedentCode = dedentCode;
 
+    // 认领上次的键时用来核对“这条译文是不是这句原文的”：占位符、格式代码、换行、数字要一致，长度大致相当
+    function seriesFeat(s) {
+        s = String(s).replace(/\\n/g, '\n');
+        const plain = (NS.stripFormatting ? NS.stripFormatting(s) : s.replace(/§./g, '')).replace(/%\d+\$[sd]|%[sd]/g, '').replace(/\s+/g, '');
+        return {
+            ph: (s.match(/%\d+\$[sd]|%[sd]/g) || []).length,
+            nl: (s.match(/\n/g) || []).length,
+            codes: (s.replace(/(?:§r|\s)+$/i, '').match(/§[0-9a-v]/gi) || []).map(c => c.toLowerCase()).sort().join(''),
+            nums: (s.replace(/%\d+\$[sd]/g, '').match(/\d+/g) || []).sort().join(','),
+            len: plain.length,
+            cjk: NS.hasCJK(s),
+        };
+    }
+    function seriesCompat(a, b, loose) {
+        if (a.ph !== b.ph || a.nl !== b.nl || a.codes !== b.codes || (!loose && a.nums !== b.nums)) return false;
+        if (!a.len || !b.len) return a.len === b.len;
+        const r = b.len / a.len;
+        if (a.cjk === b.cjk) return r >= 0.4 && r <= 2.5;
+        return a.cjk ? r >= 0.8 && r <= 10 : r >= 0.1 && r <= 1.2;
+    }
+
+    /**
+     * 只放回译文 lang 时，把这次按顺序分配的原文和上次的键整体对齐（类似 diff）：
+     * 占位符 / 换行 / 格式代码对不上的不能配；数字、长度比例越像得分越高；中间可以有新增或删掉的条目。
+     * @returns Map(基础键 → Map(序号 → 键))
+     */
+    function alignSeries(ctx) {
+        const plan = new Map();
+        if (!ctx.seriesLog || !ctx._seriesIdx) return plan;
+        const vals = (k) => { const e = ctx.existingValues.get(k); return e instanceof Set ? [...e] : e != null ? [e] : []; };
+        for (const [base, seq] of ctx.seriesLog) {
+            const exactKeys = new Set(seq.map(x => x.exact).filter(Boolean));
+            const olds = (ctx._seriesIdx.get(base) || []).filter(([, k]) => !exactKeys.has(k) && !ctx.referenced.has(k)).map(([i, k]) => {
+                const langs = [...(ctx.keyLangs.get(k) || [])];
+                // 有原文这一侧语言的旧键：只有上次本工具生成的（原文改过了）才能认领
+                return { i, k, v: vals(k), f: vals(k).map(seriesFeat), en: ctx.prevKeys.has(k) || !langs.some(l => /^en_/.test(l)), cjk: ctx.prevKeys.has(k) || !langs.some(l => /^(zh|ja|ko)_/.test(l)) };
+            });
+            // 序号远远跳开的旧键（中间空了几百号）多半是早就不用的旧条目，不参与认领
+            for (let t = 1; t < olds.length; t++) if (olds[t].i - olds[t - 1].i > 200) { olds.length = t; break; }
+            const news = seq.filter(x => !x.exact).map(x => ({ j: x.j, text: x.text, f: seriesFeat(x.text) }));
+            if (!olds.length || !news.length) continue;
+            const score = (a, bs) => {
+                let best = -1;
+                for (const b of bs) {
+                    if (a.ph !== b.ph || a.nl !== b.nl || a.codes !== b.codes) continue;
+                    let sc = 3 + (a.ph + a.nl + a.codes.length / 2) * 0.5 + (a.nums && a.nums === b.nums ? 1.5 : a.nums !== b.nums ? -0.6 : 0);
+                    if (a.len && b.len) {
+                        const r0 = a.cjk === b.cjk ? 1 : a.cjk ? 2.6 : 0.38;
+                        sc += Math.max(-1, 1 - Math.abs(Math.log((b.len / a.len) / r0)) * 1.2);
+                    }
+                    if (sc > best) best = sc;
+                }
+                return best;
+            };
+            const N = news.length, M = olds.length;
+            const band = Math.max(150, Math.abs(N - M) + 150);
+            const W = 2 * band + 1;
+            const center = (n) => Math.round(n * M / N);
+            const at = (n, m) => { const d = m - center(n) + band; return d >= 0 && d < W ? n * W + d : -1; };
+            const NEG = -1e9;
+            // 带状 DP（类似 diff）：配对得分最高的对齐方式；返回 [新序号, 旧序号] 列表
+            const runDP = (pairScore) => {
+                const dp = new Float64Array((N + 1) * W).fill(NEG);
+                const tb = new Uint8Array((N + 1) * W);   // 1 = 配对, 2 = 跳过新原文, 3 = 跳过旧键
+                dp[at(0, 0)] = 0;
+                for (let m = 1; m <= Math.min(M, band); m++) { const x = at(0, m); if (x >= 0) { dp[x] = 0; tb[x] = 3; } }
+                for (let n = 1; n <= N; n++) {
+                    const c = center(n);
+                    for (let m = Math.max(0, c - band); m <= Math.min(M, c + band); m++) {
+                        const x = at(n, m);
+                        let best = NEG, how = 0;
+                        const up = at(n - 1, m);
+                        if (up >= 0 && dp[up] > best) { best = dp[up]; how = 2; }
+                        if (m > 0) {
+                            const left = at(n, m - 1);
+                            if (left >= 0 && dp[left] > best) { best = dp[left]; how = 3; }
+                            const diag = at(n - 1, m - 1);
+                            if (diag >= 0 && dp[diag] > NEG / 2) {
+                                const sc = pairScore(n - 1, m - 1);
+                                if (sc > 0 && dp[diag] + sc > best) { best = dp[diag] + sc; how = 1; }
+                            }
+                        }
+                        dp[x] = best; tb[x] = how;
+                    }
+                }
+                let n = N, m = -1, bestEnd = NEG;
+                for (let mm = Math.max(0, center(N) - band); mm <= Math.min(M, center(N) + band); mm++) { const x = at(N, mm); if (x >= 0 && dp[x] > bestEnd) { bestEnd = dp[x]; m = mm; } }
+                const out = [];
+                while (n > 0 && m >= 0) {
+                    const x = at(n, m);
+                    if (x < 0) break;
+                    const how = tb[x];
+                    if (how === 1) { out.push([n - 1, m - 1]); n--; m--; }
+                    else if (how === 2) n--;
+                    else if (how === 3) m--;
+                    else break;
+                }
+                return out;
+            };
+            const baseScore = (n, m) => { const o = olds[m], a = news[n].f; return (a.cjk ? o.cjk : o.en) ? score(a, o.f) : -1; };
+            let pairs = runDP(baseScore);
+            // 第二遍：从第一遍的配对里学“哪个词常对应哪个译词”（Banner ↔ 旗帜、Statue ↔ 雕像），
+            // 把它加进得分再对齐一次，纯文字的长串里也能对准
+            if (pairs.length >= 40) {
+                const toks = (s, cjk) => {
+                    const t = (NS.stripFormatting ? NS.stripFormatting(String(s)) : String(s)).replace(/\\n|%\d+\$s/g, ' ');
+                    if (cjk) { const out = new Set(); const run = t.match(/[぀-ヿ㐀-鿿가-힯]+/g) || []; for (const r of run) { if (r.length === 1) out.add(r); for (let i = 0; i + 1 < r.length; i++) out.add(r.slice(i, i + 2)); } return out; }
+                    return new Set((t.toLowerCase().match(/[a-zÀ-ɏ]{3,}/g) || []));
+                };
+                const nT = news.map(x => toks(x.text, x.f.cjk));
+                const oT = olds.map(o => { const s = new Set(); for (const v of o.v) for (const t of toks(v, NS.hasCJK(v))) s.add(t); return s; });
+                const cw = new Map(), ct = new Map(), cwt = new Map();
+                const inc = (mp, k) => mp.set(k, (mp.get(k) || 0) + 1);
+                for (const [n, m] of pairs) {
+                    for (const w of nT[n]) inc(cw, w);
+                    for (const t of oT[m]) inc(ct, t);
+                    for (const w of nT[n]) for (const t of oT[m]) inc(cwt, w + '\u0000' + t);
+                }
+                const assoc = (w, t) => { const c = cwt.get(w + '\u0000' + t) || 0; return c < 2 ? 0 : c / Math.sqrt(cw.get(w) * ct.get(t)); };
+                const lex = (n, m) => {
+                    let sum = 0, cnt = 0;
+                    for (const w of nT[n]) {
+                        if ((cw.get(w) || 0) < 2) continue;
+                        cnt++;
+                        let best = 0;
+                        for (const t of oT[m]) { const v = assoc(w, t); if (v > best) best = v; }
+                        sum += best;
+                    }
+                    return cnt ? sum / cnt : null;
+                };
+                pairs = runDP((n, m) => {
+                    const sc = baseScore(n, m);
+                    if (sc <= 0) return sc;
+                    const l = lex(n, m);
+                    return l == null ? sc : sc + (l - 0.25) * 6;
+                });
+            }
+            const map = new Map();
+            for (const [n, m] of pairs) map.set(news[n].j, olds[m].k);
+            if (map.size) plan.set(base, map);
+        }
+        return plan;
+    }
+    NS.alignSeries = alignSeries;
+
     class ExtractContext {
         constructor(options = {}) {
             this.knownKeys = options.knownKeys || new Set();         // 附加包中已有的所有 lang 键
@@ -35,6 +180,8 @@
             this.claimed = new Set();      // 本次转换已认领的已有键（上次转换生成的）
             this.nameAliases = new Map();    // 同一个名称的另一种写法的键（item.x / item.x.name / 大小写不同）→ 沿用的键
             this.sourceOverride = new Map();
+            this.alignPlan = options.alignPlan || null;   // 基础键 → (序号 → 上次的键)
+            this.seriesLog = options.recordSeries ? new Map() : null;
             this.tagStrip = new Map();       // 键 → 旧译文开头要去掉的界面标识（"dingUI:quota_blue§z"） // 键 → { value: 新原文, olds: [旧原文] }：沿用默认名称键并更新原文
             this.reusedPrev = 0;
             this.splitNewlines = options.splitNewlines !== false;
@@ -129,30 +276,63 @@
                     return own;
                 }
             }
-            // 上次转换生成的同系列键（base、base_1、base_2……）：
+            // 上次转换生成的同系列键（base、base_1、base_2……，中间可能有被删掉的空号）：
             // 1) 原文相同（把上次输出的 en_US.lang 一起放回来）→ 直接复用
-            // 2) 只有译文、没有原文这一侧的语言（只放回了翻译好的 zh_CN.lang）→ 按顺序认领，
-            //    分配顺序和上次一样，所以会对上同一个键，已有译文保留
-            const series = [];
-            for (let i = 0; ; i++) {
-                const k = i ? `${base}_${i}` : base;
-                if (!this.knownKeys.has(k)) break;
-                series.push(k);
+            // 2) 只有译文、没有原文这一侧的语言（只放回了翻译好的 zh_CN.lang）→ 按顺序认领。
+            //    新版本可能多提取或少提取了几条，序号会整体错开：认领前核对占位符、格式代码、换行、数字和长度，
+            //    对不上的不认；有特征的条目（占位符、格式代码、数字……）对上后据此校正错开的位数
+            if (!this._seriesIdx) {
+                this._seriesIdx = new Map();
+                const put = (b, i, k) => { if (!this._seriesIdx.has(b)) this._seriesIdx.set(b, []); this._seriesIdx.get(b).push([i, k]); };
+                for (const k of this.knownKeys) {
+                    put(k, 0, k);
+                    const m = /^(.+)_([1-9]\d*)$/.exec(k);
+                    if (m) put(m[1], +m[2], k);
+                }
+                for (const v of this._seriesIdx.values()) v.sort((a, b) => a[0] - b[0]);
             }
+            const seriesI = this._seriesIdx.get(base) || [];
+            const series = seriesI.map(x => x[1]);
             if (series.length > 1 || (series.length === 1 && this.keyLangs.size)) {
                 const free = (k) => !this.claimed.has(k) && !this.entries.has(k) && !this.referenced.has(k);
                 let hit = series.find(k => free(k) && (() => { const e = this.existingValues.get(k); return e instanceof Set ? e.has(text) : e === text; })());
-                if (!hit && this.keyLangs.size) {
+                if (!this._seriesState) this._seriesState = new Map();
+                if (!this._seriesState.has(base)) this._seriesState.set(base, { ord: 0, off: 0 });
+                const st = this._seriesState.get(base), j = st.ord++;
+                if (this.seriesLog) { if (!this.seriesLog.has(base)) this.seriesLog.set(base, []); this.seriesLog.get(base).push({ j, text, exact: hit || null }); }
+                const planned = this.alignPlan && this.alignPlan.get(base);
+                if (!hit && planned) {
+                    // 预演后整体对齐得到的认领方案（见 alignSeries）
+                    const k = planned.get(j);
+                    if (k && free(k)) {
+                        this.claimed.add(k);
+                        this.reusedPrev++;
+                        this.entries.set(k, { value: text, file, kind });
+                        if (scope) this.dedupe.set(scope + '\u0000' + text, k);
+                        return k;
+                    }
+                } else if (!hit && this.keyLangs.size) {
                     const cjk = NS.hasCJK(text);
                     const sideOf = (l) => cjk ? /^(zh|ja|ko)_/.test(l) : /^en_/.test(l);
-                    hit = series.find(k => free(k) && (this.prevKeys.has(k) || ![...(this.keyLangs.get(k) || [])].some(sideOf)));
-                    if (hit) {
+                    const a = seriesFeat(text);
+                    const strong = a.ph + a.nl + a.codes.length / 2 + (a.nums ? 1 : 0) > 0;
+                    const vals = (k) => { const e = this.existingValues.get(k); return e instanceof Set ? [...e] : e != null ? [e] : []; };
+                    const e = j + st.off;
+                    // 数字只在“换了位置去找”时严格核对；正好在原位置上的，译文写法不同（2k / 2000）也认
+                    const cands = seriesI.filter(([i, k]) => free(k) && (this.prevKeys.has(k) || ![...(this.keyLangs.get(k) || [])].some(sideOf))
+                        && vals(k).some(v => seriesCompat(a, seriesFeat(v), i === e)));
+                    let best = null;
+                    for (const c of cands) if (!best || Math.abs(c[0] - e) < Math.abs(best[0] - e)) best = c;
+                    if (best && (strong ? Math.abs(best[0] - e) <= 80 : best[0] === e)) {
+                        hit = best[1];
+                        if (strong) st.off = best[0] - j;
                         this.claimed.add(hit);
                         this.reusedPrev++;
                         this.entries.set(hit, { value: text, file, kind });
                         if (scope) this.dedupe.set(scope + '\u0000' + text, hit);
                         return hit;
                     }
+                    hit = null;
                 }
                 if (hit) {
                     this.claimed.add(hit);
@@ -165,7 +345,8 @@
             const evList = ev instanceof Set ? [...ev] : (ev != null ? [ev] : []);
             if (evList.includes(text)) {
                 key = base;
-            } else if (evList.length && evList.every(v => NS.hasCJK(v) !== NS.hasCJK(text)) && !this.entries.has(base) && !this.referenced.has(base)) {
+            } else if (evList.length && evList.every(v => NS.hasCJK(v) !== NS.hasCJK(text)) && !this.entries.has(base) && !this.referenced.has(base)
+                && evList.some(v => seriesCompat(seriesFeat(text), seriesFeat(v), true))) {
                 // 已有键的值是另一种文字（如 en_US 的 "Altar" 对应 "祭坛"）→ 视为同一条的译文，复用键，
                 // 原文只会补进缺少该键的语言文件
                 key = base;
