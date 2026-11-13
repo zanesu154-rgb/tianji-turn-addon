@@ -1240,7 +1240,11 @@
             let hit = false;
             walk(body, (n) => {
                 if (hit || n.type !== 'TemplateLiteral') return;
-                if (!n.expressions.some(e => e.type === 'Identifier' && e.name === name)) return;
+                const at = n.expressions.findIndex(e => e.type === 'Identifier' && e.name === name);
+                if (at < 0) return;
+                // `axe_throw_${side}_${type}`、`guide.${cat}.title`：参数紧贴 ID 字符，是拼 ID 用的，不是显示
+                const before = n.quasis[at].value.cooked || '', after = (n.quasis[at + 1] && n.quasis[at + 1].value.cooked) || '';
+                if (/[\w:.\/-]$/.test(before) || /^[\w:\/]|^\.\w/.test(after)) return;
                 // console.warn(`[temperature:${e}]`, …)：调试输出，不算显示
                 const c = n.parent;
                 if (c && c.type === 'CallExpression' && c.callee.type === 'MemberExpression' && c.callee.object.type === 'Identifier' && c.callee.object.name === 'console') return;
@@ -2314,13 +2318,17 @@
         };
 
         // entit${n > 1 ? "ies" : "y"}：分支是粘在前一个单词上的词尾，不是独立文字
+        // `5fs_br:has_${right ? "right" : "left"}_skull`：两边紧贴 ID 字符（_ : . /）的分支是 ID 的一部分
         const gluedSuffix = (q) => {
             const t = q.parent;
             if (t.type === 'TemplateLiteral') {
                 const i = t.expressions.indexOf(q);
-                return i >= 0 && /[A-Za-z]$/.test(t.quasis[i].value.cooked || '');
+                if (i < 0) return false;
+                const before = t.quasis[i].value.cooked || '', after = (t.quasis[i + 1] && t.quasis[i + 1].value.cooked) || '';
+                return /[A-Za-z]$/.test(before) || /[_:.\/]$/.test(before) || /^[_:\/]|^\.\w/.test(after);
             }
-            return isStr(t.left) && t.right === q && /[A-Za-z]$/.test(t.left.value);
+            if (isStr(t.left) && t.right === q) return /[A-Za-z_:.\/]$/.test(t.left.value);
+            return false;
         };
         const isPlusOperand = (n) => n.parent && n.parent.type === 'BinaryExpression' && n.parent.operator === '+';
         walk(ast, (n) => {

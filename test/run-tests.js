@@ -1604,6 +1604,14 @@ console.log(JSON.stringify(calls));`;
         check('旧值里的界面标识移出译文，沿用原键、译文保留', JSON.stringify(g('RP/texts/zh_CN.lang')) === JSON.stringify(['script.shipSystems.command=距达成利润配额还剩%1$s天'])
             && JSON.stringify(g('RP/texts/en_US.lang')) === JSON.stringify(['script.shipSystems.command=Days left: %1$s']) && logs.some(l => /界面标识移出译文/.test(l)), JSON.stringify([g('RP/texts/zh_CN.lang'), g('RP/texts/en_US.lang')]));
     }
+    {
+        // 参数只拿来拼 ID（`axe_throw_${side}_x`、`guide.item.${id}.desc`）：调用处传的 "right" / "chisel" 不提取；真正显示的照常
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/ids.js', Buffer.from('import { world } from "@minecraft/server";\nfunction throwAxe(e, side){ e.playAnimation(`axe_throw_${side}_h`); e.setProperty(`br:has_${side ? "right" : "left"}_skull`, false); }\nfunction showItem(p, id){ p.sendMessage(`guide.item.${id}.desc`); }\nfunction greet(p, who){ p.sendMessage(`Hello ${who}, welcome back`); }\nexport function f(e, p){ throwAxe(e, "right"); showItem(p, "chisel"); greet(p, "traveler"); }\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const vals = [...NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString())].filter(([k]) => /script\.ids\./.test(k)).map(([, v]) => v);
+        check('只用来拼 ID 的参数值不提取', !vals.includes('right') && !vals.includes('left') && !vals.includes('chisel') && vals.includes('traveler'), JSON.stringify(vals));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
