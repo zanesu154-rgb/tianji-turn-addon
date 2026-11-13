@@ -71,7 +71,38 @@
         return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
     }
 
+    /** 只记写入、不改原文件的预演文件系统 */
+    class OverlayFS {
+        constructor(base) { this.base = base; this.w = new Map(); this.gone = new Set(); }
+        list() { const s = new Set(this.base.list().filter(p => !this.gone.has(p))); for (const k of this.w.keys()) s.add(k); return [...s]; }
+        async readText(p) { if (this.w.has(p)) { const v = this.w.get(p); return typeof v === 'string' ? v : new TextDecoder().decode(v); } return this.base.readText(p); }
+        async readBytes(p) { if (this.w.has(p)) { const v = this.w.get(p); return typeof v === 'string' ? new TextEncoder().encode(v) : v; } return this.base.readBytes(p); }
+        writeText(p, t) { this.w.set(p, t); this.gone.delete(p); }
+        writeBytes(p, b) { this.w.set(p, b); this.gone.delete(p); }
+        async move(a, b) { const v = this.w.has(a) ? this.w.get(a) : await this.base.readBytes(a); this.w.delete(a); this.gone.add(a); this.w.set(b, v); this.gone.delete(b); }
+    }
+
     async function runPipeline(fs, userOptions = {}, log = () => {}) {
+        // 重新转换时只放回了译文 lang（没有上次的原文）：先预演一遍记下这次的分配顺序，
+        // 和上次的键整体对齐后再正式转换，避免新版本多 / 少提取几条后译文整体错位
+        if (!userOptions._alignDry && !userOptions.alignPlan) {
+            let hasPrev = false;
+            for (const p of fs.list()) {
+                if (!/\/texts\/[a-z]{2}_[A-Z]{2}\.lang$|^texts\/[a-z]{2}_[A-Z]{2}\.lang$/.test(p)) continue;
+                try { if ((await fs.readText(p)).includes(MARK)) { hasPrev = true; break; } } catch (e) { /* 读不了就算了 */ }
+            }
+            if (hasPrev) {
+                try {
+                    const dry = await runPipeline(new OverlayFS(fs), { ...userOptions, _alignDry: true }, () => {});
+                    if (dry && dry._alignPlan && dry._alignPlan.size) {
+                        let n = 0;
+                        for (const m of dry._alignPlan.values()) n += m.size;
+                        log(`[lang] 只放回了译文：已按占位符、格式代码、数字和长度把 ${n} 条和上次的键整体对齐`);
+                        return runPipeline(fs, { ...userOptions, alignPlan: dry._alignPlan }, log);
+                    }
+                } catch (e) { /* 预演失败就按原来的方式转换 */ }
+            }
+        }
         const opt = { ...DEFAULT_OPTIONS, ...userOptions };
         const allFiles = fs.list().filter(p => !isJunk(p));
         const pending = new Map();                 // 路径 → 新内容
@@ -169,7 +200,7 @@
         for (const pv of packVersions) pv.name = pv.name.replace(/§./g, '').trim();
 
         if (typeof NS.ExtractContext !== 'function') throw new Error('页面文件没有完整加载（context.js），请刷新页面后重试');
-        const ctx = new NS.ExtractContext({ knownKeys, existingValues, keyLangs, prevKeys, splitNewlines: opt.splitNewlines });
+        const ctx = new NS.ExtractContext({ knownKeys, existingValues, keyLangs, prevKeys, splitNewlines: opt.splitNewlines, alignPlan: opt.alignPlan || null, recordSeries: !!opt._alignDry });
         ctx.sayMode = opt.sayMode;
         ctx.listCommandBlockNames = !!opt.listCommandBlockNames;
         ctx.includeHiddenItems = !!opt.includeHiddenItems;
@@ -994,6 +1025,7 @@
             packVersions,
         };
         return {
+            _alignPlan: opt._alignDry ? NS.alignSeries(ctx) : undefined,
             ctx, summary, structureSession, manualSession,
             workbook: {
                 'strings.csv': stringsCsv,
