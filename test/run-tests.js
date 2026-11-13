@@ -1515,6 +1515,20 @@ console.log(JSON.stringify(calls));`;
             && /"item\.tz:disc\.name"/.test(js) && ![...en.keys()].some(k => /^script\.disc\./.test(k))
             && zh.get('entity.tz:disc.name') === '§b宁静唱片', JSON.stringify([rose, en.get('item.tz:rose_water'), zh.get('item.tz:rose_water'), zh.get('entity.tz:disc.name'), [...en.keys()].filter(k => /tz:|script\.disc/.test(k))]));
     }
+    {
+        // 同一名称有两种写法的键（item.x 和 item.x.name）：合并成一个，译文保留，不再输出两遍
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const T = 'Deep Dark\n§8a land full of prosperity';
+        mm.files.set('BP/items/dd.json', Buffer.from(JSON.stringify({ format_version: '1.21.0', 'minecraft:item': { description: { identifier: 'tz:deep_dark_lore' }, components: { 'minecraft:display_name': { value: T } } } })));
+        mm.files.set('RP/texts/en_US.lang', Buffer.from(mm.files.get('RP/texts/en_US.lang').toString() + '\nitem.tz:deep_dark_lore=Deep Dark\\n§8a land full of prosperity\n'));
+        mm.files.set('RP/texts/zh_CN.lang', Buffer.from((mm.files.get('RP/texts/zh_CN.lang') || '').toString() + '\nitem.tz:deep_dark_lore.name=深邃黑暗\\n§8一片繁荣的土地\n'));
+        const logs = [];
+        await NS.runPipeline(mm, { baseName: 'fixture' }, (x) => logs.push(x));
+        const ks = (f) => mm.files.get(f).toString().split('\n').filter(l => /deep_dark_lore/.test(l));
+        const en = ks('RP/texts/en_US.lang'), zh = ks('RP/texts/zh_CN.lang');
+        check('重复名称键合并：item.x 与 item.x.name 只留一个，译文保留', en.length === 1 && zh.length === 1 && en[0].startsWith('item.tz:deep_dark_lore.name=Deep Dark') && zh[0] === 'item.tz:deep_dark_lore.name=深邃黑暗\\n§8一片繁荣的土地'
+            && logs.some(l => /合并重复名称键 1/.test(l)), JSON.stringify([en, zh]));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

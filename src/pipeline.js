@@ -781,6 +781,23 @@
             for (const lang of langSet) {
                 const e = langs.get(lang);
                 const map = e ? e.map : new Map();
+                // 同一名称的另一种写法（item.x / item.x.name）：这个语言已有沿用的键 → 删掉；没有 → 改名成沿用的键（保留译文）
+                let aliasN = 0, aliasRaw = null;
+                const aliasOf = (k) => { const o = ctx.nameAliases.get(k); return o && entries.has(o) && !entries.has(k) && !ctx.referenced.has(k) ? o : null; };
+                if (e && ctx.nameAliases.size) {
+                    const seen = new Set(map.keys());
+                    const out = [];
+                    for (const line of e.raw.split('\n')) {
+                        const t = line.trimStart(), eq = line.indexOf('=');
+                        const o = t && !t.startsWith('#') && eq > 0 ? aliasOf(line.slice(0, eq).trim()) : null;
+                        if (!o) { out.push(line); continue; }
+                        aliasN++;
+                        if (seen.has(o)) continue;
+                        seen.add(o); map.set(o, line.slice(eq + 1));
+                        out.push(`${o}=${line.slice(eq + 1)}`);
+                    }
+                    aliasRaw = out.join('\n');
+                }
                 const added = [];
                 for (const [k, v] of entries) {
                     if (map.has(k) || junk.has(k)) continue;
@@ -791,7 +808,7 @@
                 const filled = [];
                 if (opt.fillMissing && isRP) {
                     for (const k of allExistingKeys) {
-                        if (map.has(k) || entries.has(k) || ctx.hiddenKeys.has(k) || junk.has(k)) continue;
+                        if (map.has(k) || entries.has(k) || ctx.hiddenKeys.has(k) || junk.has(k) || aliasOf(k)) continue;
                         const v = fillFrom(k);
                         if (v != null) {
                             filled.push(`${k}=${v}`);
@@ -802,7 +819,7 @@
                     }
                 }
                 // 已有译文里 %1$s 和 %s 混用（游戏会显示成 “%3”）→ 自动改成全部带序号
-                let raw = e ? e.raw : '';
+                let raw = e ? (aliasRaw != null ? aliasRaw : e.raw) : '';
                 let fixedN = 0;
                 if (e) raw = raw.replace(/^([^#\s=][^=\r\n]*=)([^\r\n]*)$/gm, (line, k, v) => {
                     const f = fixMixedPlaceholders(v);
@@ -832,14 +849,14 @@
                     junkN++;
                     return false;
                 }).join('\n');
-                if (!added.length && !filled.length && !fixedN && !junkN && !overN) { if (e) written.push(lang); continue; }
+                if (!added.length && !filled.length && !fixedN && !junkN && !overN && !aliasN) { if (e) written.push(lang); continue; }
                 let out = e ? raw.replace(/\s*$/, '\n') : '';
                 if (added.length) out += `\n${MARK} 自动提取（源语言 ${sourceLang}${lang === sourceLang ? '' : '，待翻译'}）\n${added.join('\n')}\n`;
                 if (filled.length) out += `\n${MARK} 从其他语言补全（待翻译）\n${filled.join('\n')}\n`;
                 const path = e ? e.path : `${texts}/${lang}.lang`;
                 pending.set(path, out);
                 written.push(lang);
-                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN ? `，修正占位符 ${fixedN}` : ''}${junkN ? `，删除无效条目 ${junkN}` : ''}${overN ? `，名称按 display_name 更新 ${overN}` : ''}`);
+                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN ? `，修正占位符 ${fixedN}` : ''}${junkN ? `，删除无效条目 ${junkN}` : ''}${overN ? `，名称按 display_name 更新 ${overN}` : ''}${aliasN ? `，合并重复名称键 ${aliasN}` : ''}`);
             }
             return written;
         };

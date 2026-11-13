@@ -33,6 +33,7 @@
             this.keyLangs = options.keyLangs || new Map();           // 键 → Set(有这个键的语言)
             this.prevKeys = options.prevKeys || new Set();           // 上次转换写进 lang 的键（标记行之后）
             this.claimed = new Set();      // 本次转换已认领的已有键（上次转换生成的）
+            this.nameAliases = new Map();    // 同一个名称的另一种写法的键（item.x / item.x.name / 大小写不同）→ 沿用的键
             this.sourceOverride = new Map(); // 键 → { value: 新原文, olds: [旧原文] }：沿用默认名称键并更新原文
             this.reusedPrev = 0;
             this.splitNewlines = options.splitNewlines !== false;
@@ -100,14 +101,22 @@
                 if (this.knownKeys.has(base)) own = base;
                 else {
                     const want = new Set([base.toLowerCase(), base.replace(/\.name$/, '').toLowerCase()]);
-                    if (!this._lowerKeys) { this._lowerKeys = new Map(); for (const k of this.knownKeys) if (!this._lowerKeys.has(k.toLowerCase())) this._lowerKeys.set(k.toLowerCase(), k); }
-                    for (const w of want) if (this._lowerKeys.has(w)) { own = this._lowerKeys.get(w); break; }
+                    if (!this._lowerKeys) { this._lowerKeys = new Map(); for (const k of this.knownKeys) { const l = k.toLowerCase(); if (!this._lowerKeys.has(l)) this._lowerKeys.set(l, []); this._lowerKeys.get(l).push(k); } }
+                    for (const w of want) if (this._lowerKeys.has(w)) { own = this._lowerKeys.get(w)[0]; break; }
+                }
+                if (own) {
+                    // 同一个名称的其他写法（item.x 和 item.x.name 同时存在、大小写不同）：写 lang 时并进沿用的键，不再输出两遍
+                    if (!this._lowerKeys) { this._lowerKeys = new Map(); for (const k of this.knownKeys) { const l = k.toLowerCase(); if (!this._lowerKeys.has(l)) this._lowerKeys.set(l, []); this._lowerKeys.get(l).push(k); } }
+                    for (const w of [base.toLowerCase(), base.replace(/\.name$/, '').toLowerCase()]) for (const k of this._lowerKeys.get(w) || []) if (k !== own && !this.nameAliases.has(k)) this.nameAliases.set(k, own);
                 }
             }
             if (own && !this.entries.has(own) && !this.claimed.has(own) && !this.referenced.has(own)) {
                 const base0 = base;
-                const ev = this.existingValues.get(own);
-                const olds = ev instanceof Set ? [...ev] : ev != null ? [ev] : [];
+                const olds = [];
+                for (const k of [own, ...[...this.nameAliases].filter(([, o]) => o === own).map(([a]) => a)]) {
+                    const ev = this.existingValues.get(k);
+                    for (const v of ev instanceof Set ? ev : ev != null ? [ev] : []) if (!olds.includes(v)) olds.push(v);
+                }
                 // 只有旧值和新文字是同一种文字（都是英文 / 都是中文）才算过时的原文；不同文字是译文，交给下面的逻辑
                 if (olds.includes(text) && own !== base0) { this.claimed.add(own); if (scope) this.dedupe.set(scope + '\u0000' + text, own); return own; }
                 if (!olds.includes(text) && olds.some(o => NS.hasCJK(o) === NS.hasCJK(text))) {
