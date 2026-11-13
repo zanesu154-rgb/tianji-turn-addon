@@ -1472,6 +1472,29 @@ console.log(JSON.stringify(calls));`;
         check('可能的版本上限：假日创作者功能 / 旧模块名 / 旧生物群系格式，正常文件不报', c.length === 3 && c.find(x => /假日/.test(x.why)).files.join() === 'BP/items/a.json'
             && lines.length === 3 && lines.every(l => /可能的版本上限/.test(l)), lines.join('\n'));
     }
+    {
+        // 实体改名后，命令里的 @e[name=旧名] 同步修改
+        const R = new Map([['Bob', '鲍勃'], ['Old Man', '老人']]);
+        const a = NS.renameSelectorNames('execute as @e[type=npc,name=Bob] run tp @e[name="Old Man",r=5] ~ ~ ~', R);
+        const b = NS.renameSelectorNames('tellraw @a {"rawtext":[{"selector":"@e[name=\\"Old Man\\"]"}]}', R);
+        const c = NS.renameSelectorNames('say Bob; tag @e[name=Bobby] add x', R);
+        check('实体改名：命令选择器 name= 同步（引号 / 转义 / !）且不误改普通文字', a.n === 2 && a.text.includes('name="鲍勃"') && a.text.includes('name="老人"') && b.n === 1 && b.text.includes('name=\\"老人\\"') && c.n === 0, JSON.stringify([a, b, c]));
+    }
+    {
+        // 存档：编辑器里改实体名 → 生成时命令方块里的 name= 跟着改
+        const wm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
+        const ws = await NS.openWorld(wm, { baseName: 'w' }, () => {});
+        const ent = ws.ctx.untranslatable.find(u => /实体名字标签/.test(u.where));
+        const cmd = ws.search('@', 50).find(x => /Command/.test(x.pathText));
+        if (ent && cmd) {
+            ws.setValue(cmd.ref, `tp @e[name="${ent.text}"] ~ ~1 ~`);
+            ws.setValue(ent.ref, 'Renamed One');
+            const logs = [];
+            const out = new MemFS(new Map(wm.files));
+            await ws.build(out, (x) => logs.push(x));
+            check('存档：改了实体名，命令方块里的 name= 同步', ws.getText(cmd.ref) === 'tp @e[name="Renamed One"] ~ ~1 ~' && logs.some(l => /name= 选择器同步修改 1 处/.test(l)), ws.getText(cmd.ref));
+        } else check('存档：改了实体名，命令方块里的 name= 同步（样例存档缺少实体名或命令）', false);
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

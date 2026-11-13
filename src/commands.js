@@ -236,6 +236,33 @@
         return ARG_TOKEN.test(m[2]);
     }
 
+    /**
+     * 实体改名后同步命令里的选择器：@e[name=旧名]、@e[name="旧 名"]、@e[name=!旧名]，
+     * 也处理 JSON 字符串里转义过的 name=\"旧 名\"
+     * @param {string} text
+     * @param {Map<string,string>} renames 旧名 → 新名
+     * @returns {{ text: string, n: number }}
+     */
+    function renameSelectorNames(text, renames) {
+        if (!renames || !renames.size || typeof text !== 'string' || text.indexOf('name') < 0 || text.indexOf('@') < 0) return { text, n: 0 };
+        let n = 0;
+        const out = text.replace(/(@[aeprsvc]\s*\[)([^\]]*)\]/g, (all, head, body) => {
+            const nb = body.replace(/(\bname\s*=\s*!?\s*)(\\"(?:[^"\\]|\\[^"])*\\"|"(?:[^"\\]|\\.)*"|[^,\]]*)/g, (m, pre, val) => {
+                const esc = val.startsWith('\\"');
+                const q = esc || val.startsWith('"');
+                const raw = esc ? val.slice(2, -2) : q ? val.slice(1, -1) : val.trim();
+                if (!renames.has(raw)) return m;
+                const nv = renames.get(raw);
+                n++;
+                const needQ = q || /[\s,\]=!"@\[]/.test(nv) || /[^\x21-\x7e]/.test(nv);
+                return pre + (needQ ? (esc ? `\\"${nv}\\"` : `"${nv}"`) : nv);
+            });
+            return head + nb + ']';
+        });
+        return { text: out, n };
+    }
+
+    NS.renameSelectorNames = renameSelectorNames;
     NS.translateCommand = translateCommand;
     NS.looksLikeCommand = looksLikeCommand;
     NS.findCommandStart = findCommandStart;

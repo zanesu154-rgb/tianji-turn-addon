@@ -457,6 +457,17 @@
                     this.edits++;
                     return chunks[0];
                 }
+                // 实体改名：记下旧名 → 新名，生成时同步命令里的 @e[name=旧名]
+                if (r.path[r.path.length - 1] === 'CustomName' && r.node.t === T.STRING) {
+                    const owner = nodeAt(r.rec, r.path.slice(0, -1));
+                    if (owner && owner.t === T.COMPOUND && getStr(owner.v, 'identifier')) {
+                        if (!this.renames) this.renames = new Map();
+                        const old = this.originalNames && this.originalNames.get(ref) != null ? this.originalNames.get(ref) : displayValue(r.node.t, r.node.v);
+                        if (!this.originalNames) this.originalNames = new Map();
+                        if (!this.originalNames.has(ref)) this.originalNames.set(ref, old);
+                        if (text === old) this.renames.delete(old); else this.renames.set(old, text);
+                    }
+                }
                 r.node.set(parseValue(r.node.t, text));
                 r.rec.dirty = true;
                 this.edits++;
@@ -929,8 +940,20 @@
         return {
             'strings.csv': csvText([['key', 'source_text', 'location', 'type'], ...[...ctx.entries].map(([k, e]) => [k, e.value, e.file, e.kind])]),
             // 填写 translation 列后可在网页里“导入翻译表”批量写回
-            'untranslatable.csv': csvText([['ref', 'location', 'where', 'text', 'reason', 'translation'],
-                ...ctx.untranslatable.filter(u => !hidden.has(categoryOf(u))).map(u => [u.ref || '', u.file, u.where, u.text, u.reason, ''])]),
+            // 原文、原因、类别都相同的合并成一行（ref 用 ; 连接，导入时一起写回）；成书页面各自一行
+            'untranslatable.csv': csvText([['ref', 'location', 'where', 'text', 'reason', 'count', 'translation'], ...(() => {
+                const groups = new Map(), out = [];
+                for (const u of ctx.untranslatable) {
+                    if (hidden.has(categoryOf(u))) continue;
+                    const page = u.ref && bookField(JSON.parse(u.ref.slice(u.ref.indexOf('|') + 1))) === 'page';
+                    const key = page || !u.ref ? '\u0001' + out.length : `${u.text}\u0000${u.reason}\u0000${categoryOf(u)}`;
+                    let g = groups.get(key);
+                    if (!g) { g = { u, refs: [], files: [] }; groups.set(key, g); out.push(g); }
+                    if (u.ref) g.refs.push(u.ref);
+                    if (!g.files.includes(u.file)) g.files.push(u.file);
+                }
+                return out.map(g => [g.refs.join(';'), g.files.length > 1 ? `${g.files[0]} 等 ${g.files.length} 处` : g.files[0], g.u.where, g.u.text, g.u.reason, g.refs.length || 1, '']);
+            })()]),
             [`source_${sourceLang}.lang`]: [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n') + '\n',
             // 存档自带的行为包 / 资源包
             ...(session.embedded ? Object.fromEntries(Object.entries(session.embedded.workbook).map(([n, c]) => [`packs_${n}`, c])) : {}),
@@ -940,6 +963,24 @@
     async function buildWorld(session, fs, dbFiles, db, log) {
         const { ctx, records, rootDir, levelName, opt } = session;
         const dbDir = rootDir + 'db/';
+
+        // ---- 实体改了名：命令里 @e[name=旧名] 同步改成新名（命令方块、NPC 按钮、自带包的函数 / 动画控制器 / 脚本） ----
+        if (session.renames && session.renames.size) {
+            let n = 0;
+            const walkStr = (rec, t, v, setter) => {
+                if (t === T.STRING) { const r = NS.renameSelectorNames(displayValue(T.STRING, v), session.renames); if (r.n) { setter(new NBT.NbtString(r.text, null)); n += r.n; rec.dirty = true; } return; }
+                if (t === T.COMPOUND) { for (const c of v) walkStr(rec, c.t, c.v, (x) => { c.v = x; }); return; }
+                if (t === T.LIST) v.items.forEach((x, i) => walkStr(rec, v.et, x, (y) => { v.items[i] = y; }));
+            };
+            for (const rec of records) rec.tags.forEach(tg => walkStr(rec, tg.t, tg.v, (x) => { tg.v = x; }));
+            for (const f of fs.list()) {
+                if (!f.startsWith(rootDir + 'behavior_packs/') || !/\.(mcfunction|json|js)$/i.test(f)) continue;
+                let t; try { t = await fs.readText(f); } catch (e) { continue; }
+                const r = NS.renameSelectorNames(t, session.renames);
+                if (r.n) { fs.writeText(f, r.text); n += r.n; }
+            }
+            if (n) log(`[实体名] 改了 ${session.renames.size} 个实体的名字，命令里的 name= 选择器同步修改 ${n} 处`);
+        }
 
         // ---- 数据库 ----
         const puts = records.filter(r => r.dirty && r.kind !== 'level').map(r => ({ key: r.key, value: NBT.writeAll(r.tags) }));
