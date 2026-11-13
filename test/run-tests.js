@@ -1446,6 +1446,32 @@ console.log(JSON.stringify(calls));`;
         const vals = [...ctx.entries.values()].map(e => e.value);
         check('打包库 / 状态机 / 枚举的字符串不登记（许可证、TS 枚举、状态名、toString、日志标签）', vals.includes('Welcome to the Aether') && !vals.some(v => /Crying|Consume|Copyright|Permission|Freeze|Idle|Attacking|Vector2|SPARK/.test(v)), JSON.stringify(vals));
     }
+    {
+        // 一行行 push 进数组再 join 成消息：单词标签（Requires:）也登记；§r\n 分块时句尾 §r 补回再找
+        const ctx = new NS.ExtractContext({});
+        const src = 'import { world as W } from "@minecraft/server";\n'
+            + 'function Wm(t,e){t.push(`- \\xA7e${e.name}\\xA7r`),e.required&&t.push(`  \\xA77Requires: \\xA7e${e.required}\\xA7r`)}\n'
+            + 'function iE(t,e){let n=["\\xA7e[ Warning! ]",`\\xA77${t.name} has dependency problems.\\xA7r`];n.push("\\xA7cMissing:\\xA7r");for(let i of e.missing)Wm(n,i);return n.join(`\n`)}\n'
+            + 'export function rE(t,e){W.sendMessage(iE(t,e))}';
+        const js = NS.processScript(src, 'scripts/b.js', ctx, { injectRuntime: true, runtimeKey: '__push_t' }).content;
+        const head = js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '');
+        const rt = new Function(head + js.split('\n').filter(l => /^__i18n\.(reg|keep)\(/.test(l)).join('\n') + ';return __i18n')();
+        const out = JSON.stringify(rt.M('§e[ Warning! ]\n§7UtilityCraft has dependency problems.§r\n§cMissing:§r\n- §eFoo§r\n  §7Requires: §e1.2.0§r'));
+        check('push 进数组拼成的消息：标签行、带 §r 的句子都能找到', (out.match(/"translate"/g) || []).length === 4 && out.includes('"text":"UtilityCraft"') && out.includes('"text":"1.2.0"'), out);
+    }
+    {
+        // 可能的版本上限：假日创作者功能、旧脚本模块名、旧格式生物群系
+        const mf = [{ path: 'BP/manifest.json', manifest: { dependencies: [{ module_name: 'mojang-minecraft', version: '0.1.0' }] } }];
+        const files = [
+            { file: 'BP/items/a.json', kind: 'item', data: { 'minecraft:item': { components: { 'minecraft:on_use': { on_use: { event: 'x' } } }, events: { x: {} } } } },
+            { file: 'BP/items/b.json', kind: 'item', data: { 'minecraft:item': { components: { 'minecraft:icon': 'b' } } } },
+            { file: 'BP/biomes/c.json', kind: 'biome', data: { format_version: '1.20.60' } },
+        ];
+        const c = NS.MinVersion.checkCeiling({ manifests: mf, files });
+        const lines = NS.MinVersion.describe({ version: null, ceiling: c }, []);
+        check('可能的版本上限：假日创作者功能 / 旧模块名 / 旧生物群系格式，正常文件不报', c.length === 3 && c.find(x => /假日/.test(x.why)).files.join() === 'BP/items/a.json'
+            && lines.length === 3 && lines.every(l => /可能的版本上限/.test(l)), lines.join('\n'));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

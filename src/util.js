@@ -94,7 +94,8 @@
         if (mode === 'loose') return true;
         // strict：多个单词，或首字母大写的单词
         if (/\s/.test(plain) && /\p{L}{2,}/u.test(plain)) return true;
-        if (/^\p{Lu}[\p{L}'’-]{2,}[!?.]?$/u.test(plain)) return true;
+        // 单个首字母大写的词；带冒号的是标签（"Requires:"、"Missing:"）
+        if (/^\p{Lu}[\p{L}'’-]{2,}[!?.:：]?$/u.test(plain)) return true;
         return false;
     }
 

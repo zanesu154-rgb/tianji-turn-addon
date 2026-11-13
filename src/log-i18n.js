@@ -85,6 +85,8 @@
         [/^(.+?): lang 中已有 (.+?)=(.*)，与 manifest 原文「(.*)」不同，保留 lang 中的值$/, '$1: lang already has $2=$3, which differs from the manifest text “$4”; the lang value is kept', '$1: lang に $2=$3 があり manifest の原文「$4」と異なるため、lang の値を残します', '$1: lang에 이미 $2=$3가 있고 manifest 원문 「$4」와 달라 lang 값을 유지합니다', '$1: в lang уже есть $2=$3, отличается от текста manifest «$4»; оставлено значение из lang'],
         [/^(.+?): (.+?) 行数较多，整页使用一个翻译键（换行写作 \\n）$/, '$1: $2 has many lines; the whole page uses one key (line breaks as \\n)', '$1: $2 は行数が多いため、ページ全体を 1 つのキーにしました（改行は \\n）', '$1: $2는 줄이 많아 페이지 전체를 키 하나로 썼습니다(줄바꿈은 \\n)', '$1: в $2 много строк; вся страница — один ключ (переносы как \\n)'],
 
+        [/^\[版本\] ⚠ 可能的版本上限：(.+?) 起失效——(.+?)(?:：(.+))?$/, (m) => `[Version] ⚠ Possible upper limit: breaks from ${m[1]} — ${m[2]}${m[3] ? `: ${m[3]}` : ''}`, (m) => `[バージョン] ⚠ 上限の可能性：${m[1]} 以降は動作しない — ${m[2]}${m[3] ? `：${m[3]}` : ''}`, (m) => `[버전] ⚠ 사용 가능 상한 가능성: ${m[1]}부터 동작 안 함 — ${m[2]}${m[3] ? `: ${m[3]}` : ''}`, (m) => `[Версия] ⚠ Возможный верхний предел: не работает с ${m[1]} — ${m[2]}${m[3] ? `: ${m[3]}` : ''}`],
+
         // ---- world.js ----
         [/^扫描方块实体 (\d+) 个、实体 (\d+) 个(?:（含结构 (\d+) 个）)?；自动转换 (\d+) 条记录，提取文本 (\d+) 条，需人工处理 (\d+) 处$/, (m) => `Scanned ${m[1]} block entities and ${m[2]} entities${m[3] ? ` (${m[3]} structures)` : ''}; ${m[4]} records converted, ${m[5]} texts extracted, ${m[6]} need manual work`, (m) => `ブロックエンティティ ${m[1]} 個、エンティティ ${m[2]} 個をスキャン${m[3] ? `（構造 ${m[3]} 個を含む）` : ''}。自動変換 ${m[4]} 件、抽出テキスト ${m[5]} 件、手作業 ${m[6]} 件`, (m) => `블록 엔티티 ${m[1]}개, 엔티티 ${m[2]}개 검사${m[3] ? ` (구조 ${m[3]}개 포함)` : ''}; 자동 변환 ${m[4]}건, 추출 텍스트 ${m[5]}개, 수동 처리 ${m[6]}곳`, (m) => `Просканировано блочных сущностей: ${m[1]}, сущностей: ${m[2]}${m[3] ? ` (структур: ${m[3]})` : ''}; конвертировано записей: ${m[4]}, извлечено текстов: ${m[5]}, вручную: ${m[6]}`],
         [/^\[存档\] 已删除 (\d+) 个包，省下 (.+?)：$/, '[World] Removed $1 packs, saving $2:', '[ワールド] パックを $1 個削除し、$2 節約しました：', '[월드] 팩 $1개를 삭제해 $2를 줄였습니다:', '[Мир] Удалено пакетов: $1, освобождено $2:'],
@@ -126,6 +128,14 @@
         ['没有有效的 manifest.json', 'no valid manifest.json', '有効な manifest.json がない', '유효한 manifest.json 없음', 'нет корректного manifest.json'],
         ['是同一个附加包的不同版本', '— another version of the same add-on', 'と同じアドオンの別バージョン', '와(과) 같은 애드온의 다른 버전', '— другая версия того же аддона'],
         ['和 ', 'same as ', '', '', 'как '],
+        ['依赖已移除的“假日创作者功能”实验：方块 / 物品的 events、on_* 事件不再触发', 'relies on the removed “Holiday Creator Features” experiment: block / item events and on_* triggers no longer fire', '削除された実験「ホリデークリエイター機能」に依存：ブロック / アイテムの events、on_* イベントが発生しなくなる', '삭제된 “홀리데이 크리에이터 기능” 실험에 의존: 블록 / 아이템의 events, on_* 이벤트가 더 이상 작동하지 않음', 'зависит от удалённого эксперимента «Holiday Creator Features»: events и триггеры on_* блоков / предметов больше не срабатывают'],
+        ['早期实验性脚本（client_data / server scripts，已移除）', 'early experimental scripting (client_data / server scripts, removed)', '初期の実験的スクリプト（client_data / server scripts、削除済み）', '초기 실험 스크립트(client_data / server scripts, 삭제됨)', 'ранние экспериментальные скрипты (client_data / server scripts, удалены)'],
+        ['（已改名为 @minecraft/*）', ' (renamed to @minecraft/*)', '（@minecraft/* に改名済み）', ' (@minecraft/*로 이름 변경됨)', ' (переименован в @minecraft/*)'],
+        ['旧脚本模块名', 'old script module name', '旧スクリプトモジュール名', '옛 스크립트 모듈 이름', 'старое имя модуля скриптов'],
+        ['服务端生物群系 format_version', 'server biome format_version', 'サーバー側バイオーム format_version', '서버 바이옴 format_version', 'format_version серверного биома'],
+        ['（1.21.110 起要求 1.21.110 或更高）', ' (1.21.110+ requires 1.21.110 or higher)', '（1.21.110 以降は 1.21.110 以上が必要）', ' (1.21.110부터 1.21.110 이상 필요)', ' (с 1.21.110 требуется 1.21.110 и выше)'],
+        [' 等 ', ' and others, total ', ' など計 ', ' 등 총 ', ' и др., всего '],
+        [' 个文件', ' files', ' ファイル', '개 파일', ' файлов'],
         ['地图编辑工具', 'map editing tool', 'マップ編集ツール', '맵 편집 도구', 'инструмент редактирования карты'],
         ['format_version 最高', 'highest format_version', 'format_version 最大', '최고 format_version', 'макс. format_version'],
         ['存档自带包', 'bundled packs', '同梱パック', '포함된 팩', 'пакеты мира'],

@@ -980,12 +980,13 @@
     if (!r && tab < 0 && s.indexOf("\\n") >= 0) {
       // 自动换行过的文字（作者按宽度把空格换成了换行）：换行还原成空格再找
       const un = (t) => t.indexOf("\\n") >= 0 ? one(t.replace(/\\n/g, " ")) : null;
-      const lines = (t, els) => {
+      const lines = (t, els, endR) => {
         let hit = false;
-        t.split("\\n").forEach((l, i) => {
+        const ls = t.split("\\n");
+        ls.forEach((l, i) => {
           if (i) els.push({ text: "\\n" });
           if (!l) return;
-          const x = one(l) || tailOne(l);
+          const x = one(l) || tailOne(l) || (endR && i === ls.length - 1 && one(l + "\\u00a7r"));
           if (x) { hit = true; els.push(...x); } else els.push({ text: l });
         });
         return hit;
@@ -998,9 +999,10 @@
         blocks.forEach((b, i) => {
           if (i) els.push({ text: "\\u00a7r\\n" });
           if (!b) return;
-          const x = blocks.length > 1 ? (one(b) || un(b)) : null;
+          // 句尾的 §r 被当成了分隔符的一部分：补回来再找一次
+          const x = blocks.length > 1 ? (one(b) || (i < blocks.length - 1 && one(b + "\u00a7r")) || un(b)) : null;
           if (x) { hit = true; els.push(...x); return; }
-          if (lines(b, els)) hit = true;
+          if (lines(b, els, i < blocks.length - 1)) hit = true;
         });
         if (hit) r = els;
       }
@@ -2187,7 +2189,7 @@
             if (/^\/\*|\*\/$|^\/\//.test(t)) return true;                                  // /* class：代码注释片段
             if (/^[A-Za-z_$][\w$]*<[^<>]*>$/.test(t)) return true;                               // Vector2<%1$s, %2$s>：toString
             if (/Copyright \(c\)|Permission is hereby granted|THE SOFTWARE IS PROVIDED|All rights reserved\.|\bMIT License\b|Licensed under the/i.test(t)) return true;
-            if (/^(?:Object expected|Object not disposable|An error was suppressed during disposal|Symbol\.(?:async)?[Dd]ispose is not defined\.?|Cannot (?:add|read|write) private member.*|Private (?:field|method|accessor) .*|Class extends value .*|Generator is already executing\.?|Iterator result .* is not an object|Super constructor .*)$/.test(t)) return true;
+            if (/^(?:Cannot %s|Cannot %1\$s|read from private field|write to private field|access private method|Cannot add the same private member more than once|Object expected|Object not disposable|An error was suppressed during disposal|Symbol\.(?:async)?[Dd]ispose is not defined\.?|Cannot (?:add|read|write) private member.*|Private (?:field|method|accessor) .*|Class extends value .*|Generator is already executing\.?|Iterator result .* is not an object|Super constructor .*)$/.test(t)) return true;
             if (/\bis being mocked\b|\bit is a noop\b|\bnot implemented\b|\bis deprecated\b/i.test(t)) return true;
             return false;
         };
