@@ -1007,6 +1007,7 @@
         const byRef = new Map(fileItems.map(u => [u.refs[0], u]));
         const values = new Map();      // F 引用 → 新文字
         const writtenVals = new Map(); // F 引用 → 已写进文件的文字
+        const appliedNames = new Map(); // 实体原名 → 已同步进命令 / 脚本的新名
         const S = structureSession;
         const T = NS.NBT && NS.NBT.T;
         const editorList = [...(S ? S.ctx.untranslatable : []), ...fileItems.map(u => ({ ...u, ref: u.refs[0] }))];
@@ -1095,7 +1096,25 @@
                     if (r.text !== src) { fs.writeText(file, r.text); files++; }
                     for (const x of (r.done || reps)) { if (x.to === byRef.get(x.ref).text) writtenVals.delete(x.ref); else writtenVals.set(x.ref, x.to); }
                 }
-                return { structures, files, missed };
+                // 实体名（脚本 .nameTag = / 结构里的实体名字标签）改了：别的文件里按名字找它的地方一起改，
+                // 不然 @e[name=旧名]、nameTag === "旧名"、getEntities({ name: "旧名" }) 会找不到这个实体
+                const want = new Map(); // 原名 → 现在要的名字
+                for (const u of fileItems) if (/^\.nameTag =$/.test(u.where)) want.set(u.text, values.has(u.refs[0]) ? values.get(u.refs[0]) : u.text);
+                if (S && S.renames) for (const [o, v] of S.renames) want.set(o, v);
+                for (const o of appliedNames.keys()) if (!want.has(o)) want.set(o, o);
+                const pairs = new Map();
+                for (const [o, v] of want) { const cur = appliedNames.has(o) ? appliedNames.get(o) : o; if (cur !== v && cur) pairs.set(cur, v); }
+                let renamed = 0;
+                if (pairs.size) {
+                    for (const f of fs.list()) {
+                        if (!/\.(mcfunction|json|m?js)$/i.test(f) || /(^|\/)texts\//.test(f)) continue;
+                        let t; try { t = await fs.readText(f); } catch (e) { continue; }
+                        const r = /\.m?js$/i.test(f) && NS.renameNameRefsInScript ? NS.renameNameRefsInScript(t, pairs) : NS.renameSelectorNames(t, pairs);
+                        if (r.n) { fs.writeText(f, r.text); renamed += r.n; }
+                    }
+                    for (const [o, v] of want) { if (v === o) appliedNames.delete(o); else appliedNames.set(o, v); }
+                }
+                return { structures, files, missed, renamed };
             },
         };
         return session;

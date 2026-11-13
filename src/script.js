@@ -2492,6 +2492,70 @@
     NS.regexPhrases = regexPhrases;
     NS.langHintFromFile = langHintFromFile;
     NS.collectTranslationGroups = collectTranslationGroups;
+    /**
+     * 实体改名后，脚本里按名字判断实体的地方同步改成新名：
+     *   e.nameTag === "旧名" / switch (e.nameTag) { case "旧名": } / e.nameTag.includes("旧名")
+     *   getEntities({ name: "旧名", excludeNames: ["旧名"] })
+     *   以及字符串里命令的 @e[name=旧名]
+     * 别处同样内容的字符串（提示文字等）不动。
+     * @returns {{ text: string, n: number }}
+     */
+    function renameNameRefsInScript(src, renames) {
+        if (!renames || !renames.size || typeof src !== 'string') return { text: src, n: 0 };
+        let has = false;
+        for (const k of renames.keys()) if (src.includes(JSON.stringify(k).slice(1, -1)) || src.includes(k)) { has = true; break; }
+        if (!has) return { text: src, n: 0 };
+        let ast;
+        try { ast = parse(src); } catch (e) { return { text: src, n: 0 }; }
+        const nameish = (x) => {
+            if (!x) return false;
+            if (x.type === 'ChainExpression') x = x.expression;
+            if (x.type === 'MemberExpression') { const p = propName(x); return p === 'nameTag' || p === 'name' && /nameTag|entity|player|target|mob|npc/i.test(src.slice(x.start, x.end)); }
+            if (x.type === 'Identifier') return /^(name|nameTag|entityName|tagName|mobName|npcName|bossName)$/i.test(x.name);
+            if (x.type === 'CallExpression' && x.callee.type === 'MemberExpression' && /^(trim|toString|replace)$/.test(propName(x.callee) || '')) return nameish(x.callee.object);
+            return false;
+        };
+        const QUERY = /^(getEntities|getPlayers|getEntitiesAtBlockLocation|getEntitiesFromViewDirection|getAllPlayers)$/;
+        const hits = new Set();
+        const mark = (lit) => { if (lit && isStr(lit) && renames.has(lit.value)) hits.add(lit); };
+        const edits = [];
+        let n = 0;
+        walk(ast, (node) => {
+            if (node.type === 'BinaryExpression' && /^[!=]==?$/.test(node.operator)) {
+                if (nameish(node.left)) mark(node.right);
+                if (nameish(node.right)) mark(node.left);
+            } else if (node.type === 'SwitchStatement' && nameish(node.discriminant)) {
+                for (const c of node.cases) mark(c.test);
+            } else if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression') {
+                const p = propName(node.callee) || '';
+                if (/^(includes|startsWith|endsWith|indexOf)$/.test(p) && nameish(node.callee.object)) mark(node.arguments[0]);
+                // ["旧名", "别名"].includes(e.nameTag)
+                if (p === 'includes' && node.callee.object.type === 'ArrayExpression' && nameish(node.arguments[0])) node.callee.object.elements.forEach(mark);
+                if (QUERY.test(p)) for (const a of node.arguments) if (a && a.type === 'ObjectExpression') for (const pr of a.properties) {
+                    const k = pr.key && (pr.key.name || pr.key.value);
+                    if (k === 'name') mark(pr.value);
+                    if (k === 'excludeNames' && pr.value.type === 'ArrayExpression') pr.value.elements.forEach(mark);
+                }
+            }
+        });
+        walk(ast, (node) => {
+            if (hits.has(node)) { edits.push([node.start, node.end, JSON.stringify(renames.get(node.value))]); n++; return; }
+            // 字符串里的命令：@e[name=旧名]
+            if (isStr(node) && NS.renameSelectorNames) {
+                const r = NS.renameSelectorNames(node.value, renames);
+                if (r.n) { edits.push([node.start, node.end, JSON.stringify(r.text)]); n += r.n; }
+            } else if (node.type === 'TemplateElement' && NS.renameSelectorNames && typeof node.value.cooked === 'string') {
+                const r = NS.renameSelectorNames(node.value.cooked, renames);
+                if (r.n) { edits.push([node.start, node.end, r.text.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${')]); n += r.n; }
+            }
+        });
+        if (!edits.length) return { text: src, n: 0 };
+        edits.sort((a, b) => b[0] - a[0]);
+        let out = src;
+        for (const [a, b, t] of edits) out = out.slice(0, a) + t + out.slice(b);
+        return { text: out, n };
+    }
+    NS.renameNameRefsInScript = renameNameRefsInScript;
     NS.processScript = processScript;
     NS.collectParamTexts = collectParamTexts;
     NS.collectAsciiPacketTexts = collectAsciiPacketTexts;
