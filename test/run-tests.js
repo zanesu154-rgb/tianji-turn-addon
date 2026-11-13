@@ -1433,6 +1433,19 @@ console.log(JSON.stringify(calls));`;
         check('战利品表成书：页面换成翻译键，标题 / 名称列进需人工翻译，作者不动', p1.rawtext.some(e => e.translate && en.has(e.translate)) && fn.author === 'Forsaken Odyssey'
             && lr.ctx.untranslatable.some(u => u.text === 'Guide Book #123') && lr.ctx.untranslatable.some(u => u.text === 'Levitation Staff Guide'), fn.pages[0]);
     }
+    {
+        // 打包库 / 状态机 / 枚举带来的字符串不登记成运行时条目
+        const ctx = new NS.ExtractContext({});
+        const src = 'import { world } from "@minecraft/server";\n'
+            + 'var U=(l=>(l[l.NOOP=0]="NOOP",l[l.Crying=1]="Crying",l))(U||{}),C=(e=>(e.Consume="Consume",e))(C||{});\n'
+            + 'var L="Copyright (c) 2017 Someone\\n\\nPermission is hereby granted, free of charge, to any person";\n'
+            + 'var F={Idle:{onUpdate(e){e("Freeze")}},Freeze:{onEnter(e){}}};\n'
+            + 'class V{toString(){return `Vector2<${this.x}, ${this.y}>`}}\n'
+            + 'export function f(p,t,i){t.movement_fsm.transition("Attacking");console.log("[SPARK LOG]");p.sendMessage(["Welcome to the Aether","Idle"][i]);}';
+        NS.processScript(src, 'scripts/main.js', ctx, { injectRuntime: true, runtimeKey: '__noise_t', splitNewlines: true });
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        check('打包库 / 状态机 / 枚举的字符串不登记（许可证、TS 枚举、状态名、toString、日志标签）', vals.includes('Welcome to the Aether') && !vals.some(v => /Crying|Consume|Copyright|Permission|Freeze|Idle|Attacking|Vector2|SPARK/.test(v)), JSON.stringify(vals));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
