@@ -1671,6 +1671,30 @@ export function show(player, item) {
         const a = JSON.stringify(rt.T(' §8(head/legs)')), b = JSON.stringify(rt.T('§f' + rt.H('minecraft:netherite_boots', 'netherite boots')));
         check('表达式里拼的物品名套 H；括号里斜杠分隔的固定小词逐段翻译', js.includes('__i18n.H(item.typeId,') && /"translate":"script\.ce\.word[_\d]*"\},\{"text":"\/"\},\{"translate"/.test(a) && b.includes('item.netherite_boots.name'), a + ' ' + b);
     }
+    {
+        // 选中标记 "§a> 名字"、cap(choice) 的大写选项、附魔 ID 拼名、setLore（不支持 RawMessage 时按简体中文固定写入）
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/eb.js', Buffer.from('import { ActionFormData } from "@minecraft/server-ui";\n'
+            + 'export const MODES = [{ id: "disable", label: "Disable" }, { id: "line", label: "Line" }];\n'
+            + 'export const OPTS = { line: [{ key: "curve", label: "Curve", choices: ["straight", "bezier"] }] };\n'
+            + 'export const LORE = ["§8> §7Right-click §8| §fOpen the guide"];\n'
+            + 'function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }\n'
+            + 'export function show(p, stack, e, active) { const f = new ActionFormData();\n'
+            + '  for (const m of MODES) f.button(`${active === m.id ? "§a> " : ""}${m.label}`);\n'
+            + '  for (const o of OPTS.line) for (const c of o.choices) f.button(`${o.label}: ${cap(c)}`);\n'
+            + '  f.button(e.type.id.replace("minecraft:", "").replace(/_/g, " "));\n'
+            + '  stack.setLore(LORE); f.show(p); }\n'));
+        mm.files.set('RP/texts/zh_CN.lang', Buffer.from(((mm.files.get('RP/texts/zh_CN.lang') || '').toString()) + '\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture', bakeZh: true, bakeLang: {} }, () => {});
+        const js = mm.files.get('BP/scripts/eb.js').toString();
+        const en = NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString());
+        const vals = [...en].filter(([k]) => /script\.eb\./.test(k)).map(([, v]) => v);
+        const rt = new Function(js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const sel = JSON.stringify(rt.T('§a> Disable'));
+        const ench = JSON.stringify(rt.T(rt.H('minecraft:fire_protection', 'fire protection')));
+        check('选中标记逐段翻译、大写选项登记、附魔 ID 拼名、setLore 固定写入', /"translate":"script\.eb\./.test(sel) && vals.includes('Straight') && vals.includes('Bezier')
+            && ench.includes('enchantment.protect.fire') && js.includes('__i18n.BA(LORE)') && js.includes('__i18n.H(e.type.id,'), JSON.stringify([sel, ench, vals]));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
