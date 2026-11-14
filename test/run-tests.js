@@ -787,7 +787,7 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const d2 = JSON.parse(xm.files.get('BP/blocks/only.json').toString())['minecraft:block'].components['minecraft:display_name'];
         const vals = [...xr.ctx.entries.values()].map(e => e.value);
         check('名称里引用了别的 %键：引用原样保留，只把自己的文字换成 %新键；只有引用的不动',
-            dn === '%tile.5fs_br.spikes.name\n§7§c%potion.wither II (0:05)§r\n§9%tile.5fs_br:spikes.name.text' && vals.includes('Bedrock Reimagined') && !vals.some(v => /%tile|%potion/.test(v)) && d2 === '%tile.5fs_br.only.name\n§7%potion.wither II', JSON.stringify(dn));
+            dn === '%tile.5fs_br.spikes.name\n§7§c%potion.wither II (0:05)§r\n§9%tile.5fs_br.spikes.name.text' && vals.includes('Bedrock Reimagined') && !vals.some(v => /%tile|%potion/.test(v)) && d2 === '%tile.5fs_br.only.name\n§7%potion.wither II', JSON.stringify(dn));
     }
     {
         // 百分号：带参数的值 % → %%、已有的 %% 不再翻倍；不带参数的值 %% → %
@@ -1726,6 +1726,18 @@ export function show(player, item) {
         const rt = new Function(js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
         const a = JSON.stringify(rt.T('Oak Sapling')), b = JSON.stringify(rt.T('Redwood Sapling'));
         check('对象键名当下拉选项登记翻译；原版名字用游戏自带键', a.includes('tile.sapling.oak.name') && /script\.wp\./.test(b), a + ' ' + b);
+    }
+    {
+        // 以前生成的 %item.ntk:x.name.text（冒号处游戏断开，显示成键名）：换成不带冒号的键，各语言的值照抄
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/items/club.json', Buffer.from(JSON.stringify({ format_version: '1.21.0', 'minecraft:item': { description: { identifier: 'ntk:magma_club' }, components: { 'minecraft:display_name': { value: '%item.ntk.magma_club.name\n§7%enchantment.knockback §o%item.ntk:magma_club.name.text§r' } } } })));
+        const add = (f, t) => mm.files.set(f, Buffer.from(((mm.files.get(f) || '').toString()) + '\n' + t + '\n'));
+        add('RP/texts/en_US.lang', 'item.ntk.magma_club.name=Magma Club\nitem.ntk:magma_club.name.text=(15%% chance)');
+        add('RP/texts/zh_CN.lang', 'item.ntk.magma_club.name=岩浆棒\nitem.ntk:magma_club.name.text=（15%%概率）');
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const dn = JSON.parse(mm.files.get('BP/items/club.json').toString())['minecraft:item'].components['minecraft:display_name'].value;
+        const zh = NS.parseLang(mm.files.get('RP/texts/zh_CN.lang').toString());
+        check('带冒号的 %键 换成不带冒号的键，译文照抄', dn.endsWith('§o%item.ntk.magma_club.name.text§r') && zh.get('item.ntk.magma_club.name.text') === '（15%%概率）', dn + ' ' + zh.get('item.ntk.magma_club.name.text'));
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);

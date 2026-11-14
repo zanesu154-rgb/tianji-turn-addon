@@ -182,7 +182,8 @@
             this.sourceOverride = new Map();
             this.alignPlan = options.alignPlan || null;   // 基础键 → (序号 → 上次的键)
             this.seriesLog = options.recordSeries ? new Map() : null;
-            this.tagStrip = new Map();       // 键 → 旧译文开头要去掉的界面标识（"dingUI:quota_blue§z"） // 键 → { value: 新原文, olds: [旧原文] }：沿用默认名称键并更新原文
+            this.tagStrip = new Map();
+            this.keyCopies = new Map();      // 新键 → 旧键：写 lang 时没有新键的语言照抄旧键的值       // 键 → 旧译文开头要去掉的界面标识（"dingUI:quota_blue§z"） // 键 → { value: 新原文, olds: [旧原文] }：沿用默认名称键并更新原文
             this.reusedPrev = 0;
             this.splitNewlines = options.splitNewlines !== false;
             this.entries = new Map();      // 新键 → { value, file, kind }

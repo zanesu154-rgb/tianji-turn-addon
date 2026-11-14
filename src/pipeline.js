@@ -835,6 +835,14 @@
                     }
                     aliasRaw = out.join('\n');
                 }
+                // 改了名的键（%item.ntk:x.text → %item.ntk.x.text）：没有新键的语言照抄旧键的值
+                let copyN = 0;
+                if (e && ctx.keyCopies.size) {
+                    const extra = [];
+                    for (const [nk, ok] of ctx.keyCopies) if (map.has(ok) && !map.has(nk)) { map.set(nk, map.get(ok)); extra.push(`${nk}=${map.get(ok)}`); }
+                    copyN = extra.length;
+                    if (extra.length) aliasRaw = (aliasRaw != null ? aliasRaw : e.raw).replace(/\s*$/, '\n') + extra.join('\n') + '\n';
+                }
                 const added = [];
                 for (const [k, v] of entries) {
                     if (map.has(k) || junk.has(k)) continue;
@@ -912,7 +920,7 @@
                     junkN++;
                     return false;
                 }).join('\n');
-                if (!added.length && !filled.length && !fixedN && !junkN && !overN && !aliasN && !tagN) { if (e) written.push(lang); continue; }
+                if (!added.length && !filled.length && !fixedN && !junkN && !overN && !aliasN && !tagN && !copyN) { if (e) written.push(lang); continue; }
                 let out = e ? raw.replace(/\s*$/, '\n') : '';
                 if (added.length) out += `\n${MARK} 自动提取（源语言 ${sourceLang}${lang === sourceLang ? '' : '，待翻译'}）\n${added.join('\n')}\n`;
                 if (filled.length) out += `\n${MARK} 从其他语言补全（待翻译）\n${filled.join('\n')}\n`;
