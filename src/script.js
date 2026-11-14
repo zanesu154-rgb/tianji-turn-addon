@@ -56,6 +56,8 @@
         'getEntities', 'getPlayers', 'getEntitiesAtBlockLocation', 'createExplosion',
         // 状态机切换：fsm.transition("Attacking")、setState("Idle")
         'transition', 'setState', 'changeState', 'goto', 'gotoState',
+        // 按键名（"Jump"、"Sneak"）、动画名
+        'getButtonState', 'playAnimation',
     ]);
 
     // 这些属性名对应的值是技术数据
@@ -2164,6 +2166,8 @@
                 case 'ArrayExpression': {
                     // [/正则/, "替换成的内部标记"] —— 输入归一化表，不是显示文本
                     if (p.elements.some(e => e && e.type === 'Literal' && e.regex)) return true;
+                    // [InputButton.Attack, "Attack", "Break"]：和枚举成员混在一起的字符串是枚举值
+                    if (p.elements.some(e => e && e.type === 'MemberExpression' && !e.computed && e.object.type === 'Identifier' && /^[A-Z][A-Za-z]+$/.test(e.object.name) && /^[A-Z]/.test(e.property.name || ''))) return true;
                     // { command: ["function a", …], tags: ["x"] }：技术字段的数组值
                     const pp = p.parent;
                     if (pp && pp.type === 'Property' && pp.value === p && !pp.computed) {
