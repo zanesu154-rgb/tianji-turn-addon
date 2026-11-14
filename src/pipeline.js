@@ -855,6 +855,21 @@
                         }
                     }
                 }
+                // 包里原有、目标语言的值和源语言一字不差（作者直接复制了英文）的句子：也是没翻译，
+                // 移到“待翻译”段并列入翻译表，不然只会翻新提取的
+                const sameMoved = new Set();
+                if (opt.fillMissing && isRP && e && lang !== sourceLang) {
+                    const srcE = langs.get(sourceLang) || langs.get('en_US');
+                    if (srcE && srcE !== e) for (const [k, v] of e.map) {
+                        if (entries.has(k) || ctx.prevKeys.has(k) || ctx.hiddenKeys.has(k) || junk.has(k) || aliasOf(k)) continue;
+                        if (!srcE.map.has(k) || srcE.map.get(k) !== v) continue;
+                        if (!/\p{L}{2,}[^\p{L}]+\p{L}{2,}/u.test(NS.stripFormatting(String(v).replace(/\\n/g, ' ')))) continue;
+                        sameMoved.add(k);
+                        filled.push(`${k}=${v}`);
+                        if (!existingUntranslated.has(k)) existingUntranslated.set(k, { value: v, file: `${pk.root ? pk.root + "/" : ""}texts/${lang}.lang`, langs: new Set() });
+                        existingUntranslated.get(k).langs.add(lang);
+                    }
+                }
                 // 已有译文里 %1$s 和 %s 混用（游戏会显示成 “%3”）→ 自动改成全部带序号
                 let raw = e ? (aliasRaw != null ? aliasRaw : e.raw) : '';
                 let fixedN = 0;
@@ -886,11 +901,14 @@
                     return `${k}=${v.slice(t.length)}`;
                 });
                 let junkN = 0;
-                if (e && junk.size) raw = raw.split('\n').filter((line) => {
+                if (e && (junk.size || sameMoved.size)) raw = raw.split('\n').filter((line) => {
                     const t = line.trimStart();
                     if (!t || t.startsWith('#')) return true;
                     const eq = line.indexOf('=');
-                    if (eq <= 0 || !junk.has(line.slice(0, eq).trim())) return true;
+                    if (eq <= 0) return true;
+                    const k = line.slice(0, eq).trim();
+                    if (sameMoved.has(k)) return false;
+                    if (!junk.has(k)) return true;
                     junkN++;
                     return false;
                 }).join('\n');
@@ -957,7 +975,7 @@
         }
         for (const [rootDir, m] of ctx.packEntries) for (const [k, v] of m) rows.push([k, v, rootDir + '/manifest.json', 'manifest']);
         for (const [k, x] of existingUntranslated) if (!ctx.entries.has(k)) rows.push([k, NS.fromLangValue ? NS.fromLangValue(x.value) : x.value, x.file, 'existing', ...trLangs.map(() => '')]);
-        if (existingUntranslated.size) log(`[lang] 包里原有的 ${existingUntranslated.size} 个键在目标语言里还没有译文（已先填入原文），一并列入翻译表`, 'warn');
+        if (existingUntranslated.size) log(`[lang] 包里原有的 ${existingUntranslated.size} 个键在目标语言里还没有译文（缺少的已先填入原文，和原文一字不差的移到待翻译段），一并列入翻译表`, 'warn');
         const stringsCsv = '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
         // 附加包里的结构：转换后可在编辑器里手动修改（用合并前的逐条列表）
         const structureSession = NS.makeAddonStructureSession ? NS.makeAddonStructureSession(ctx, opt) : null;

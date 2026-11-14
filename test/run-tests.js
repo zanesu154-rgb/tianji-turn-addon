@@ -1695,6 +1695,17 @@ export function show(player, item) {
         check('选中标记逐段翻译、大写选项登记、附魔 ID 拼名、setLore 固定写入', /"translate":"script\.eb\./.test(sel) && vals.includes('Straight') && vals.includes('Bezier')
             && ench.includes('enchantment.protect.fire') && js.includes('__i18n.BA(LORE)') && js.includes('__i18n.H(e.type.id,'), JSON.stringify([sel, ench, vals]));
     }
+    {
+        // 作者在目标语言里直接复制了英文原句：移到“待翻译”段并列入翻译表；单个词（名字等）不动
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        const add = (f, t) => mm.files.set(f, Buffer.from(((mm.files.get(f) || '').toString()) + '\n' + t + '\n'));
+        add('RP/texts/en_US.lang', 'eb.body=What are you playing on?\neb.brand=Minecraft');
+        add('RP/texts/ja_JP.lang', 'eb.body=What are you playing on?\neb.brand=Minecraft');
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const ja = mm.files.get('RP/texts/ja_JP.lang').toString();
+        const sec = ja.split('从其他语言补全（待翻译）')[1] || '';
+        check('目标语言里和原文一字不差的句子移到待翻译段', sec.includes('eb.body=What are you playing on?') && (ja.match(/eb\.body=/g) || []).length === 1 && !sec.includes('eb.brand='), ja.slice(-300));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
