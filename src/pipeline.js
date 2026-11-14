@@ -276,6 +276,31 @@
         const userMethods = new Set();
         let usesServerUi = false;
         const paramTexts = NS.collectParamTexts(scriptInfos);
+        // 包作者自己的“按玩家语言返回纯文字”函数（localizeText(player, …)）：调用处套 BL(player, …)，
+        // 把转换时已有的各语言译文写进脚本，作者没做的语言也能显示译文
+        const localizers = NS.collectLocalizers ? NS.collectLocalizers(scriptInfos) : new Set();
+        let localeBakeOf = null;
+        if (localizers.size) {
+            const unesc = (v) => String(v).replace(/\\n/g, '\n');
+            const langNames = new Set();
+            for (const langs of packLangs.values()) for (const l of langs.keys()) langNames.add(l);
+            for (const t of ctx.translations.values()) for (const l of t.keys()) langNames.add(l);
+            const enOf = (k) => { for (const langs of packLangs.values()) { const e = langs.get('en_US'); if (e && e.map.has(k)) return e.map.get(k); } return undefined; };
+            localeBakeOf = (k) => {
+                const out = {};
+                const src = ctx.entries.has(k) ? ctx.entries.get(k).value : undefined, en = enOf(k);
+                for (const l of langNames) {
+                    if (/^en_/.test(l)) continue;
+                    let v;
+                    for (const langs of packLangs.values()) { const e = langs.get(l); if (e && e.map.has(k)) { v = unesc(e.map.get(k)); break; } }
+                    if (v == null) { const t = ctx.translations.get(k); if (t && t.has(l)) v = t.get(l); }
+                    if (v == null || v === src || v === (en == null ? en : unesc(en))) continue;
+                    out[l] = v;
+                }
+                return out;
+            };
+            log(`[脚本] 发现包作者自己的按语言返回文字的函数：${[...localizers].join('、')}。调用处按玩家语言换成已有译文（翻好的 lang 放回后重新转换即可生效）`);
+        }
         const crossDicts = NS.collectCrossFileDicts(scriptInfos, ctx);
         const asciiTexts = NS.collectAsciiPacketTexts ? NS.collectAsciiPacketTexts(scriptInfos) : new Map();
         if (asciiTexts.size) log(`[脚本] 发现固定长度 ASCII 的 HUD 数据包：${asciiTexts.size} 条流进它的文字无法本地化，已列入“无法本地化”`, 'warn');
@@ -402,7 +427,7 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, bakeOf,
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, bakeOf, localizers, localeBakeOf,
                 });
                 if (r.changed) {
                     pending.set(p, r.content);

@@ -1739,6 +1739,30 @@ export function show(player, item) {
         const zh = NS.parseLang(mm.files.get('RP/texts/zh_CN.lang').toString());
         check('带冒号的 %键 换成不带冒号的键，译文照抄', dn.endsWith('§o%item.ntk.magma_club.name.text§r') && zh.get('item.ntk.magma_club.name.text') === '（15%%概率）', dn + ' ' + zh.get('item.ntk.magma_club.name.text'));
     }
+    {
+        // 作者自己的 localizeText(player, text)（只认葡 / 西）：调用处套 BL，中文玩家按放回的 zh_CN 译文显示；%s 行登记成句式
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/i18n/catalog.js', Buffer.from('export const translationCatalog = [\n  ["Tournament Announcer", "Locutor do Torneio", "Locutor del Torneo"],\n  ["Power: %s", "Poder: %s", "Poder: %s"],\n  ["Lower your fighting power", "Diminua seu poder de luta", "Reduce tu poder de pelea"],\n  ["You are not in a party yet.", "Você ainda não faz parte de um time.", "Todavía no estás en un equipo."],\n  ["Benefits", "Benefícios", "Beneficios"],\n];\n'));
+        mm.files.set('BP/scripts/i18n/index.js', Buffer.from('import { translationCatalog } from "./catalog.js";\nconst pt = new Map(translationCatalog.map(([e, p]) => [e, p]));\nfunction languageForPlayer(player) { const l = String(player?.clientSystemInfo?.locale ?? ""); return l.startsWith("pt") ? "pt" : "en"; }\nexport function localizeText(player, value) { return languageForPlayer(player) === "pt" ? (pt.get(value) ?? value) : value; }\n'));
+        mm.files.set('BP/scripts/hud.js', Buffer.from('import { localizeText } from "./i18n/index.js";\nexport function hud(player, p) { player.setDynamicProperty("hud", localizeText(player, "Tournament Announcer").padEnd(24, " ") + localizeText(player, `Power: ${p}`)); }\n'));
+        const r1 = await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        // 翻好的中文放回再转换
+        const en = NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString());
+        const zhLines = [...en].filter(([k]) => /script\.catalog\./.test(k)).map(([k, v]) => `${k}=${v === 'Tournament Announcer' ? '武道会播报员' : v.replace('Power', '力量')}`);
+        void r1;
+        const o = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        o.files.set('BP/scripts/i18n/catalog.js', Buffer.from('export const translationCatalog = [\n  ["Tournament Announcer", "Locutor do Torneio", "Locutor del Torneo"],\n  ["Power: %s", "Poder: %s", "Poder: %s"],\n  ["Lower your fighting power", "Diminua seu poder de luta", "Reduce tu poder de pelea"],\n  ["You are not in a party yet.", "Você ainda não faz parte de um time.", "Todavía no estás en un equipo."],\n  ["Benefits", "Benefícios", "Beneficios"],\n];\n'));
+        o.files.set('BP/scripts/i18n/index.js', Buffer.from('import { translationCatalog } from "./catalog.js";\nconst pt = new Map(translationCatalog.map(([e, p]) => [e, p]));\nfunction languageForPlayer(player) { const l = String(player?.clientSystemInfo?.locale ?? ""); return l.startsWith("pt") ? "pt" : "en"; }\nexport function localizeText(player, value) { return languageForPlayer(player) === "pt" ? (pt.get(value) ?? value) : value; }\n'));
+        o.files.set('BP/scripts/hud.js', Buffer.from('import { localizeText } from "./i18n/index.js";\nexport function hud(player, p) { player.setDynamicProperty("hud", localizeText(player, "Tournament Announcer").padEnd(24, " ") + localizeText(player, `Power: ${p}`)); }\n'));
+        o.files.set('RP/texts/zh_CN.lang', Buffer.from(((o.files.get('RP/texts/zh_CN.lang') || '').toString()) + '\n' + zhLines.join('\n') + '\n'));
+        await NS.runPipeline(o, { baseName: 'fixture' }, () => {});
+        const hud = o.files.get('BP/scripts/hud.js').toString();
+        let rt;
+        for (const f of ['BP/scripts/i18n/catalog.js', 'BP/scripts/hud.js']) { const js = o.files.get(f).toString(); const e = js.indexOf('// ---- end i18n runtime ----'); if (e > 0) rt = new Function(js.slice(0, e).replace(/^import.*$/mg, '') + '\nreturn __i18n;')(); }
+        const zh = { clientSystemInfo: { locale: 'zh-CN' } };
+        const a = rt.BL(zh, 'Tournament Announcer'), b = rt.BL(zh, 'Power: 25'), c = rt.BL({ clientSystemInfo: { locale: 'en-US' } }, 'Power: 25');
+        check('作者自己的 localizeText：调用处套 BL，中文玩家显示放回的译文', hud.includes('__i18n.BL(player, localizeText(player, "Tournament Announcer"))') && a === '武道会播报员' && b === '力量: 25' && c === 'Power: 25', JSON.stringify([a, b, c]));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
