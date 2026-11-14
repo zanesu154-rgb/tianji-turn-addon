@@ -227,7 +227,7 @@
                 if (!this._nameIdx) {
                     this._nameIdx = new Map();
                     for (const [k, ev] of this.existingValues) {
-                        if (!/^(item|tile|entity)\.[^.]+(\.name)?$/.test(k)) continue;
+                        if (!/^(item|tile|entity)\.[^.]+(\.name)?(\.short)?$/.test(k)) continue;
                         for (const v of (ev instanceof Set ? ev : [ev])) {
                             if (typeof v !== 'string') continue;
                             // 也按去掉首尾颜色码的写法登记（显示位置会把开头的 §b 拆出去）

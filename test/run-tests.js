@@ -1706,6 +1706,27 @@ export function show(player, item) {
         const sec = ja.split('从其他语言补全（待翻译）')[1] || '';
         check('目标语言里和原文一字不差的句子移到待翻译段', sec.includes('eb.body=What are you playing on?') && (ja.match(/eb\.body=/g) || []).length === 1 && !sec.includes('eb.brand='), ja.slice(-300));
     }
+    {
+        // `${DOT} ${A}Settings${R}`：两头都是变量、中间一个词的句式不做模糊匹配，否则会吞掉整段正文
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/guide.js', Buffer.from('import { ActionFormData } from "@minecraft/server-ui";\nconst A = "§e", R = "§r", DOT = "•";\nexport const PAGES = [`${DOT} ${A}Settings${R}`, "Keep the defaults. Settings has this again later."];\nexport function show(p, body) { new ActionFormData().body(body).show(p); }\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const js = mm.files.get('BP/scripts/guide.js').toString();
+        const rt = new Function(js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const r = JSON.stringify(rt.M('Keep the defaults. Settings has this again later.'));
+        const d = JSON.stringify(rt.M('• §eSettings§r'));
+        check('一个词的开放句式不吞整句；单独的词逐段翻译', /^\{"rawtext":\[\{"translate":"script\.guide\.str[_\d]*"\}\]\}$/.test(r) && /translate/.test(d), r + ' ' + d);
+    }
+    {
+        // 对象键名当下拉选项：Object.entries(C.ICON_TEXTURES).map(([s]) => s) → 键名登记翻译，原版名字用游戏自带的键
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/wp.js', Buffer.from('import { ModalFormData } from "@minecraft/server-ui";\nconst C = {}; C.ICON_TEXTURES = { "No Icon": "", "Oak Sapling": "textures/blocks/sapling_oak", "Redwood Sapling": "textures/blocks/redwood" };\nexport function show(p) { const i = Object.entries(C.ICON_TEXTURES); new ModalFormData().dropdown("Icon", i.map(([s]) => s)).show(p); }\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const js = mm.files.get('BP/scripts/wp.js').toString();
+        const rt = new Function(js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const a = JSON.stringify(rt.T('Oak Sapling')), b = JSON.stringify(rt.T('Redwood Sapling'));
+        check('对象键名当下拉选项登记翻译；原版名字用游戏自带键', a.includes('tile.sapling.oak.name') && /script\.wp\./.test(b), a + ' ' + b);
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

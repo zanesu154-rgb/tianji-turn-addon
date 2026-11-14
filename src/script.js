@@ -1094,6 +1094,9 @@
     }
     for (const [k, lits, ord] of pats) {
       if (!srcPat.has(k)) srcPat.set(k, [lits, ord]);
+      // 两头都是占位符、中间只有一个词的句式（"%1$s %2$sSettings%3$s"）会吞掉整段正文：不参与模糊匹配
+      const wd = lits.join(" ").replace(/\\u00a7./g, " ").match(/\\p{L}[\\p{L}'’-]*/gu) || [];
+      if (lits.length > 2 && !/\\p{L}/u.test(lits[0]) && !/\\p{L}/u.test(lits[lits.length - 1]) && wd.length <= 1 && !/[^\\s\\p{L}'’-]/u.test(lits.join("").replace(/\\u00a7./g, ""))) continue;
       const len = lits.join("").length;
       p.push([k, new RegExp("^" + lits.map(esc).join("([\\\\s\\\\S]*?)") + "$"), len, ord, lits]);
     }
@@ -2369,6 +2372,13 @@
                     if ('lit' in p) lits[lits.length - 1] += p.lit;
                     else lits.push('');
                 }
+                // `${DOT} ${A}Settings${R}`：两头都是变量、中间只有一个词的句式能匹配几乎任何含这个词的文字，
+                // 运行时会把整段正文吞进占位符；只登记这个词本身（显示时按分隔符逐段翻译）
+                const words = lits.join(' ').replace(/\u00a7./g, ' ').match(/\p{L}[\p{L}'’-]*/gu) || [];
+                if (!/\p{L}/u.test(lits[0]) && !/\p{L}/u.test(lits[lits.length - 1]) && words.length <= 1 && !/[^\s\p{L}'’-]/u.test(lits.join('').replace(/\u00a7./g, ''))) {
+                    if (words.length && words[0].length >= 3 && !ctx.isKey(words[0]) && !exact.some(([x]) => x === words[0])) exact.push([words[0], ctx.alloc(keyBase('str'), words[0], meta('str'))]);
+                    continue;
+                }
                 const key = ctx.alloc(keyBase('fmt'), partsToValue(line), meta('fmt'));
                 patterns.push([key, lits]);
             }
@@ -2473,6 +2483,47 @@
                 for (const x of arr.elements) if (!ctx.isKey(x.value)) forceText(x.value);
             }
         });
+        // 对象的键名当选项显示：dropdown(…, Object.entries(C.ICON_TEXTURES).map(([s]) => s))，{ "Oak Sapling": "textures/…" }
+        // 键名是英文名字：登记翻译（原版名字直接用游戏自带的键）
+        {
+            const objOf = (name) => {
+                let found = null;
+                walk(ast, (x) => {
+                    if (found) return;
+                    if (x.type === 'AssignmentExpression' && x.right.type === 'ObjectExpression' && ((x.left.type === 'MemberExpression' && propName(x.left) === name) || (x.left.type === 'Identifier' && x.left.name === name))) found = x.right;
+                    else if (x.type === 'VariableDeclarator' && x.id.type === 'Identifier' && x.id.name === name && x.init && x.init.type === 'ObjectExpression') found = x.init;
+                    else if (x.type === 'Property' && !x.computed && (x.key.name || x.key.value) === name && x.value.type === 'ObjectExpression') found = x.value;
+                });
+                return found;
+            };
+            let vRev = null;
+            const vanillaKeyOf = (t) => {
+                if (!vRev) { vRev = new Map(); const V = NS.VANILLA; if (V && V.en) for (const [k, v] of Object.entries(V.en)) if (/^(item|tile)\./.test(k) && !vRev.has(v)) vRev.set(v, k); }
+                return vRev.get(t);
+            };
+            walk(ast, (n) => {
+                if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.object.type !== 'Identifier' || n.callee.object.name !== 'Object' || !/^(keys|entries)$/.test(propName(n.callee) || '') || !n.arguments[0]) return;
+                const a = n.arguments[0];
+                const name = a.type === 'MemberExpression' ? propName(a) : a.type === 'Identifier' ? a.name : null;
+                if (!name) return;
+                // 结果要流进表单控件：直接作参数，或存进变量后在 .dropdown( / .button( 里用到
+                let fn = n.parent; while (fn && !/Function/.test(fn.type)) fn = fn.parent;
+                const body = fn ? src.slice(fn.start, fn.end) : '';
+                const v = n.parent && n.parent.type === 'VariableDeclarator' && n.parent.id.type === 'Identifier' ? n.parent.id.name : null;
+                const used = v ? new RegExp(`\\.(dropdown|button|toggle|textField)\\([^;]*\\b${v.replace(/\$/g, '\\$')}\\b`).test(body) : /\.(dropdown|button)\(/.test(src.slice(n.parent.start, n.parent.end));
+                if (!used) return;
+                const obj = objOf(name);
+                if (!obj) return;
+                for (const pr of obj.properties) {
+                    if (pr.type !== 'Property' || pr.computed) continue;
+                    const t = pr.key.type === 'Identifier' ? pr.key.name : isStr(pr.key) ? pr.key.value : null;
+                    if (!t || !/^[A-Z]/.test(t) || !looksLikeText(t, 'loose') || ctx.isKey(t) || exact.some(([x]) => x === t)) continue;
+                    const vk = vanillaKeyOf(t);
+                    exact.push([t, vk || ctx.alloc(keyBase('word'), t, meta('word'))]);
+                    if (vk) usesRuntime = true;
+                }
+            });
+        }
         // { label: "Curve", choices: ["straight", "bezier"] }：选项值显示时常被首字母大写（cap(choice)），把大写形式登记翻译
         walk(ast, (n) => {
             if (n.type !== 'Property' || n.computed || !n.key || !/^(choices|options|values)$/.test(n.key.name || n.key.value || '') || n.value.type !== 'ArrayExpression') return;
