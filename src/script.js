@@ -959,6 +959,23 @@
     const h = one(t[1]);
     return h ? [...h, { text: t[2] }] : null;
   };
+  // " §8(chest/legs)"、"§a> Disable"：括号、斜杠、箭头等分开的几个词，每个都登记过 → 逐段换成译文
+  const pieces = (s) => {
+    if (s.length > 160 || !/[()\\[\\]\\/,·|<>«»•*:]/.test(s)) return null;
+    const parts = s.split(/(\\u00a7.|[()\\[\\]\\/,·|<>«»•*:]+)/);
+    const els = []; let hit = false;
+    for (const part of parts) {
+      if (!part) continue;
+      if (!/\\p{L}/u.test(part) || /^\\u00a7.$/.test(part)) { els.push({ text: part }); continue; }
+      const core = part.trim(), x = one(core);
+      if (!x) return null;
+      const a = part.indexOf(core);
+      if (a > 0) els.push({ text: part.slice(0, a) });
+      els.push(...x); hit = true;
+      if (a + core.length < part.length) els.push({ text: part.slice(a + core.length) });
+    }
+    return hit ? els : null;
+  };
   const lookup = (s) => {
     if (cache.has(s)) return cache.get(s);
     if (kept.size && kept.has(s.replace(/^(?:\u00a7.|\\s)+|(?:\u00a7.|\\s)+$/g, ""))) { cache.set(s, null); return null; }
@@ -988,7 +1005,7 @@
         ls.forEach((l, i) => {
           if (i) els.push({ text: "\\n" });
           if (!l) return;
-          const x = one(l) || tailOne(l) || (endR && i === ls.length - 1 && one(l + "\\u00a7r"));
+          const x = one(l) || tailOne(l) || (endR && i === ls.length - 1 && one(l + "\\u00a7r")) || pieces(l);
           if (x) { hit = true; els.push(...x); } else els.push({ text: l });
         });
         return hit;
@@ -1009,22 +1026,7 @@
         if (hit) r = els;
       }
     }
-    if (!r && s.length < 160 && !/[\\n\\t]/.test(s) && /[()\\[\\]\\/,·|]/.test(s)) {
-      // " §8(chest/legs)"：括号、斜杠等分开的几个小词，每个都登记过 → 逐段换成译文
-      const parts = s.split(/(\\u00a7.|[()\\[\\]\\/,·|]+)/);
-      const els = []; let hit = false, ok = true;
-      for (const part of parts) {
-        if (!part) continue;
-        if (!/\\p{L}/u.test(part) || /^\\u00a7.$/.test(part)) { els.push({ text: part }); continue; }
-        const core = part.trim(), x = one(core);
-        if (!x) { ok = false; break; }
-        const a = part.indexOf(core);
-        if (a > 0) els.push({ text: part.slice(0, a) });
-        els.push(...x); hit = true;
-        if (a + core.length < part.length) els.push({ text: part.slice(a + core.length) });
-      }
-      if (ok && hit) r = els;
-    }
+    if (!r && tab < 0 && s.indexOf("\\n") < 0) r = pieces(s);
     r = r ? { rawtext: r } : null;
     // 满了只丢最早的一批，不整个清空（每帧都变的字符串不会把常用文本挤掉）
     if (cache.size >= 2000) { let n = 0; for (const x of cache.keys()) { cache.delete(x); if (++n >= 500) break; } }
@@ -1152,7 +1154,8 @@
     }).join("");
     return hit ? out : s;
   };
-  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds, keep, bake, B, GL });
+  const BA = (a) => (Array.isArray(a) ? a.map(B) : a);
+  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds, keep, bake, B, BA, GL });
 })();
 `;
     }
@@ -1637,6 +1640,8 @@
 
         // ---- 改写表 ----
         const overrides = new Map();   // node → () => string
+        // 套在表达式本身外面、又不影响别的改写（M(…) 等）的包装：H(id, 拼出来的名字)
+        const innerWrap = new Map();
         const handled = new Set();     // 已作为显示参数处理过的节点（不再登记为候选）
         const exact = [];              // [原文, 键]
         const patterns = [];           // [键, [字面量片段…]]
@@ -1715,10 +1720,9 @@
                 b = b.callee.object;
             }
             if (!under || !b || b.type !== 'MemberExpression' || !/^(typeId|id)$/.test(propName(b) || '')) return;
-            if (overrides.has(n)) return;
             for (let f = n.parent; f; f = f.parent) if (/Function/.test(f.type) && humanizerNames.has(f.id && f.id.name)) return;
             const idSrc = src.slice(b.start, b.end);
-            overrides.set(n, () => ` ${RT}.H(${idSrc}, (${renderOrig(n)}))`);
+            innerWrap.set(n, (r) => ` ${RT}.H(${idSrc}, (${r}))`);
             humanizers++;
             usesRuntime = true;
         });
@@ -1729,15 +1733,16 @@
             let pos = node.start;
             const collect = (n) => {
                 for (const c of childrenOf(n)) {
-                    if (overrides.has(c)) {
-                        out.push(src.slice(pos, c.start), overrides.get(c)());
+                    if (overrides.has(c) || innerWrap.has(c)) {
+                        out.push(src.slice(pos, c.start), overrides.has(c) ? overrides.get(c)() : renderOrig(c));
                         pos = c.end;
                     } else if (c.end > pos) collect(c);
                 }
             };
             collect(node);
             out.push(src.slice(pos, node.end));
-            return out.join('');
+            const r = out.join('');
+            return innerWrap.has(node) ? innerWrap.get(node)(r) : r;
         };
         const render = (node) => overrides.has(node) ? overrides.get(node)() : renderOrig(node);
         const renderPart = (p) => {
@@ -1951,6 +1956,15 @@
                     });
                     else if (a.type !== 'Literal' && a.type !== 'SpreadElement') { usesRuntime = true; overrides.set(a, () => `${RT}.MA(${renderOrig(a)})`); }
                     return;
+                }
+                // 不支持 RawMessage 的 setLore：选了“按简体中文固定写入”时逐行换成译文
+                if (name === 'setLore' && !opts.rawLore && opts.bakeOf && injectRuntime && n.callee.type === 'MemberExpression' && n.arguments[0] && !inDebug(n)) {
+                    const a = n.arguments[0];
+                    if (!(a.type === 'ArrayExpression' && a.elements.every(e => isStr(e)) && !a.elements.length)) {
+                        overrides.set(a, () => `${RT}.BA(${renderOrig(a)})`);
+                        usesRuntime = true;
+                        bakeSites++;
+                    }
                 }
                 // 读回 lore（脚本按英文原文判断哪几行是自己加的，再整体重写）：lore 已经写成翻译键，
                 // getLore() 读到的不再是原文 → 改成按 getRawLore() 还原成原文，否则每次都会再追加一遍
@@ -2459,6 +2473,14 @@
                 for (const x of arr.elements) if (!ctx.isKey(x.value)) forceText(x.value);
             }
         });
+        // { label: "Curve", choices: ["straight", "bezier"] }：选项值显示时常被首字母大写（cap(choice)），把大写形式登记翻译
+        walk(ast, (n) => {
+            if (n.type !== 'Property' || n.computed || !n.key || !/^(choices|options|values)$/.test(n.key.name || n.key.value || '') || n.value.type !== 'ArrayExpression') return;
+            const el = n.value.elements;
+            if (!el.length || !el.every(e => isStr(e) && /^[a-z]{3,20}$/.test(e.value))) return;
+            if (!n.parent || n.parent.type !== 'ObjectExpression' || !n.parent.properties.some(q => q.type === 'Property' && /^(label|name|title)$/.test(q.key && (q.key.name || q.key.value) || ''))) return;
+            for (const e of el) { const t = e.value.charAt(0).toUpperCase() + e.value.slice(1); if (!ctx.isKey(t)) forceText(t); }
+        });
         // 固定 ID 列表经“ID 拼英文名”函数变成选项：PRIVACY_MODES.map(r => prettier(r)) → Public / Private / Whitelist
         // 运行时才拼出文字、也查不到物品键：按同样规则先拼好登记翻译
         if (humanizerNames.size) {
@@ -2535,14 +2557,14 @@
                 // ID → 翻译键：包里自定义的 + 原版
                 if (opts.idKeys) for (const [id, k] of opts.idKeys()) own[id] = k;
                 const V = NS.VANILLA || { ids: {}, ents: {} };
-                prelude += `${RT}.regIds(${JSON.stringify(Object.assign({}, V.ids, own))}, ${JSON.stringify(V.ents)});\n`;
+                prelude += `${RT}.regIds(${JSON.stringify(Object.assign({}, V.ids, V.ench || {}, own))}, ${JSON.stringify(V.ents)});\n`;
             }
             if (opts.bakeOf && (bakeSites || hasRegistrations || humanizers)) {
                 // 这个文件登记的键（和拼英文名用到的键）的简体中文
                 const keys = new Set();
                 for (const [, k] of exact) keys.add(k);
                 for (const p of patterns) keys.add(p[0]);
-                if (humanizers) { const V = NS.VANILLA || { ids: {}, ents: {} }; for (const k of Object.values(V.ids)) keys.add(k); for (const k of Object.values(V.ents)) keys.add(k); for (const k of Object.values(own)) keys.add(k); }
+                if (humanizers) { const V = NS.VANILLA || { ids: {}, ents: {} }; for (const k of Object.values(V.ids)) keys.add(k); for (const k of Object.values(V.ench || {})) keys.add(k); for (const k of Object.values(V.ents)) keys.add(k); for (const k of Object.values(own)) keys.add(k); }
                 const bk = {};
                 for (const k of keys) { const v = opts.bakeOf(k); if (v != null) bk[k] = v; }
                 if (Object.keys(bk).length) prelude += `${RT}.bake(${JSON.stringify(bk)});\n`;
