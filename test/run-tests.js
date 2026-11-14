@@ -1717,6 +1717,16 @@ export function show(player, item) {
         const d = JSON.stringify(rt.M('• §eSettings§r'));
         check('一个词的开放句式不吞整句；单独的词逐段翻译', /^\{"rawtext":\[\{"translate":"script\.guide\.str[_\d]*"\}\]\}$/.test(r) && /translate/.test(d), r + ' ' + d);
     }
+    {
+        // 对象键名当下拉选项：Object.entries(C.ICON_TEXTURES).map(([s]) => s) → 键名登记翻译，原版名字用游戏自带的键
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/wp.js', Buffer.from('import { ModalFormData } from "@minecraft/server-ui";\nconst C = {}; C.ICON_TEXTURES = { "No Icon": "", "Oak Sapling": "textures/blocks/sapling_oak", "Redwood Sapling": "textures/blocks/redwood" };\nexport function show(p) { const i = Object.entries(C.ICON_TEXTURES); new ModalFormData().dropdown("Icon", i.map(([s]) => s)).show(p); }\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const js = mm.files.get('BP/scripts/wp.js').toString();
+        const rt = new Function(js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const a = JSON.stringify(rt.T('Oak Sapling')), b = JSON.stringify(rt.T('Redwood Sapling'));
+        check('对象键名当下拉选项登记翻译；原版名字用游戏自带键', a.includes('tile.sapling.oak.name') && /script\.wp\./.test(b), a + ' ' + b);
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
