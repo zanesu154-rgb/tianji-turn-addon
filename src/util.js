@@ -75,6 +75,13 @@
         // 代码特征；英文里的 “fails to function”、“return to base” 不算
         if (/=>|\bfunction\s*[\w$]*\s*\(|\breturn\s+[\w$.()[\]'"]+\s*;|;\s*$/.test(t)) return true;
         if (/^q\.|^query\.|^v\.|^variable\.|^math\./.test(t)) return true; // Molang
+        // 不在开头的 Molang："!query.is_alive || (v.a ?? 0) > 0"：带 query.x / v.x 且有运算符
+        if (/\b(?:q|v|t|c|query|variable|temp|context|math)\.[a-z_]\w*/.test(t) && /\|\||&&|[<>!=]=|\?\?|[<>]\s*\d|^!|\?\s*[\w.('"]+\s*:/.test(t)) return true;
+        // 竖线分隔的数据记录："adaptive|Rapid Adaptation|p|duration|60"：至少三段，有一段是数字或小写标识符
+        if (/^[^|\s][^|]*(\|[^|]*){2,}$/.test(t) && !/\s\|\s/.test(t)) {
+            const parts = t.split('|');
+            if (parts.some(x => /^-?\d+(\.\d+)?$/.test(x)) || parts.filter(x => /^[a-z][a-zA-Z0-9_]*$/.test(x)).length >= 2) return true;
+        }
         return false;
     }
 

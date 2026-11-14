@@ -1639,6 +1639,19 @@ console.log(JSON.stringify(calls));`;
         const vals = [...NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString())].filter(([k]) => /script\.privacy\./.test(k)).map(([, v]) => v);
         check('ID 列表经拼名函数做成的选项（Public / Private / Whitelist）登记翻译', ['Public', 'Private', 'Whitelist'].every(v => vals.includes(v)), JSON.stringify(vals));
     }
+    {
+        // Molang 表达式、竖线分隔的数据记录、按键枚举不提取；带竖线的 HUD 文字照常
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/cv.js', Buffer.from('import { world } from "@minecraft/server";\n'
+            + 'export const REWARDS = ["adaptive|Rapid Adaptation|p|duration|60", "adaptive|Rapid Adaptation|effect|speed"];\n'
+            + 'const POSE_STOP = "!query.is_alive || (query.any_animation_finished && 1)";\n'
+            + 'export function f(p, InputButton){ p.playAnimation("animation.x", { stopExpression: "(v.mode ?? 0) > 0 || (v.phase ?? 0) >= 9", controller: POSE_STOP });\n'
+            + '  const buttons = [InputButton.Attack, "Attack", "Break", "Mine"]; for (const b of buttons) p.inputInfo.getButtonState(b);\n'
+            + '  p.onScreenDisplay.setActionbar("§6Ground Zero §8| §fFlying"); }\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const vals = [...NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString())].filter(([k]) => /script\.cv\./.test(k)).map(([, v]) => v);
+        check('Molang、竖线数据记录、按键枚举不提取；带竖线的 HUD 文字照常', vals.length === 1 && vals[0] === '§6Ground Zero §8| §fFlying', JSON.stringify(vals));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
