@@ -1122,43 +1122,82 @@
   // 固定写入某种语言（名字标签等只认纯文字的位置）：按键查预先写入的译文，拼成纯文字
   const baked = new Map();
   const bake = (o) => { for (const k in o || {}) baked.set(k, o[k]); };
-  const render = (els) => {
+  const render = (els, tb) => {
+    tb = tb || baked;
     let out = "";
     for (const e of els || []) {
       if (!e) continue;
       if (typeof e.text === "string") { out += e.text; continue; }
-      if (Array.isArray(e.rawtext)) { const r = render(e.rawtext); if (r == null) return null; out += r; continue; }
+      if (Array.isArray(e.rawtext)) { const r = render(e.rawtext, tb); if (r == null) return null; out += r; continue; }
       if (typeof e.translate !== "string") return null;
-      const v = baked.get(e.translate);
+      const v = tb.get(e.translate);
       if (v == null) return null;
       const w = e.with && Array.isArray(e.with.rawtext) ? e.with.rawtext : (Array.isArray(e.with) ? e.with.map((x) => ({ text: String(x) })) : []);
-      const args = w.map((x) => render([x]));
+      const args = w.map((x) => render([x], tb));
       if (args.some((a) => a == null)) return null;
       let i = 0;
       out += v.replace(/%(\\d+)\\$[sd]|%[sd]|%%/g, (m0, n) => m0 === "%%" ? "%" : n ? (args[n - 1] ?? "") : (args[i++] ?? ""));
     }
     return out;
   };
-  const B = (s) => {
-    if (typeof s !== "string" || !baked.size) return s;
+  const bakeWith = (tb, s) => {
+    if (typeof s !== "string" || !tb || !tb.size) return s;
     const r = lookup(s);
-    const t = r ? render(r.rawtext) : null;
+    let t = r ? render(r.rawtext, tb) : null;
     if (t != null) return t;
+    // 最先匹配上的句式在这种语言里没有译文（同一句在别处又登记了一个键）：只在有译文的句式里再找一次
+    for (const [pk, re, , ord] of p) {
+      if (!tb.has(pk)) continue;
+      const x = re.exec(s);
+      if (!x) continue;
+      let caps = x.slice(1);
+      if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
+      t = render([{ translate: pk, with: { rawtext: caps.map((c) => { const y = bakeWith(tb, c); return { text: y }; }) } }], tb);
+      if (t != null) return t;
+    }
     // 整句对不上（"\\u00a7fIron Sword \\u00a76x64"）：按颜色码 / 换行切开，逐段换
     let hit = false;
     const out = s.split(/(\\u00a7.|\\n)/).map((seg) => {
       if (!seg || /^(\\u00a7.|\\n)$/.test(seg)) return seg;
       const m = /^(\\s*)([\\s\\S]*?)(\\s*)$/.exec(seg);
       const x = m[2] ? lookup(m[2]) : null;
-      const y = x ? render(x.rawtext) : null;
+      const y = x ? render(x.rawtext, tb) : null;
       if (y == null) return seg;
       hit = true;
       return m[1] + y + m[3];
     }).join("");
     return hit ? out : s;
   };
+  const B = (s) => bakeWith(baked, s);
+  // 按玩家语言写入（包作者自己的 localizeText(player, …) 只认几种语言、只能返回纯文字的地方）：
+  // 每种语言一张 键→译文 表，按 player.clientSystemInfo.locale 选表
+  const bakedL = new Map(), locCache = new Map();
+  const bakeL = (o) => {
+    for (const l in o || {}) {
+      let t = bakedL.get(l);
+      if (!t) bakedL.set(l, (t = new Map()));
+      for (const k in o[l]) t.set(k, o[l][k]);
+    }
+    locCache.clear();
+  };
+  const tableFor = (loc) => {
+    if (locCache.has(loc)) return locCache.get(loc);
+    const L = loc.toLowerCase().replace("-", "_");
+    let t = null;
+    for (const [l, tb] of bakedL) if (l.toLowerCase() === L) t = tb;
+    if (!t) { const pre = L.split("_")[0]; const c = [...bakedL].filter(([l]) => l.toLowerCase().split("_")[0] === pre); if (c.length) t = c[0][1]; }
+    locCache.set(loc, t);
+    return t;
+  };
+  const BL = (pl, s) => {
+    if (typeof s !== "string" || !bakedL.size) return s;
+    let loc = "";
+    try { loc = String((pl && pl.clientSystemInfo && pl.clientSystemInfo.locale) || ""); } catch (e) { return s; }
+    const tb = loc ? tableFor(loc) : null;
+    return tb ? bakeWith(tb, s) : s;
+  };
   const BA = (a) => (Array.isArray(a) ? a.map(B) : a);
-  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds, keep, bake, B, BA, GL });
+  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
 })();
 `;
     }
@@ -1679,7 +1718,7 @@
         // ---- 把 ID 拼成英文名的函数：(id) => id.split(":").pop().split("_").map(首字母大写).join(" ") ----
         // 文字在运行时才生成，没有可提取的原文；给返回值套上 H(id, 文字)，运行时按 ID 记下对应的翻译键
         // （原版用游戏自带键，包里自定义的物品 / 方块 / 实体用 item.<id>.name 等），之后显示时就能翻译
-        let humanizers = 0, bakeSites = 0;
+        let humanizers = 0, bakeSites = 0, localizerSites = 0;
         const humanizerNames = new Set();
         walk(ast, (n) => {
             if (!/Function/.test(n.type) || !n.params.length || n.params[0].type !== 'Identifier') return;
@@ -1709,6 +1748,24 @@
                 : par && (par.type === 'MethodDefinition' || par.type === 'Property') && par.key ? (par.key.name || par.key.value) : null;
             if (nm) humanizerNames.add(nm);
         });
+        // 包作者自己的 localizeText(player, text)：只认作者做过的几种语言 → 结果外面套 BL(player, …)
+        if (opts.localizers && opts.localizers.size && injectRuntime) {
+            walk(ast, (n) => {
+                if (n.type !== 'CallExpression' || n.arguments.length < 2) return;
+                const nm = n.callee.type === 'Identifier' ? n.callee.name : n.callee.type === 'MemberExpression' ? propName(n.callee) : null;
+                if (!nm || !opts.localizers.has(nm)) return;
+                const a = n.arguments[0];
+                if (!(a.type === 'Identifier' || (a.type === 'MemberExpression' && !a.computed && /^(Identifier|ThisExpression|MemberExpression)$/.test(a.object.type)))) return;
+                for (let f = n.parent; f; f = f.parent) {
+                    const fn = f.type === 'FunctionDeclaration' && f.id ? f.id.name : (/Function/.test(f.type) && f.parent && f.parent.type === 'VariableDeclarator' && f.parent.id.type === 'Identifier' ? f.parent.id.name : null);
+                    if (fn && opts.localizers.has(fn)) return;
+                }
+                const pSrc = src.slice(a.start, a.end);
+                innerWrap.set(n, (r) => `${RT}.BL(${pSrc}, ${r})`);
+                localizerSites++;
+                usesRuntime = true;
+            });
+        }
         // 不写成函数、直接在表达式里拼的：item.typeId.replace(/^.*:/, "").replace(/_/g, " ") → 同样套上 H(item.typeId, …)
         walk(ast, (n) => {
             if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression') return;
@@ -2105,21 +2162,23 @@
             return { lits, order };
         };
         // 占位符：${name}（模板字面量写法）或 {0}（运行时 replaceAll 填入）
-        const PH = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{(\d{1,2})\}/g;
+        // 也认 %s / %1$s（作者自己的 applyTemplate 按顺序填入）
+        const PH = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{(\d{1,2})\}|%(?:(\d)\$)?s/g;
+        const phNames = (text) => { let seq = 0; return [...text.matchAll(PH)].map(m => m[1] || (m[2] != null ? '#' + m[2] : '%' + (m[3] || ++seq))); };
         for (const g of tables.groups) {
             const nodes = [...g.values()].filter(nd => !handled.has(nd));
             if (nodes.length < (g.fromDict ? 1 : 2)) continue;
             // 字符串里带 ${name} 占位符（脚本运行时才填入）→ 按句式登记，按占位符名字对齐参数
             const srcEntry = pickSource(g);
-            const names = [...srcEntry[1].value.matchAll(PH)].map(m => m[1] || '#' + m[2]);
+            const names = phNames(srcEntry[1].value);
             if (names.length) {
                 const uniq = [...new Set(names)];
                 const toParts = (text) => {
                     const parts = [];
-                    let last = 0;
+                    let last = 0, seq = 0;
                     for (const m of text.matchAll(PH)) {
                         if (m.index > last) parts.push({ lit: text.slice(last, m.index) });
-                        const gi = uniq.indexOf(m[1] || '#' + m[2]) + 1;
+                        const gi = uniq.indexOf(m[1] || (m[2] != null ? '#' + m[2] : '%' + (m[3] || ++seq))) + 1;
                         if (!gi) return null;
                         parts.push({ g: gi });
                         last = m.index + m[0].length;
@@ -2129,9 +2188,11 @@
                 };
                 const all = [...g].map(([l, nd]) => [l, nd, toParts(nd.value)]);
                 if (all.some(([, , ps]) => !ps)) continue;
-                const key = ctx.alloc(keyBase('fmt'), toValue(all.find(([l]) => l === srcEntry[0])[2]), meta('fmt'));
+                // 只有 %s 占位（lang 本身就认 %s）：值原样保留、键名和以前一样，放回的旧译文照样对得上
+                const pctOnly = names.every(n => n[0] === '%');
+                const key = pctOnly ? ctx.alloc(keyBase('str'), srcEntry[1].value, meta('str')) : ctx.alloc(keyBase('fmt'), toValue(all.find(([l]) => l === srcEntry[0])[2]), meta('fmt'));
                 for (const [l, nd, ps] of all) {
-                    ctx.addTranslation(key, l, toValue(ps));
+                    ctx.addTranslation(key, l, pctOnly ? nd.value : toValue(ps));
                     const t = toLits(ps);
                     patterns.push([key, t.lits, t.order]);
                     handled.add(nd);
@@ -2610,6 +2671,15 @@
                 const V = NS.VANILLA || { ids: {}, ents: {} };
                 prelude += `${RT}.regIds(${JSON.stringify(Object.assign({}, V.ids, V.ench || {}, own))}, ${JSON.stringify(V.ents)});\n`;
             }
+            if (opts.localeBakeOf && (localizerSites || hasRegistrations)) {
+                // 这个文件登记的键在各语言的译文（给 BL 用）
+                const keys = new Set();
+                for (const [, k] of exact) keys.add(k);
+                for (const p of patterns) keys.add(p[0]);
+                const tb = {};
+                for (const k of keys) { const o = opts.localeBakeOf(k); for (const l in o) (tb[l] || (tb[l] = {}))[k] = o[l]; }
+                if (Object.keys(tb).length) prelude += `${RT}.bakeL(${JSON.stringify(tb)});\n`;
+            }
             if (opts.bakeOf && (bakeSites || hasRegistrations || humanizers)) {
                 // 这个文件登记的键（和拼英文名用到的键）的简体中文
                 const keys = new Set();
@@ -2736,6 +2806,45 @@
     }
     NS.renameNameRefsInScript = renameNameRefsInScript;
     NS.processScript = processScript;
+    /**
+     * 包作者自己的“按玩家语言返回纯文字”函数：localizeText(player, text) 这类。
+     * 函数体里读 player.clientSystemInfo（或调用了这样的函数）、至少两个参数、有返回值。
+     * 它只认作者加过的几种语言；调用处外面再套 BL(player, …)，其他语言按转换时写入的译文换掉。
+     * @returns {Set<string>} 函数名
+     */
+    function collectLocalizers(infos) {
+        const fns = [];   // { name, node, aware, calls:Set }
+        for (const info of infos.values()) {
+            if (!info || !info.ast) continue;
+            walk(info.ast, (n) => {
+                let name = null, f = null;
+                if (n.type === 'FunctionDeclaration' && n.id) { name = n.id.name; f = n; }
+                else if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && /Function/.test(n.init.type)) { name = n.id.name; f = n.init; }
+                if (!f) return;
+                let aware = false, ret = false;
+                const calls = new Set();
+                walk(f.body, (x) => {
+                    if (x.type === 'MemberExpression' && !x.computed && x.property && x.property.name === 'clientSystemInfo') aware = true;
+                    if (x.type === 'CallExpression' && x.callee.type === 'Identifier') calls.add(x.callee.name);
+                    if (x.type === 'ReturnStatement' && x.argument) ret = true;
+                });
+                if (f.type === 'ArrowFunctionExpression' && f.body.type !== 'BlockStatement') ret = true;
+                fns.push({ name, f, aware, ret, calls });
+            });
+        }
+        // 只认两种：函数体里直接读 clientSystemInfo，或直接调用了“读 clientSystemInfo 并返回”的取语言函数
+        const getters = new Set(fns.filter(x => x.aware && x.ret).map(x => x.name));
+        const out = new Set();
+        for (const x of fns) {
+            if (!x.ret || x.f.params.length < 2 || x.f.params[0].type !== 'Identifier') continue;
+            if (!(x.aware || [...x.calls].some(c => getters.has(c)))) continue;
+            if (!/locali[sz]|translat|^(t|tr|_t|i18n)$|lang|text/i.test(x.name)) continue;
+            if (/^(send|show|open|play|set|apply|register|give|spawn|run|is|has)/i.test(x.name)) continue;
+            out.add(x.name);
+        }
+        return out;
+    }
+    NS.collectLocalizers = collectLocalizers;
     NS.collectParamTexts = collectParamTexts;
     NS.collectAsciiPacketTexts = collectAsciiPacketTexts;
     NS.collectCrossFileDicts = collectCrossFileDicts;
