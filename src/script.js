@@ -1009,6 +1009,22 @@
         if (hit) r = els;
       }
     }
+    if (!r && s.length < 160 && !/[\\n\\t]/.test(s) && /[()\\[\\]\\/,·|]/.test(s)) {
+      // " §8(chest/legs)"：括号、斜杠等分开的几个小词，每个都登记过 → 逐段换成译文
+      const parts = s.split(/(\\u00a7.|[()\\[\\]\\/,·|]+)/);
+      const els = []; let hit = false, ok = true;
+      for (const part of parts) {
+        if (!part) continue;
+        if (!/\\p{L}/u.test(part) || /^\\u00a7.$/.test(part)) { els.push({ text: part }); continue; }
+        const core = part.trim(), x = one(core);
+        if (!x) { ok = false; break; }
+        const a = part.indexOf(core);
+        if (a > 0) els.push({ text: part.slice(0, a) });
+        els.push(...x); hit = true;
+        if (a + core.length < part.length) els.push({ text: part.slice(a + core.length) });
+      }
+      if (ok && hit) r = els;
+    }
     r = r ? { rawtext: r } : null;
     // 满了只丢最早的一批，不整个清空（每帧都变的字符串不会把常用文本挤掉）
     if (cache.size >= 2000) { let n = 0; for (const x of cache.keys()) { cache.delete(x); if (++n >= 500) break; } }
@@ -1684,6 +1700,27 @@
                 : par && par.type === 'VariableDeclarator' && par.id.type === 'Identifier' ? par.id.name
                 : par && (par.type === 'MethodDefinition' || par.type === 'Property') && par.key ? (par.key.name || par.key.value) : null;
             if (nm) humanizerNames.add(nm);
+        });
+        // 不写成函数、直接在表达式里拼的：item.typeId.replace(/^.*:/, "").replace(/_/g, " ") → 同样套上 H(item.typeId, …)
+        walk(ast, (n) => {
+            if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression') return;
+            const par = n.parent;
+            if (par && par.type === 'MemberExpression' && par.object === n) return;   // 只看链条最外层
+            let b = n, under = false;
+            while (b && (b.type === 'CallExpression' || b.type === 'ChainExpression') && (b.type === 'ChainExpression' ? (b = b.expression) : true)) {
+                if (b.type !== 'CallExpression' || b.callee.type !== 'MemberExpression') break;
+                const m = propName(b.callee), a = b.arguments;
+                if (/^(replace|replaceAll)$/.test(m) && a[0] && ((a[0].regex && /_/.test(a[0].regex.pattern)) || (isStr(a[0]) && a[0].value === '_')) && isStr(a[1]) && a[1].value === ' ') under = true;
+                if (m === 'split' && a[0] && ((isStr(a[0]) && a[0].value === '_') || (a[0].regex && /_/.test(a[0].regex.pattern)))) under = true;
+                b = b.callee.object;
+            }
+            if (!under || !b || b.type !== 'MemberExpression' || !/^(typeId|id)$/.test(propName(b) || '')) return;
+            if (overrides.has(n)) return;
+            for (let f = n.parent; f; f = f.parent) if (/Function/.test(f.type) && humanizerNames.has(f.id && f.id.name)) return;
+            const idSrc = src.slice(b.start, b.end);
+            overrides.set(n, () => ` ${RT}.H(${idSrc}, (${renderOrig(n)}))`);
+            humanizers++;
+            usesRuntime = true;
         });
         if (humanizers) ctx.warn(`${file}: 发现 ${humanizers} 个把 ID 拼成英文名的函数，运行时按 ID 换成翻译键`);
 
@@ -2398,6 +2435,28 @@
                 if (!c.every(e => isStr(e) && !handled.has(e) && /^[A-Za-z][A-Za-z '\-]{1,40}$/.test(e.value))) continue;
                 if (new Set(c.map(e => e.value)).size < c.length * 0.8) continue;   // 单位、类型这类重复值的列不是名称
                 for (const e of c) { forceText(e.value); handled.add(e); }
+            }
+        });
+        // ` §8(${slots.join("/")})`，slots = types.filter(t => ["head", "chest", "legs"].includes(t))：
+        // 拼进显示文字的固定小词登记翻译，运行时按分隔符逐段换成译文
+        walk(ast, (n) => {
+            if (n.type !== 'TemplateLiteral' || inDebug(n)) return;
+            for (const e of n.expressions) {
+                if (e.type !== 'CallExpression' || propName(e.callee) !== 'join' || e.callee.type !== 'MemberExpression' || !isStr(e.arguments[0]) || !/^[\s\/,·|&+-]+$/.test(e.arguments[0].value)) continue;
+                let o = e.callee.object, arr = null;
+                if (o.type === 'Identifier') {
+                    let d = null;
+                    walk(ast, (x) => { if (!d && x.type === 'VariableDeclarator' && x.id.type === 'Identifier' && x.id.name === o.name && x.init) d = x.init; });
+                    o = d;
+                }
+                if (o && o.type === 'ArrayExpression') arr = o;
+                else if (o && o.type === 'CallExpression' && propName(o.callee) === 'filter') {
+                    const f = o.arguments[0];
+                    const body = f && /Function/.test(f.type) ? (f.body.type === 'BlockStatement' ? null : f.body) : null;
+                    if (body && body.type === 'CallExpression' && propName(body.callee) === 'includes' && body.callee.object.type === 'ArrayExpression') arr = body.callee.object;
+                }
+                if (!arr || !arr.elements.length || !arr.elements.every(x => isStr(x) && /^[A-Za-z][A-Za-z ]{1,24}$/.test(x.value))) continue;
+                for (const x of arr.elements) if (!ctx.isKey(x.value)) forceText(x.value);
             }
         });
         // 固定 ID 列表经“ID 拼英文名”函数变成选项：PRIVACY_MODES.map(r => prettier(r)) → Public / Private / Whitelist

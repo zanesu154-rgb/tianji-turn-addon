@@ -1652,6 +1652,25 @@ console.log(JSON.stringify(calls));`;
         const vals = [...NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString())].filter(([k]) => /script\.cv\./.test(k)).map(([, v]) => v);
         check('Molang、竖线数据记录、按键枚举不提取；带竖线的 HUD 文字照常', vals.length === 1 && vals[0] === '§6Ground Zero §8| §fFlying', JSON.stringify(vals));
     }
+    {
+        // 直接在表达式里把 typeId 拼成名字 → 套 H；拼进括号里的固定小词（head / chest）登记并在运行时逐段翻译
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/ce.js',Buffer.from(`import { ActionFormData } from "@minecraft/server-ui";
+const E = { frost: { name: "Frost Guard", types: ["head", "chest", "legs", "feet"] }, vit: { name: "Vitality", types: ["chest"] } };
+function itemLabel(item) { if (!item) return "§7(nothing)"; return "§f" + (item.nameTag ?? item.typeId.replace(/^.*:/, "").replace(/_/g, " ")); }
+export function show(player, item) {
+  const form = new ActionFormData().title("§l§9Armor Enchants").body(\`Holding: \${itemLabel(item)}\\n§7§oGreen = usable on your held item\`);
+  for (const id in E) { const e = E[id]; const slots = e.types.filter(t => ["head", "chest", "legs", "feet"].includes(t));
+    const where = slots.length && slots.length < 4 ? \` §8(\${slots.join("/")})\` : "";
+    form.button(\`§2§l\${e.name}§r\${where}\\n§7Max II\`); }
+  form.show(player);
+}`));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const js = mm.files.get('BP/scripts/ce.js').toString();
+        const rt = new Function(js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const a = JSON.stringify(rt.T(' §8(head/legs)')), b = JSON.stringify(rt.T('§f' + rt.H('minecraft:netherite_boots', 'netherite boots')));
+        check('表达式里拼的物品名套 H；括号里斜杠分隔的固定小词逐段翻译', js.includes('__i18n.H(item.typeId,') && /"translate":"script\.ce\.word[_\d]*"\},\{"text":"\/"\},\{"translate"/.test(a) && b.includes('item.netherite_boots.name'), a + ' ' + b);
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
