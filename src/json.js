@@ -53,14 +53,27 @@
                     const atEnd = start + t.length >= text.length || li < lines.length - 1;
                     if (!m || !/\p{L}{3,}/u.test(m[2]) || !looksLikeText(m[2], 'loose') || (!atEnd && !/^\s/.test(m[3]))) return t;
                     changed = true;
-                    return m[1] + '%' + ctx.alloc(n++ ? `${baseKey}.text${n}` : `${baseKey}.text`, m[2], meta) + m[3];
+                    // 游戏解析文字里的 %键 时遇到冒号就断开（%item.ntk:x.name.text 只认出 item.ntk），新键名不能带冒号
+                    const want = (n++ ? `${baseKey}.text${n}` : `${baseKey}.text`);
+                    const safe = want.replace(/:/g, '.');
+                    const k = ctx.alloc(safe, m[2], meta);
+                    if (safe !== want && ctx.knownKeys.has(want)) ctx.keyCopies.set(k, want);
+                    return m[1] + '%' + k + m[3];
                 }).join('\n');
             };
             for (const mm of text.matchAll(REF)) {
-                ctx.ref(mm[0].slice(1), meta.file);
+                let ref = mm[0].slice(1);
+                // 以前生成的带冒号的 %键（游戏认不出）：换成不带冒号的键，各语言的值照抄过去
+                if (ref.includes(':') && ctx.knownKeys.has(ref) && /\.text\d*$/.test(ref)) {
+                    const safe = ref.replace(/:/g, '.');
+                    ctx.keyCopies.set(safe, ref);
+                    ref = safe;
+                    changed = true;
+                }
+                ctx.ref(ref, meta.file);
                 const piece = text.slice(last, mm.index);
                 out += seg(piece);
-                out += mm[0];
+                out += '%' + ref;
                 last = mm.index + mm[0].length;
             }
             out += seg(text.slice(last));
