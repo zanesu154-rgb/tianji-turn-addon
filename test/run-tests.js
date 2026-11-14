@@ -1706,6 +1706,17 @@ export function show(player, item) {
         const sec = ja.split('从其他语言补全（待翻译）')[1] || '';
         check('目标语言里和原文一字不差的句子移到待翻译段', sec.includes('eb.body=What are you playing on?') && (ja.match(/eb\.body=/g) || []).length === 1 && !sec.includes('eb.brand='), ja.slice(-300));
     }
+    {
+        // `${DOT} ${A}Settings${R}`：两头都是变量、中间一个词的句式不做模糊匹配，否则会吞掉整段正文
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/guide.js', Buffer.from('import { ActionFormData } from "@minecraft/server-ui";\nconst A = "§e", R = "§r", DOT = "•";\nexport const PAGES = [`${DOT} ${A}Settings${R}`, "Keep the defaults. Settings has this again later."];\nexport function show(p, body) { new ActionFormData().body(body).show(p); }\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const js = mm.files.get('BP/scripts/guide.js').toString();
+        const rt = new Function(js.slice(0, js.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const r = JSON.stringify(rt.M('Keep the defaults. Settings has this again later.'));
+        const d = JSON.stringify(rt.M('• §eSettings§r'));
+        check('一个词的开放句式不吞整句；单独的词逐段翻译', /^\{"rawtext":\[\{"translate":"script\.guide\.str[_\d]*"\}\]\}$/.test(r) && /translate/.test(d), r + ' ' + d);
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

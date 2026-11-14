@@ -1094,6 +1094,9 @@
     }
     for (const [k, lits, ord] of pats) {
       if (!srcPat.has(k)) srcPat.set(k, [lits, ord]);
+      // 两头都是占位符、中间只有一个词的句式（"%1$s %2$sSettings%3$s"）会吞掉整段正文：不参与模糊匹配
+      const wd = lits.join(" ").replace(/\\u00a7./g, " ").match(/\\p{L}[\\p{L}'’-]*/gu) || [];
+      if (lits.length > 2 && !/\\p{L}/u.test(lits[0]) && !/\\p{L}/u.test(lits[lits.length - 1]) && wd.length <= 1 && !/[^\\s\\p{L}'’-]/u.test(lits.join("").replace(/\\u00a7./g, ""))) continue;
       const len = lits.join("").length;
       p.push([k, new RegExp("^" + lits.map(esc).join("([\\\\s\\\\S]*?)") + "$"), len, ord, lits]);
     }
@@ -2368,6 +2371,13 @@
                 for (const p of line) {
                     if ('lit' in p) lits[lits.length - 1] += p.lit;
                     else lits.push('');
+                }
+                // `${DOT} ${A}Settings${R}`：两头都是变量、中间只有一个词的句式能匹配几乎任何含这个词的文字，
+                // 运行时会把整段正文吞进占位符；只登记这个词本身（显示时按分隔符逐段翻译）
+                const words = lits.join(' ').replace(/\u00a7./g, ' ').match(/\p{L}[\p{L}'’-]*/gu) || [];
+                if (!/\p{L}/u.test(lits[0]) && !/\p{L}/u.test(lits[lits.length - 1]) && words.length <= 1 && !/[^\s\p{L}'’-]/u.test(lits.join('').replace(/\u00a7./g, ''))) {
+                    if (words.length && words[0].length >= 3 && !ctx.isKey(words[0]) && !exact.some(([x]) => x === words[0])) exact.push([words[0], ctx.alloc(keyBase('str'), words[0], meta('str'))]);
+                    continue;
                 }
                 const key = ctx.alloc(keyBase('fmt'), partsToValue(line), meta('fmt'));
                 patterns.push([key, lits]);
