@@ -520,7 +520,7 @@
                 }
                 return { applied, skipped };
             },
-            hiddenCats: new Set(),   // 编辑器里取消勾选的类别：不显示、不导出
+            hiddenCats: new Set(NS.DEFAULT_HIDDEN_CATS),   // 编辑器里取消勾选的类别：不显示、不导出
             workbook() { return makeWorkbook(this); },
         };
     }
@@ -931,7 +931,9 @@
     }
 
     /** 待翻译条目的类别（编辑器筛选与导出共用） */
-    const categoryOf = (u) => u.where.startsWith('/') ? '命令' : /成书|讲台书/.test(u.where) ? '成书' : u.where.replace(/（.*$/, '');
+    const categoryOf = (u) => /scoreboard|addObjective|计分板/i.test(u.where + ' ' + (u.reason || '')) ? '计分板' : u.where.startsWith('/') ? '命令' : /成书|讲台书/.test(u.where) ? '成书' : u.where.replace(/（.*$/, '');
+    // 默认不显示、不导出的类别（计分板名一般不改）：编辑器里勾上即可显示
+    NS.DEFAULT_HIDDEN_CATS = ['计分板'];
 
     function makeWorkbook(session) {
         const { ctx } = session;

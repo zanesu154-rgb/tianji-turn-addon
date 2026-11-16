@@ -1123,7 +1123,7 @@
         const ctxView = Object.create(S ? S.ctx : {});
         ctxView.untranslatable = editorList;
         const session = {
-            records: S ? S.records : [], ctx: ctxView, hiddenCats: S ? S.hiddenCats : new Set(),
+            records: S ? S.records : [], ctx: ctxView, hiddenCats: S ? S.hiddenCats : new Set(NS.DEFAULT_HIDDEN_CATS || []),
             get edits() { return (S ? S.edits : 0) + values.size; },
             set edits(v) { /* 由各自会话计数 */ },
             resolve(ref) {

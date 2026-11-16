@@ -1807,6 +1807,18 @@ export function show(player, item) {
         const vals = [...NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString())].filter(([k]) => /script\.(wall_debug|canon)\./.test(k)).map(([, v]) => v);
         check('调试输出、错误信息、哈希字符串不提取；正常提示照常', vals.length === 1 && vals[0] === 'The cannon is ready to fire.', JSON.stringify(vals));
     }
+    {
+        // 计分板显示名：默认隐藏（不导出），勾选后才显示
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/sb.js', Buffer.from('import { world } from "@minecraft/server";\nexport function f(e) { world.scoreboard.addObjective("kills", "Kill Count"); e.nameTag = "Village Guard"; }\n'));
+        const res = await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const ms = res.manualSession;
+        const cats = ms.ctx.untranslatable.map(u => NS.worldCategoryOf(u));
+        const csv1 = ms.workbook()['untranslatable.csv'];
+        ms.hiddenCats.delete('计分板');
+        const csv2 = ms.workbook()['untranslatable.csv'];
+        check('计分板名默认隐藏，勾选后导出', cats.includes('计分板') && !csv1.includes('Kill Count') && csv1.includes('Village Guard') && csv2.includes('Kill Count'), JSON.stringify(cats));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -159,9 +159,18 @@
         // 类别勾选：取消勾选的类别不显示，也不进入导出的待翻译表（如命令方块名称）
         const catOf = NS.worldCategoryOf;
         const cats = [...new Set(untr.map(catOf))];
-        const HKEY = 'addon-i18n.hiddenCats';
+        const HKEY = 'addon-i18n.hiddenCats', SKEY = 'addon-i18n.shownCats';
+        // 默认隐藏的类别（计分板）：用户勾选过就记住“要显示”
+        let shown = [];
+        try { shown = JSON.parse(localStorage.getItem(SKEY) || '[]'); } catch (e) { /* 无存储 */ }
+        for (const c of NS.DEFAULT_HIDDEN_CATS || []) if (shown.includes(c)) session.hiddenCats.delete(c); else session.hiddenCats.add(c);
         try { for (const c of JSON.parse(localStorage.getItem(HKEY) || '[]')) if (cats.includes(c)) session.hiddenCats.add(c); } catch (e) { /* 无存储 */ }
-        const saveHidden = () => { try { localStorage.setItem(HKEY, JSON.stringify([...session.hiddenCats])); } catch (e) { /* 无存储 */ } };
+        const saveHidden = () => {
+            try {
+                localStorage.setItem(HKEY, JSON.stringify([...session.hiddenCats].filter(c => !(NS.DEFAULT_HIDDEN_CATS || []).includes(c))));
+                localStorage.setItem(SKEY, JSON.stringify((NS.DEFAULT_HIDDEN_CATS || []).filter(c => !session.hiddenCats.has(c))));
+            } catch (e) { /* 无存储 */ }
+        };
         const catBox = el('div', { class: 'nbt-cats' }, el('span', { class: 'nbt-cats-title', text: L('e_cats') }),
             ...cats.map(c => {
                 const cb = el('input', { type: 'checkbox' });
