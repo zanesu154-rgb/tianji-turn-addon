@@ -2238,10 +2238,19 @@
             }
             return false;
         };
+        // const COMMAND = "function flamethrower"; … runCommand(COMMAND)：拿去执行的命令
+        // 只认名字唯一、不像压缩后短名的变量（压缩过的脚本里 r、n 在不同函数里反复用）
+        const cmdVars = new Set(), declCount = new Map();
+        walk(ast, (n) => {
+            if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier') declCount.set(n.id.name, (declCount.get(n.id.name) || 0) + 1);
+            if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && /^runCommand(Async)?$/.test(propName(n.callee) || '') && n.arguments[0] && n.arguments[0].type === 'Identifier') cmdVars.add(n.arguments[0].name);
+        });
+        for (const v of [...cmdVars]) if (v.length < 4 || declCount.get(v) !== 1) cmdVars.delete(v);
         const isTechPosition = (node) => {
             const p = node.parent;
             if (!p) return false;
             if (inputOwned(node)) return true;
+            if (p.type === 'VariableDeclarator' && p.init === node && p.id.type === 'Identifier' && cmdVars.has(p.id.name)) return true;
             switch (p.type) {
                 case 'ImportDeclaration': case 'ExportAllDeclaration': case 'ExportNamedDeclaration':
                 case 'ImportExpression': case 'TaggedTemplateExpression':

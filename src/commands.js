@@ -224,7 +224,7 @@
         const t = s.trim();
         if (STRONG_COMMANDS.test(t) || WEAK_COMMANDS.test(t)) return true;
         // function 文件路径：function ants_spawner1、/function quests/start
-        if (/^\/?function\s+[\w./-]+$/.test(t) && /[_\/\d]|[a-z][A-Z]/.test(t.split(/\s+/)[1])) return true;
+        if (/^\/?function\s+[\w./-]+$/.test(t) && /[_\/\d]|[a-z][A-Z]|^[a-z]+$/.test(t.split(/\s+/)[1])) return true;
         const m = ALL_COMMANDS.exec(t);
         if (!m) return false;
         // 子命令关键字：event entity …、camera @s set …、loot spawn …、time set …
