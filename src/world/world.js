@@ -952,7 +952,15 @@
                     if (u.ref) g.refs.push(u.ref);
                     if (!g.files.includes(u.file)) g.files.push(u.file);
                 }
-                return out.map(g => [g.refs.join(';'), g.files.length > 1 ? `${g.files[0]} 等 ${g.files.length} 处` : g.files[0], g.u.where, g.u.text, g.u.reason, g.refs.length || 1, '']);
+                // 已经在网页里改过的，把现在的译文填进 translation 列
+                const curOf = (g) => {
+                    if (!g.refs.length) return '';
+                    const vals = new Set(g.refs.map(r => { try { return session.getText(r); } catch (e) { return null; } }));
+                    if (vals.size !== 1) return '';
+                    const v = [...vals][0];
+                    return v == null || v === g.u.text ? '' : v;
+                };
+                return out.map(g => [g.refs.join(';'), g.files.length > 1 ? `${g.files[0]} 等 ${g.files.length} 处` : g.files[0], g.u.where, g.u.text, g.u.reason, g.refs.length || 1, curOf(g)]);
             })()]),
             [`source_${sourceLang}.lang`]: [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n') + '\n',
             // 存档自带的行为包 / 资源包

@@ -1150,7 +1150,7 @@ console.log(JSON.stringify(calls));`;
         const db3 = await NS.LevelDB.openDb(new Map([...em.files].filter(([p]) => p.startsWith('db/')).map(([p, v]) => [p.slice(3), new Uint8Array(v)])));
         const plain = db3.entries().flatMap(e => { const k = e.key; return (((k.length === 9 || k.length === 13) && k[k.length - 1] === 49) || String.fromCharCode(...k.subarray(0, 11)) === 'actorprefix') ? NS.NBT.readAll(e.value).map(t => NS.NBT.toPlain(t.t, t.v)) : []; });
         check('编辑器：人工修改箱子名写回存档', plain.find(p => p.id === 'Chest').CustomName === 'Mystery Chest');
-        check('编辑器：导入翻译表批量写回', imp.applied === 1 && plain.find(p => p.identifier === 'minecraft:armor_stand').CustomName === 'Can I rename it?');
+        check('编辑器：导入翻译表批量写回', imp.applied === 2 && plain.find(p => p.identifier === 'minecraft:armor_stand').CustomName === 'Can I rename it?');
         const ld = new Uint8Array(em.files.get('level.dat'));
         check('编辑器：改世界名（level.dat + levelname.txt）', NS.NBT.getStr(NS.NBT.readAll(ld.subarray(8))[0].v, 'LevelName') === 'My World (EN)' && em.files.get('levelname.txt') === 'My World (EN)' && new DataView(ld.buffer, ld.byteOffset).getInt32(4, true) === ld.length - 8);
         check('编辑器：数字字段类型校验', typeErr === '需要整数');
@@ -1762,6 +1762,22 @@ export function show(player, item) {
         const zh = { clientSystemInfo: { locale: 'zh-CN' } };
         const a = rt.BL(zh, 'Tournament Announcer'), b = rt.BL(zh, 'Power: 25'), c = rt.BL({ clientSystemInfo: { locale: 'en-US' } }, 'Power: 25');
         check('作者自己的 localizeText：调用处套 BL，中文玩家显示放回的译文', hud.includes('__i18n.BL(player, localizeText(player, "Tournament Announcer"))') && a === '武道会播报员' && b === '力量: 25' && c === 'Power: 25', JSON.stringify([a, b, c]));
+    }
+    {
+        // 附加包需人工翻译：导出时相同原文合并成一行、已改的填进 translation；导入合并行写回所有位置
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/n1.js', Buffer.from('export function a(e){ e.nameTag = "Old Guard"; }\n'));
+        mm.files.set('BP/scripts/n2.js', Buffer.from('export function b(e){ e.nameTag = "Old Guard"; }\n'));
+        const res = await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const ms = res.manualSession;
+        const items = ms.ctx.untranslatable.filter(u => u.text === 'Old Guard');
+        ms.setValue(items[0].ref, '老守卫');
+        const rows = NS.worldParseCsv(ms.workbook()['untranslatable.csv'].slice(1));
+        const h = rows[0], og = rows.filter(r => r[h.indexOf('text')] === 'Old Guard');
+        const okExport = items.length === 2 && og.length === 1 && og[0][h.indexOf('ref')].split(';').length === 2;
+        og[0][h.indexOf('translation')] = '老卫兵';
+        const imp = ms.importCsv(rows.map(r => r.map(x => /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x).join(',')).join('\n'));
+        check('需人工翻译导出合并相同原文；导入合并行写回所有位置', okExport && items.every(u => ms.getText(u.ref) === '老卫兵') && imp.applied === 2, JSON.stringify(og));
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
