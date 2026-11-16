@@ -1779,6 +1779,14 @@ export function show(player, item) {
         const imp = ms.importCsv(rows.map(r => r.map(x => /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x).join(',')).join('\n'));
         check('需人工翻译导出合并相同原文；导入合并行写回所有位置', okExport && items.every(u => ms.getText(u.ref) === '老卫兵') && imp.applied === 2, JSON.stringify(og));
     }
+    {
+        // 先存进常量再 runCommand(常量) 的命令不提取
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/flame.js', Buffer.from('import { world, system } from "@minecraft/server";\nconst COMMAND = "function flamethrower";\nconst MSG = "The flamethrower is overheating!";\nexport function f(player) { player.runCommand(COMMAND); player.sendMessage(MSG); }\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const vals = [...NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString())].filter(([k]) => /script\.flame\./.test(k)).map(([, v]) => v);
+        check('存进常量再执行的命令不提取', !vals.includes('function flamethrower') && vals.includes('The flamethrower is overheating!'), JSON.stringify(vals));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
