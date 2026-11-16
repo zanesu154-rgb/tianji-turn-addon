@@ -1787,6 +1787,16 @@ export function show(player, item) {
         const vals = [...NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString())].filter(([k]) => /script\.flame\./.test(k)).map(([, v]) => v);
         check('存进常量再执行的命令不提取', !vals.includes('function flamethrower') && vals.includes('The flamethrower is overheating!'), JSON.stringify(vals));
     }
+    {
+        // 原版名字的多语言表：葡萄牙语 / 西班牙语写的原版名字也认得出
+        const a = NS.vanillaKeyFor('diamond_sword', 'item', 'Espada de diamante');
+        const b = NS.vanillaKeyFor('minecraft:zombie', 'entity', 'Zumbi');
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/wp2.js', Buffer.from('import { ModalFormData } from "@minecraft/server-ui";\nconst C = {}; C.ICONES = { "Muda de Carvalho": "textures/blocks/sapling_oak", "Meu Ícone": "x" };\nexport function show(p) { const i = Object.keys(C.ICONES); new ModalFormData().dropdown("Ícone", i).show(p); }\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const js = mm.files.get('BP/scripts/wp2.js').toString();
+        check('原版名字多语言表：葡萄牙语原版名也换成游戏自带键', a === 'item.diamond_sword.name' && b === 'entity.zombie.name' && js.includes('["Muda de Carvalho","tile.sapling.oak.name"]'), JSON.stringify([a, b, NS.VANILLA.intl.pt_BR['tile.sapling.oak.name']]));
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
