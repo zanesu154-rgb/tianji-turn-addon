@@ -1125,9 +1125,28 @@
             get notice() { return S ? S.notice : null; },
             get structureChanged() { return S ? S.structureChanged : false; },
             workbook() {
+                // 和编辑器一样：原文、原因、类别都相同的合并成一行（ref 用 ; 连接，导入时一起写回）；
+                // 已经在网页里改过的，把现在的译文填进 translation 列
+                const catOf = (u) => NS.worldCategoryOf ? NS.worldCategoryOf(u) : u.where;
+                const groups = new Map(), out = [];
+                for (const u of list) {
+                    if (session.hiddenCats.has(catOf(u))) continue;
+                    const lim = session.limitOf(u.refs[0]);
+                    const key = lim && lim.auto ? '\u0001' + u.refs[0] : `${u.text}\u0000${u.reason || ''}\u0000${catOf(u)}`;
+                    let g = groups.get(key);
+                    if (!g) { g = { u, refs: [], files: [], count: 0 }; groups.set(key, g); out.push(g); }
+                    g.refs.push(...u.refs);
+                    g.count += u.count || u.refs.length || 1;
+                    if (!g.files.includes(u.file)) g.files.push(u.file);
+                }
+                const curOf = (g) => {
+                    const vals = new Set(g.refs.map(r => session.getText(r)));
+                    if (vals.size !== 1) return '';
+                    const v = [...vals][0];
+                    return v == null || v === g.u.text ? '' : v;
+                };
                 const rows = [['ref', 'file', 'where', 'text', 'reason', 'count', 'translation'],
-                    ...list.filter(u => !session.hiddenCats.has(NS.worldCategoryOf ? NS.worldCategoryOf(u) : u.where))
-                        .map(u => [u.refs.join(';'), u.file, u.where, u.text, u.reason, u.count, ''])];
+                    ...out.map(g => [g.refs.join(';'), g.files.length > 1 ? `${g.files[0]} 等 ${g.files.length} 处` : g.files[0], g.u.where, g.u.text, g.u.reason, g.count, curOf(g)])];
                 return { 'untranslatable.csv': '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n') };
             },
             importCsv(text) {
@@ -1141,7 +1160,11 @@
                 // 表格来自另一次转换（选项不同，序号对不上）：按原文 + 文件找回对应条目
                 const norm = (t) => String(t == null ? '' : t).replace(/\r\n/g, '\n');
                 const byText = new Map();
-                for (const u of fileItems) { const k = u.file + '\u0000' + norm(u.text); if (!byText.has(k)) byText.set(k, []); byText.get(k).push(u.refs[0]); }
+                const byTextAny = new Map();
+                for (const u of fileItems) {
+                    const k = u.file + '\u0000' + norm(u.text); if (!byText.has(k)) byText.set(k, []); byText.get(k).push(u.refs[0]);
+                    const t = norm(u.text); if (!byTextAny.has(t)) byTextAny.set(t, []); byTextAny.get(t).push(u.refs[0]);
+                }
                 for (const r of rows.slice(1)) {
                     const tr = r[iTr];
                     if (!r[iRef] || tr == null || tr === '') { skipped++; continue; }
@@ -1152,7 +1175,8 @@
                         if (!ref.startsWith('F|')) { sRefs.push(ref); continue; }
                         let targets = [ref];
                         if (txt != null && (!byRef.has(ref) || norm(byRef.get(ref).text) !== txt)) {
-                            targets = (iFile >= 0 && byText.get(r[iFile] + '\u0000' + txt)) || [];
+                            // 合并行的 file 是“a.js 等 3 处”：按原文在所有文件里找
+                            targets = (iFile >= 0 && byText.get(r[iFile] + '\u0000' + txt)) || byTextAny.get(txt) || [];
                         }
                         if (!targets.length) { skipped++; continue; }
                         for (const t of targets) { session.setValue(t, tr); applied++; }
