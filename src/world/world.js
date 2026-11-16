@@ -913,7 +913,16 @@
             } else if (ch === '"') q = true;
             else if (ch === ',') { row.push(cell); cell = ''; }
             else if (ch === '\n' || ch === '\r') {
-                if (ch === '\r' && text[i + 1] === '\n') i++;
+                const nl = ch === '\r' && text[i + 1] === '\n' ? 2 : 1;
+                // 别的软件 / 翻译工具填写最后一列（translation）时，多行译文常常没加引号：
+                // 正在最后一列、下一行又不像新的一条（不以 “编号|” 开头）时，当成同一格里的换行
+                const head = rows[0];
+                if (head && row.length === head.length - 1) {
+                    const rest = text.slice(i + nl);
+                    const next = rest.slice(0, rest.search(/\r?\n|$/));
+                    if (rest.trim() && !/^"?[^,"\r\n]*\|/.test(next)) { cell += '\n'; i += nl - 1; continue; }
+                }
+                i += nl - 1;
                 row.push(cell); rows.push(row); row = []; cell = '';
             } else cell += ch;
         }

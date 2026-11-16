@@ -1818,6 +1818,10 @@ export function show(player, item) {
         ms.hiddenCats.delete('计分板');
         const csv2 = ms.workbook()['untranslatable.csv'];
         check('计分板名默认隐藏，勾选后导出', cats.includes('计分板') && !csv1.includes('Kill Count') && csv1.includes('Village Guard') && csv2.includes('Kill Count'), JSON.stringify(cats));
+        // 别的软件填写的翻译表：多行译文没加引号，也能正确读回
+        const csv = 'ref,location,where,text,reason,count,translation\n"92|[3,""book""]",L,讲台书标题,Link,x,1,连接过去\n"328|[5,""pages"",1]",L,第 2 页,"\n\n- After -\nEV = 14",x,1,\n\n- 获得后 -\n期望值 = 14\n"386|[3,""pages"",0]",L,第 1 页,Hi,x,1,你好\n';
+        const rows = NS.worldParseCsv(csv);
+        check('翻译表：没加引号的多行译文按同一格读回', rows.length === 4 && rows[2][6] === '\n\n- 获得后 -\n期望值 = 14' && rows[3][6] === '你好' && rows[1][6] === '连接过去', JSON.stringify(rows.map(r => r[6])));
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
