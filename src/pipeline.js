@@ -82,7 +82,25 @@
         async move(a, b) { const v = this.w.has(a) ? this.w.get(a) : await this.base.readBytes(a); this.w.delete(a); this.gone.add(a); this.w.set(b, v); this.gone.delete(b); }
     }
 
+    /** 原版名字的其他语言表（约 1 MB）：转换时才加载，加载失败就只用英文 */
+    let intlLoading = null;
+    NS.ensureVanillaIntl = function () {
+        if (!NS.VANILLA || NS.VANILLA.intl) return Promise.resolve();
+        if (typeof document === 'undefined') return Promise.resolve();
+        if (!intlLoading) intlLoading = new Promise((resolve) => {
+            const me = document.querySelector('script[src*="src/pipeline.js"]');
+            const v = me ? (me.getAttribute('src').split('?')[1] || '') : '';
+            const el = document.createElement('script');
+            el.src = 'src/vanilla-names-intl.js' + (v ? '?' + v : '');
+            el.onload = () => resolve();
+            el.onerror = () => resolve();
+            document.head.appendChild(el);
+        });
+        return intlLoading;
+    };
+
     async function runPipeline(fs, userOptions = {}, log = () => {}) {
+        await NS.ensureVanillaIntl();
         // 重新转换时只放回了译文 lang（没有上次的原文）：先预演一遍记下这次的分配顺序，
         // 和上次的键整体对齐后再正式转换，避免新版本多 / 少提取几条后译文整体错位
         if (!userOptions._alignDry && !userOptions.alignPlan) {

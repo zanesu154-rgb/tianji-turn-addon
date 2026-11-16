@@ -207,17 +207,25 @@
         if (ns !== 'minecraft') return null;
         const full = id.indexOf(':') >= 0 ? id : 'minecraft:' + id;
         const want = value.replace(/§./g, '').trim().toLowerCase();
-        const ok = (k) => k && V.en[k] && V.en[k].trim().toLowerCase() === want;
+        // 英文或任一种语言的原版名字一致都算（作者用葡萄牙语等写的 "Espada de Diamante"）
+        const ok = (k) => {
+            if (!k) return false;
+            if (V.en[k] && V.en[k].trim().toLowerCase() === want) return true;
+            for (const l in V.intl || {}) { const v = V.intl[l][k]; if (v && v.trim().toLowerCase() === want) return true; }
+            return false;
+        };
         const k1 = kind === 'entity' ? V.ents[full] : (V.ids[full] || V.ents[full]);
         if (ok(k1)) return k1;
         // 旧式 / 自造的写法（appleEnchanted、porkchop_cooked）：按英文名在同类键里找唯一的一个
         if (!vanillaByValue) {
             vanillaByValue = new Map();
-            for (const [k, v] of Object.entries(V.en)) {
+            const addV = (k, v) => {
                 const t = v.trim().toLowerCase();
                 if (!vanillaByValue.has(t)) vanillaByValue.set(t, []);
-                vanillaByValue.get(t).push(k);
-            }
+                if (!vanillaByValue.get(t).includes(k)) vanillaByValue.get(t).push(k);
+            };
+            for (const [k, v] of Object.entries(V.en)) addV(k, v);
+            for (const l in V.intl || {}) for (const [k, v] of Object.entries(V.intl[l])) addV(k, v);
         }
         const pre = kind === 'entity' ? /^entity\./ : kind === 'block' ? /^tile\./ : /^(item|tile)\./;
         const ks = (vanillaByValue.get(want) || []).filter(k => pre.test(k) && /\.name$/.test(k) && !/spawn_egg/.test(k));
@@ -2568,7 +2576,11 @@
             };
             let vRev = null;
             const vanillaKeyOf = (t) => {
-                if (!vRev) { vRev = new Map(); const V = NS.VANILLA; if (V && V.en) for (const [k, v] of Object.entries(V.en)) if (/^(item|tile)\./.test(k) && !vRev.has(v)) vRev.set(v, k); }
+                if (!vRev) {
+                    vRev = new Map();
+                    const V = NS.VANILLA;
+                    if (V && V.en) for (const tb of [V.en, ...Object.values(V.intl || {})]) for (const [k, v] of Object.entries(tb)) if (/^(item|tile)\./.test(k) && !vRev.has(v)) vRev.set(v, k);
+                }
                 return vRev.get(t);
             };
             walk(ast, (n) => {
