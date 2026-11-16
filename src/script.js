@@ -58,6 +58,8 @@
         'transition', 'setState', 'changeState', 'goto', 'gotoState',
         // 按键名（"Jump"、"Sneak"）、动画名
         'getButtonState', 'playAnimation',
+        // 液体类型（"Water"）
+        'canBeDestroyedByLiquidSpread', 'liquidSpreadCausesSpawn', 'canContainLiquid', 'isLiquidBlocking', 'getLiquidType',
     ]);
 
     // 这些属性名对应的值是技术数据
@@ -72,7 +74,7 @@
     const DEBUG_STR = /(^|[^a-z])(debug|dbg)/i;
     const DEBUG_ID = /debug|dbg|^dev(_?mode)?$|devMode|^is_?dev$/i;
     // 整个文件都是调试用（debug.js、dev-tools.js、test/…）
-    const DEBUG_FILE = /(^|\/)(debug|dbg|devtools?|dev[-_]tools?|tests?)(\/|[._-][^\/]*$|\.[cm]?js$)/i;
+    const DEBUG_FILE = /(^|\/)(debug|dbg|devtools?|dev[-_]tools?|tests?)(\/|[._-][^\/]*$|\.[cm]?js$)|(^|\/)[^\/]*[_-](debug|dbg|probe|diag|diagnostics?)([_.-][^\/]*)?\.[cm]?js$/i;
 
     // 这些位置的文本玩家能看到但游戏不支持翻译键 —— 记录到报告
     const UNTRANSLATABLE_ASSIGN = new Set(['nameTag']);
@@ -1319,6 +1321,8 @@
                 // console.warn(`[temperature:${e}]`, …)：调试输出，不算显示
                 const c = n.parent;
                 if (c && c.type === 'CallExpression' && c.callee.type === 'MemberExpression' && c.callee.object.type === 'Identifier' && c.callee.object.name === 'console') return;
+                // debugPearl(owner, `fail: ${reason}`)：调试函数
+                if (c && c.type === 'CallExpression' && c.callee.type === 'Identifier' && DEBUG_ID.test(c.callee.name)) return;
                 const lit = n.quasis.map(q => q.value.cooked || '').join(' ');
                 if (/\bdebug\b/i.test(lit)) return;   // `[Bladeworks Debug] ${x} queued`
                 if (looksLikeText(lit, 'loose') && !looksLikeCommand(n.quasis.map(q => q.value.cooked || '').join('0'))) hit = true;
@@ -1550,13 +1554,44 @@
         // ---- 调试输出：只在调试开关 / 调试标签 / 调试函数下执行的代码，文本不提取 ----
         const debugFile = DEBUG_FILE.test(file);
         const debugMemo = new Map();
+        // logCannon(c, msg) { debugCannon(`… ${msg}`) }：只把参数转给调试函数 / console 的包装函数也算调试输出
+        const debugWrappers = new Set();
+        {
+            // 只认“除了调试输出几乎什么也不做”的小函数：里面的调用只能是 console / 调试函数 / 别的调试包装，
+            // 以及取时间、格式化这类无副作用的调用
+            const PURE_OBJ = /^(system|Math|JSON|Date|String|Number|Object|Array)$/;
+            const PURE_M = /^(toFixed|join|map|filter|slice|toString|padStart|padEnd|trim|floor|round|ceil|stringify|keys|values|entries|has|get|now)$/;
+            const fns = [];
+            walk(ast, (n) => {
+                let name = null, f = null;
+                if (n.type === 'FunctionDeclaration' && n.id) { name = n.id.name; f = n; }
+                else if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && /Function/.test(n.init.type)) { name = n.id.name; f = n.init; }
+                if (!f || DEBUG_ID.test(name) || !f.params.length) return;
+                let con = false, bad = false;
+                const calls = new Set();
+                walk(f.body, (x) => {
+                    if (bad || x.type !== 'CallExpression') return;
+                    const c = x.callee;
+                    if (c.type === 'Identifier') { if (DEBUG_ID.test(c.name)) con = true; else if (!/^(format|fmt|describe|stringify|toStr|round|pad|vec|loc)/i.test(c.name)) calls.add(c.name); }
+                    else if (c.type === 'MemberExpression' && c.object.type === 'Identifier' && c.object.name === 'console') con = true;
+                    else if (c.type === 'MemberExpression' && ((c.object.type === 'Identifier' && PURE_OBJ.test(c.object.name)) || PURE_M.test(propName(c) || ''))) { /* 无副作用 */ }
+                    else bad = true;
+                });
+                if (!bad) fns.push({ name, con, calls });
+            });
+            // logCannonEvery → logCannon → debugCannon：一层层转给调试函数的也算
+            for (let changed = true; changed;) {
+                changed = false;
+                for (const x of fns) if (!debugWrappers.has(x.name) && [...x.calls].every(c => debugWrappers.has(c) || DEBUG_ID.test(c)) && (x.con || [...x.calls].some(c => debugWrappers.has(c)))) { debugWrappers.add(x.name); changed = true; }
+            }
+        }
         const mentionsDebug = (e) => {
             // 不进函数体：foo(() => {…debug…}).then(cb) 不算
             const stack = [e];
             while (stack.length) {
                 const x = stack.pop();
                 if (x.type === 'Literal' && typeof x.value === 'string' && DEBUG_STR.test(x.value)) return true;
-                if (x.type === 'Identifier' && DEBUG_ID.test(x.name)) return true;
+                if (x.type === 'Identifier' && (DEBUG_ID.test(x.name) || debugWrappers.has(x.name))) return true;
                 if (/Function/.test(x.type)) continue;
                 stack.push(...childrenOf(x));
             }
@@ -1592,7 +1627,13 @@
                     // world.getPlayers({tags:["debug"]}).forEach(p => …)、debugLog("…")
                     return c !== p.callee && mentionsDebug(p.callee);
                 case 'FunctionDeclaration': case 'FunctionExpression': case 'ArrowFunctionExpression':
-                    return DEBUG_ID.test(fnName(p));
+                    return DEBUG_ID.test(fnName(p)) || debugWrappers.has(fnName(p));
+                // throw new ReferenceError("…")：开发者看的错误信息
+                case 'NewExpression':
+                    return c !== p.callee && p.callee.type === 'Identifier' && /Error$/.test(p.callee.name);
+                // const errors = { DURABILITY_MISSING: `Item must have …` }：错误信息表
+                case 'VariableDeclarator':
+                    return c === p.init && p.id.type === 'Identifier' && /^(errors?|errs?|error_?messages?|errorMsgs?)$/i.test(p.id.name);
                 case 'BlockStatement': case 'Program': case 'SwitchCase': {
                     // if (!player.hasTag("debug_x")) continue; 之后的语句
                     const list = p.type === 'SwitchCase' ? p.consequent : p.body;
@@ -1716,9 +1757,11 @@
                 for (const e of row) {
                     handled.add(e);
                     const v = valOf(e);
-                    if (!reported.has(v)) { reported.add(v); ctx.report(file, 'HUD 数据包字段', v, '固定长度 ASCII 的 HUD 字段：界面按字符位置截取，非 ASCII 字符会被替换，翻译键放不进去'); }
+                    // 改了就会坏（界面按字符位置截取、只认 ASCII）：不列入“需人工翻译”免得误导，只在日志里说明
+                    reported.add(v);
                 }
             });
+            if (reported.size) ctx.warn(`${file}: ${reported.size} 段文字写进固定长度的 ASCII HUD 字段（界面按字符位置截取），无法翻译也不能改，保持原文`);
         }
         const warnedCollide = new Set();
         const src = source;
@@ -2314,6 +2357,8 @@
                         ? (p.callee.type === 'Identifier' ? p.callee.name : propName(p.callee))
                         : calleeName(p);
                     if (nm && TECH_CALLS.has(nm)) return true;
+                    // hashString(`${dim}:${x}:${y}:${theme}`)：拿去算哈希 / 随机种子的字符串
+                    if (nm && /hash|checksum|crc32|digest|^seed/i.test(nm)) return true;
                     if (p.callee.type === 'MemberExpression' && p.callee.object.type === 'Identifier' && p.callee.object.name === 'console') return true;
                     return false;
                 }

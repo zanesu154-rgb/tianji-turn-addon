@@ -238,9 +238,9 @@ function renderCommand(cmd, lang) {
         const pr = await NS.runPipeline(pm, { baseName: 'fixture' }, () => {});
         const vals = [...pr.ctx.entries.values()].map(e => e.value);
         const un = pr.ctx.untranslatable.filter(u => /ASCII/.test(u.reason)).map(u => u.text);
-        check('ASCII 数据包 HUD：流进字段的文字及对照表同一行不提取，列入无法本地化；聊天文字照常',
+        check('ASCII 数据包 HUD：流进字段的文字及对照表同一行不提取，不列入需人工翻译（改了会坏），日志说明；聊天文字照常',
             !['Sin companero', 'No partner', 'EQUIPO 0/5', 'TEAM 0/5', 'FIND A WILD PAL', 'Parcela lista', 'Plot ready', 'Listo para luchar'].some(t => vals.includes(t))
-            && vals.includes('Your team is full right now') && un.includes('No partner') && un.includes('Parcela lista'), JSON.stringify(vals.filter(v => /[A-Za-z]/.test(v)).slice(-12)));
+            && vals.includes('Your team is full right now') && !un.length && pr.ctx.warnings.some(w => /ASCII HUD/.test(w)), JSON.stringify(vals.filter(v => /[A-Za-z]/.test(v)).slice(-12)));
     }
     {
         // 语言文件黑名单：模板残留条目删除；包里定义了实体 / 引用了键 / 值改过的保留
@@ -1796,6 +1796,16 @@ export function show(player, item) {
         await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
         const js = mm.files.get('BP/scripts/wp2.js').toString();
         check('原版名字多语言表：葡萄牙语原版名也换成游戏自带键', a === 'item.diamond_sword.name' && b === 'entity.zombie.name' && js.includes('["Muda de Carvalho","tile.sapling.oak.name"]'), JSON.stringify([a, b, NS.VANILLA.intl.pt_BR['tile.sapling.oak.name']]));
+    }
+    {
+        // 调试输出：xx_debug.js / xx_probe.js 整个文件、抛出的错误、错误信息表、一层层转给调试函数的包装、算哈希的字符串、调试日志里的参数
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/wall_debug.js', Buffer.from('export function f(p, n) { p.onScreenDisplay.setActionBar(`Debug on | walls ${n}`); p.sendMessage("Wall debug is enabled."); }\n'));
+        mm.files.set('BP/scripts/canon.js', Buffer.from('import { system } from "@minecraft/server";\nconst errors = { MISSING: `Item must have a durability component.` };\nfunction debugCannon(m) { console.warn(m); }\nfunction logCannon(c, msg) { debugCannon(`tick=${system.currentTick} ${msg}`); }\nfunction logEvery(c, k, msg) { logCannon(c, msg); }\nfunction hashString(s) { return s.length; }\nfunction failPearl(o, reason) { debugPearl(o, `fail: ${reason}`); }\nfunction debugPearl(o, m) { console.warn(m); }\n'
+            + 'export function f(p, c, t) { if (!c) throw new ReferenceError("Missing modified structure."); logEvery(c, "k", `cooldown target=${t}`); hashString(`${c}:${t}:jungle`); failPearl(p, "unloaded"); p.sendMessage("The cannon is ready to fire."); return errors; }\n'));
+        await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const vals = [...NS.parseLang(mm.files.get('RP/texts/en_US.lang').toString())].filter(([k]) => /script\.(wall_debug|canon)\./.test(k)).map(([, v]) => v);
+        check('调试输出、错误信息、哈希字符串不提取；正常提示照常', vals.length === 1 && vals[0] === 'The cannon is ready to fire.', JSON.stringify(vals));
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
