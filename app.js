@@ -575,10 +575,10 @@ dropZone.addEventListener('drop', async (e) => {
 })();
 
 (function initCounter() {
-    // 不蒜子填好数字后，画成七段数码管；加载失败（被拦截、离线）时保持隐藏
-    const box = $('visit-counter'), pv = $('busuanzi_value_page_pv'), uv = $('busuanzi_value_site_uv');
+    // Vercount（兼容不蒜子）填好数字后，画成七段数码管；服务没响应（被拦截、离线、服务故障）时显示 --
+    const box = $('visit-counter'), pv = $('vercount_value_page_pv'), uv = $('vercount_value_site_uv');
     //            a  b  c  d  e  f  g
-    const SEG = { 0: '1111110', 1: '0110000', 2: '1101101', 3: '1111001', 4: '0110011', 5: '1011011', 6: '1011111', 7: '1110000', 8: '1111111', 9: '1111011' };
+    const SEG = { 0: '1111110', 1: '0110000', 2: '1101101', 3: '1111001', 4: '0110011', 5: '1011011', 6: '1011111', 7: '1110000', 8: '1111111', 9: '1111011', '-': '0000001' };
     const POLY = [
         '3,1 17,1 14,4 6,4', '18,2 18,16 15,14 15,5', '18,18 18,32 15,29 15,20', '3,33 17,33 14,30 6,30',
         '2,18 5,20 5,29 2,32', '2,2 5,5 5,14 2,16', '3,17 6,15 14,15 17,17 14,19 6,19',
@@ -589,8 +589,8 @@ dropZone.addEventListener('drop', async (e) => {
     };
     // 只画实际位数，数字在各自区域里居中（位数变化时自动居中）
     const draw = (el, text) => {
-        const n = String(text).replace(/\D/g, '') || '0';
-        el.innerHTML = [...n].map(ch => digitSvg(+ch)).join('');
+        const n = String(text).replace(/\D/g, '') || '--';
+        el.innerHTML = [...n].map(ch => digitSvg(ch === '-' ? '-' : +ch)).join('');
         el.setAttribute('aria-label', n);
     };
     let tries = 0;
@@ -600,7 +600,12 @@ dropZone.addEventListener('drop', async (e) => {
             draw($('led-uv'), uv.textContent);
             box.hidden = false;
             clearInterval(timer);
-        } else if (++tries > 30) clearInterval(timer);
+        } else if (++tries > 30) {
+            clearInterval(timer);
+            draw($('led-pv'), '');
+            draw($('led-uv'), '');
+            box.hidden = false;
+        }
     }, 500);
 })();
 
