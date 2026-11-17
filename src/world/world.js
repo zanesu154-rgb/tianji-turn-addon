@@ -998,7 +998,7 @@
                 if (!f.startsWith(rootDir + 'behavior_packs/') || !/\.(mcfunction|json|js)$/i.test(f)) continue;
                 let t; try { t = await fs.readText(f); } catch (e) { continue; }
                 // 脚本：按名字判断实体的地方（nameTag === "旧名"、getEntities({ name })……）和字符串里的命令一起改
-                const r = /\.js$/i.test(f) && NS.renameNameRefsInScript ? NS.renameNameRefsInScript(t, session.renames) : NS.renameSelectorNames(t, session.renames);
+                const r = /\.js$/i.test(f) && NS.renameNameRefsInScript ? NS.renameNameRefsInScript(t, session.renames) : /\.json$/i.test(f) ? NS.renameNamesInJsonText(t, session.renames) : NS.renameSelectorNames(t, session.renames);
                 if (r.n) { fs.writeText(f, r.text); n += r.n; }
             }
             if (n) log(`[实体名] 改了 ${session.renames.size} 个实体的名字，命令和脚本里按名字找实体的地方同步修改 ${n} 处`);

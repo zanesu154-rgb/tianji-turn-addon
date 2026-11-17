@@ -1243,7 +1243,7 @@
                     for (const f of fs.list()) {
                         if (!/\.(mcfunction|json|m?js)$/i.test(f) || /(^|\/)texts\//.test(f)) continue;
                         let t; try { t = await fs.readText(f); } catch (e) { continue; }
-                        const r = /\.m?js$/i.test(f) && NS.renameNameRefsInScript ? NS.renameNameRefsInScript(t, pairs) : NS.renameSelectorNames(t, pairs);
+                        const r = /\.m?js$/i.test(f) && NS.renameNameRefsInScript ? NS.renameNameRefsInScript(t, pairs) : /\.json$/i.test(f) ? NS.renameNamesInJsonText(t, pairs) : NS.renameSelectorNames(t, pairs);
                         if (r.n) { fs.writeText(f, r.text); renamed += r.n; }
                     }
                     for (const [o, v] of want) { if (v === o) appliedNames.delete(o); else appliedNames.set(o, v); }

@@ -1483,6 +1483,17 @@ console.log(JSON.stringify(calls));`;
         check('实体改名：命令选择器 name= 同步（引号 / 转义 / !）且不误改普通文字', a.n === 2 && a.text.includes('name="鲍勃"') && a.text.includes('name="老人"') && b.n === 1 && b.text.includes('name=\\"老人\\"') && c.n === 0, JSON.stringify([a, b, c]));
     }
     {
+        // summon 生成的实体名也要跟着改，不然 @e[name=新名] 找不到后来生成的实体（后室房间生成链断掉）
+        const R = new Map([['room', '房间'], ['button', '按钮']]);
+        const a = NS.renameSelectorNames('execute as @e[tag=use] at @s unless entity @e[name="房间",r=2] run summon armor_stand room ~9~~9', R);
+        const b = NS.renameSelectorNames('summon chicken ~~1.5~ ~~ a button', R);
+        const c = NS.renameSelectorNames('summon zombie ~ ~ ~ minecraft:as_baby', new Map([['minecraft:as_baby', 'x']]));
+        const d = NS.renameSelectorNames('tellraw @a {"rawtext":[{"text":"summon armor_stand room"}]}', R);
+        const e = NS.renameNamesInJsonText('{"on_entry":["/summon armor_stand room ~~~"]}', R);
+        check('summon 的名字参数同步改名', a.text.endsWith('summon armor_stand "房间" ~9~~9') && b.text === 'summon chicken ~~1.5~ ~~ a "按钮"' && c.n === 0 && d.n === 0, [a.text, b.text, c.n, d.n]);
+        check('JSON 文件里改名按 JSON 转义', JSON.parse(e.text).on_entry[0] === '/summon armor_stand "房间" ~~~', e.text);
+    }
+    {
         // 存档：编辑器里改实体名 → 生成时命令方块里的 name= 跟着改
         const wm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
         const ws = await NS.openWorld(wm, { baseName: 'w' }, () => {});
