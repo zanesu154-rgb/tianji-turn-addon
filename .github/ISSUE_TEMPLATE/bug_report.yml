@@ -1,0 +1,128 @@
+name: 🐛 Bug report / 问题反馈
+description: Text was missed, wrongly extracted, or the converted pack misbehaves. 文本漏提取、误提取，或转换后的包出问题。
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve **Localizator for MCBE**! One problem per issue makes it much easier to fix.
+        感谢反馈！一个 issue 只报一个问题，修起来会快很多。
+
+        ⚠️ Please **don't attach other creators' add-ons or maps** unless you have their permission — a download link, or just the relevant file / snippet, is enough.
+        ⚠️ 未经作者允许，请**不要直接上传别人的附加包或地图**，给下载链接或只贴出问题的那个文件 / 片段即可。
+
+  - type: input
+    id: version
+    attributes:
+      label: Tool version / 工具版本
+      description: Shown at the bottom of the page, e.g. `v2026.11.17-68`. 页面最底部的版本号。
+      placeholder: v2026.11.17-68
+    validations:
+      required: true
+
+  - type: dropdown
+    id: input
+    attributes:
+      label: What did you convert? / 转换的是什么
+      options:
+        - Add-on (.mcaddon / .zip with BP + RP) / 附加包
+        - Single pack (.mcpack, BP or RP only) / 单个包
+        - World / map (.mcworld) / 存档、地图
+        - Re-conversion of an already converted pack / 重新转换已转换过的包
+        - Other / 其他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Problem type / 问题类型
+      options:
+        - Text not extracted (players still see the original) / 漏提取：游戏里还是原文
+        - Wrongly extracted (IDs, commands, debug logs… ended up in the lang file) / 误提取：ID、命令、调试日志等被提取
+        - Shows a raw key in game (e.g. script.xxx.str_3) / 游戏里显示成键名
+        - Converted pack is broken (script error, UI broken, feature stops working) / 转换后包坏了（脚本报错、界面失效、功能失灵）
+        - Translations lost or misaligned after re-conversion / 重新转换后译文丢失或错位
+        - Translation sheet / editor (import, export, manual translation) / 翻译表、编辑器（导入导出、需人工翻译）
+        - Website itself (won't load, button does nothing…) / 网页本身（打不开、按钮没反应等）
+        - Other / 其他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: filetype
+    attributes:
+      label: Where does the text come from? / 出问题的文本在哪类文件里
+      multiple: true
+      options:
+        - Script (.js) / 脚本
+        - JSON UI (ui/*.json) / 界面
+        - Item / block / entity JSON / 物品、方块、实体
+        - Dialogue (dialogue/*.json) / NPC 对话
+        - Function / command (.mcfunction, command blocks) / 函数、命令、命令方块
+        - Lang file (texts/*.lang) / 语言文件
+        - Structure / world data (.mcstructure, book, sign, name tag) / 结构、存档数据（书、告示牌、名称）
+        - Loot table / trade table / 战利品表、交易表
+        - Not sure / 不确定
+
+  - type: textarea
+    id: location
+    attributes:
+      label: File and code / 文件和代码
+      description: |
+        Path inside the pack and the relevant snippet (a few lines around it is ideal). Or the lang line in question.
+        包里的路径和相关代码（前后几行最好），或者有问题的 lang 行。
+      placeholder: |
+        BP/scripts/ui/menu.js
+        form.button(`${active ? "§a> " : ""}${mode.label}`)
+      render: javascript
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result / 预期结果
+      description: What should have happened? 应该是什么样？
+      placeholder: '"Disable" should be translated like the other modes.'
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result / 实际结果
+      description: What happened instead? Screenshots from the game are very welcome. 实际是什么样？欢迎附游戏截图。
+      placeholder: 'The selected mode still shows "> Disable" in English.'
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps / 操作步骤
+      description: Options you ticked, whether you put a translated lang back, etc. 勾选了哪些选项、是否放回了翻译好的 lang 等。
+      placeholder: |
+        1. Converted with default options, target languages en_US + zh_CN
+        2. Translated zh_CN.lang, put it back and converted again
+        3. Opened the guide menu in game
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Conversion log / 转换日志
+      description: Click "Download log" after converting and paste the relevant lines (or attach the file). 转换后点“下载日志”，贴出相关几行或附上文件。
+      render: text
+
+  - type: input
+    id: game
+    attributes:
+      label: Minecraft version & platform / 游戏版本和平台
+      placeholder: 1.21.120, Windows / Android / iOS / Xbox …
+
+  - type: textarea
+    id: files
+    attributes:
+      label: Files or links / 文件或链接
+      description: Drag files here (lang, log, a single script, your own pack), or link the add-on page. 可拖入文件，或给出附加包页面链接。
