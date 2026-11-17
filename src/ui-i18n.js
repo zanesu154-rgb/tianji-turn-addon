@@ -95,7 +95,7 @@
             c_chars: '{0} / {1} 字', c_lines: '，{0} / {1} 行', c_autopage: '（超出部分會自動分頁）', c_over: '（超出遊戲限制）',
         },
         en_US: {
-            title: 'Bedrock Add-on Localization Tool',
+            title: 'Localizator for MCBE',
             subtitle: 'Extract player-visible text from Minecraft Bedrock add-ons and worlds, and generate lang files ready for translation',
             ui_lang: 'Language', visits: 'Visits', visitors: 'Visitors',
             mode_addon: 'Add-on', mode_world: 'World',
@@ -136,7 +136,7 @@
             c_chars: '{0} / {1} chars', c_lines: ', {0} / {1} lines', c_autopage: ' (overflow moves to new pages)', c_over: ' (over the game limit)',
         },
         ja_JP: {
-            title: '統合版アドオン翻訳ツール',
+            title: 'Localizator for MCBE',
             subtitle: 'Minecraft 統合版のアドオンやワールドからプレイヤーに見えるテキストを抽出し、多言語翻訳用の lang ファイルを作成します',
             ui_lang: '表示言語', visits: '訪問', visitors: '訪問者',
             mode_addon: 'アドオン', mode_world: 'ワールド',
@@ -177,7 +177,7 @@
             c_chars: '{0} / {1} 文字', c_lines: '、{0} / {1} 行', c_autopage: '（超過分は自動で改ページ）', c_over: '（ゲームの上限を超えています）',
         },
         ko_KR: {
-            title: '베드락 애드온 번역 도구',
+            title: 'Localizator for MCBE',
             subtitle: 'Minecraft 베드락 에디션 애드온과 월드에서 플레이어에게 보이는 텍스트를 추출해 다국어 번역용 lang 파일을 만듭니다',
             ui_lang: '언어', visits: '방문', visitors: '방문자',
             mode_addon: '애드온', mode_world: '월드',
@@ -218,7 +218,7 @@
             c_chars: '{0} / {1}자', c_lines: ', {0} / {1}줄', c_autopage: ' (넘치는 부분은 자동으로 다음 페이지로)', c_over: ' (게임 제한 초과)',
         },
         ru_RU: {
-            title: 'Инструмент локализации аддонов Bedrock',
+            title: 'Localizator for MCBE',
             subtitle: 'Извлекает видимый игроку текст из аддонов и миров Minecraft Bedrock и создаёт lang-файлы для перевода',
             ui_lang: 'Язык', visits: 'Посещения', visitors: 'Посетители',
             mode_addon: 'Аддон', mode_world: 'Мир',

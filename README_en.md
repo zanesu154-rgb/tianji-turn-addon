@@ -1,4 +1,4 @@
-# Bedrock Add-on Localization Tool
+# Localizator for MCBE
 
 English · [简体中文](README.md)
 
