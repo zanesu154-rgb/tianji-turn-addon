@@ -88,6 +88,9 @@ function mountEditor(...args) {
     NS.mountWorldEditor(...args);
 }
 
+/** 固定说明里的词语按界面语言显示（玩家文字不动） */
+const TR = (x) => (NS.LogI18n && NS.LogI18n.term ? NS.LogI18n.term(x) : x);
+
 function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -242,10 +245,10 @@ function renderSummary(res) {
     if (s.inputGroups) html += `<p class="summary-note">${t('n_input', s.inputGroups)}</p>`;
     if (untr.length && !s.world) {
         html += `<details><summary>${t('d_untr', untr.length)}</summary>${list(untr, u =>
-            `<code>${escapeHtml(u.text)}</code> — ${escapeHtml(u.reason)}<br><small>${escapeHtml(u.file)} · ${escapeHtml(u.where)}</small>`)}</details>`;
+            `<code>${escapeHtml(u.text)}</code> — ${escapeHtml(TR(u.reason))}<br><small>${escapeHtml(u.file)} · ${escapeHtml(TR(u.where))}</small>`)}</details>`;
     }
     if (s.warnings.length) {
-        html += `<details><summary>${t('d_warn', s.warnings.length)}</summary>${list(s.warnings, w => escapeHtml(w))}</details>`;
+        html += `<details><summary>${t('d_warn', s.warnings.length)}</summary>${list(s.warnings, w => escapeHtml(NS.LogI18n ? NS.LogI18n.tr(w) : w))}</details>`;
     }
     if (s.missingRefs.length) {
         html += `<details><summary>${t('d_missing', s.missingRefs.length)}</summary>${list(s.missingRefs, ([k, f]) =>

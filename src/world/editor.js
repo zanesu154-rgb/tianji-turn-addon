@@ -9,6 +9,9 @@
     const NS = root.AddonI18n;
     const { T } = NS.NBT;
     const L = (...a) => (NS.UI ? NS.UI.t(...a) : a[0]);   // 界面文字（t 在本文件里是 NBT 类型）
+    const TR = (x) => (NS.LogI18n && NS.LogI18n.term ? NS.LogI18n.term(x) : x);   // 位置说明、原因、类别名按界面语言显示
+    // 记录名里可能有玩家起的名字（结构名、文件名），只翻译工具自己加的前缀
+    const TRL = (x) => String(x).replace(/^(level\.dat（世界设置）|结构 |玩家：(?:本地玩家$)?)/, (m) => TR(m));
     const TYPE_NAME = { 1: 'byte', 2: 'short', 3: 'int', 4: 'long', 5: 'float', 6: 'double', 7: 'byte[]', 8: 'string', 9: 'list', 10: 'compound', 11: 'int[]', 12: 'long[]' };
     const EDITABLE = new Set([T.BYTE, T.SHORT, T.INT, T.LONG, T.FLOAT, T.DOUBLE, T.STRING]);
     const PAGE = 200;
@@ -179,7 +182,7 @@
                     if (cb.checked) session.hiddenCats.delete(c); else session.hiddenCats.add(c);
                     saveHidden(); page = 0; renderManual(); changed();
                 });
-                return el('label', { class: 'opt-check nbt-cat' }, cb, ` ${c}（${untr.filter(u => catOf(u) === c).length}）`);
+                return el('label', { class: 'opt-check nbt-cat' }, cb, ` ${TR(c)} (${untr.filter(u => catOf(u) === c).length})`);
             }));
         const kw = el('input', { class: 'nbt-filter', type: 'search', placeholder: L('e_filter_ph'), spellcheck: 'false' });
         const onlyTodo = el('input', { type: 'checkbox' });
@@ -226,7 +229,7 @@
                 const r = session.resolve(u.ref);
                 const more = g.files.length > 1 ? ` ${L('e_more_files', g.files.length - 1)}` : '';
                 list.append(el('div', { class: 'nbt-row' },
-                    el('div', { class: 'nbt-loc' }, el('b', { text: u.where }), el('span', { text: ` · ${g.files[0]}${more}` }),
+                    el('div', { class: 'nbt-loc' }, el('b', { text: TR(u.where) }), el('span', { text: ` · ${TRL(g.files[0])}${more}` }),
                         g.refs.length > 1 ? el('span', { class: 'nbt-tag-dup', text: L('e_dup', g.refs.length) }) : null),
                     el('div', { class: 'nbt-orig', text: L('e_orig', u.text) }),
                     valueEditor(groupSession(g), u.ref, r.node.t, cur, changed, u.text),
@@ -270,7 +273,7 @@
             if (!hits.length) { results.append(el('p', { class: 'nbt-empty', text: L('e_not_found') })); return; }
             for (const h of hits.slice(0, 300)) {
                 results.append(el('div', { class: 'nbt-row' },
-                    el('div', { class: 'nbt-loc' }, el('b', { text: h.pathText || L('e_root') }), el('span', { class: 'nbt-type', text: TYPE_NAME[h.type] }), el('span', { text: ` · ${h.label}` })),
+                    el('div', { class: 'nbt-loc' }, el('b', { text: h.pathText || L('e_root') }), el('span', { class: 'nbt-type', text: TYPE_NAME[h.type] }), el('span', { text: ` · ${TRL(h.label)}` })),
                     valueEditor(session, h.ref, h.type, h.value, changed),
                 ));
             }
@@ -342,7 +345,7 @@
                 const end = Math.min(roots.length, shown + PAGE);
                 for (; shown < end; shown++) {
                     const { rec, ri, tg } = roots[shown];
-                    renderNode(kids, rec, [ri], tg.t, tg.v, NS.worldRootLabel(rec, ri));
+                    renderNode(kids, rec, [ri], tg.t, tg.v, TRL(NS.worldRootLabel(rec, ri)));
                 }
                 if (shown < roots.length) kids.append(el('button', { class: 'btn btn-secondary btn-sm', text: L('e_more', roots.length - shown), onclick: (e) => { e.target.remove(); more(); } }));
             };
