@@ -1343,6 +1343,8 @@ console.log(JSON.stringify(calls));`;
             if (/[一-鿿]/.test(x)) left.push(x);
         }
         check('日志译成英文后没有残留中文（玩家原文、包名除外）', left.length === 0, left.slice(0, 5).join('\n'));
+        check('界面词语：原因、位置、类别按界面语言显示', NS.LogI18n.term('物品自定义名称不会被游戏翻译', 'en_US') === 'custom item names are not translated by the game' && NS.LogI18n.term('物品名（minecraft:diamond_sword）', 'en_US') === 'item name (minecraft:diamond_sword)' && NS.LogI18n.term('计分板', 'ko_KR') === '점수판' && NS.LogI18n.term('成书第 3 页（自动分页）', 'en_US') === 'written book page 3 (auto-paged)' && NS.LogI18n.term('计分板', 'zh_CN') === '计分板');
+        check('注意事项：HUD 字段提示可翻译', !/[一-鿿]/.test(NS.LogI18n.tr('a.js: 3 段文字写进固定长度的 ASCII HUD 字段（界面按字符位置截取），无法翻译也不能改，保持原文', 'en_US')));
         check('日志繁体：按字转换且不改玩家原文', NS.LogI18n.tr('[需人工处理] world 物品名（x）: 这个书', 'zh_TW') === '[需人工處理] world 物品名（x）: 这个书' && NS.LogI18n.tr('[脚本] a.js（静态改写 1 处，运行时登记 2 条，合并自带多语言 5 条）', 'zh_TW').includes('合併'));
     }
     {
