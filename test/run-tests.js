@@ -1823,6 +1823,18 @@ export function show(player, item) {
         const rows = NS.worldParseCsv(csv);
         check('翻译表：没加引号的多行译文按同一格读回', rows.length === 4 && rows[2][6] === '\n\n- 获得后 -\n期望值 = 14' && rows[3][6] === '你好' && rows[1][6] === '连接过去', JSON.stringify(rows.map(r => r[6])));
     }
+    {
+        // 编辑器勾了“只看未修改”：导出的需人工翻译表也只含还没改过的
+        const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        mm.files.set('BP/scripts/todo.js', Buffer.from('export function a(e){ e.nameTag = "Old Guard"; }\nexport function b(e){ e.nameTag = "Young Guard"; }\n'));
+        const res = await NS.runPipeline(mm, { baseName: 'fixture' }, () => {});
+        const ms = res.manualSession;
+        ms.setValue(ms.ctx.untranslatable.find(u => u.text === 'Old Guard').ref, '老守卫');
+        const all = ms.workbook()['untranslatable.csv'];
+        ms.exportOnlyTodo = true;
+        const todo = ms.workbook()['untranslatable.csv'];
+        check('勾了只看未修改时导出只含未改过的', all.includes('Old Guard') && all.includes('Young Guard') && !todo.includes('Old Guard') && todo.includes('Young Guard'), todo);
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
