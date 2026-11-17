@@ -1163,8 +1163,9 @@
                     const v = [...vals][0];
                     return v == null || v === g.u.text ? '' : v;
                 };
+                const todo = (g) => !session.exportOnlyTodo || g.refs.some(r => session.getText(r) === g.u.text);
                 const rows = [['ref', 'file', 'where', 'text', 'reason', 'count', 'translation'],
-                    ...out.map(g => [g.refs.join(';'), g.files.length > 1 ? `${g.files[0]} 等 ${g.files.length} 处` : g.files[0], g.u.where, g.u.text, g.u.reason, g.count, curOf(g)])];
+                    ...out.filter(todo).map(g => [g.refs.join(';'), g.files.length > 1 ? `${g.files[0]} 等 ${g.files.length} 处` : g.files[0], g.u.where, g.u.text, g.u.reason, g.count, curOf(g)])];
                 return { 'untranslatable.csv': '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n') };
             },
             importCsv(text) {

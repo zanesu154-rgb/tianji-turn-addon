@@ -971,7 +971,9 @@
                     const v = [...vals][0];
                     return v == null || v === g.u.text ? '' : v;
                 };
-                return out.map(g => [g.refs.join(';'), g.files.length > 1 ? `${g.files[0]} 等 ${g.files.length} 处` : g.files[0], g.u.where, g.u.text, g.u.reason, g.refs.length || 1, curOf(g)]);
+                // 编辑器勾了“只看未修改”：所有位置都已改过的不导出
+                const todo = (g) => !session.exportOnlyTodo || !g.refs.length || g.refs.some(r => { try { return session.getText(r) === g.u.text; } catch (e) { return true; } });
+                return out.filter(todo).map(g => [g.refs.join(';'), g.files.length > 1 ? `${g.files[0]} 等 ${g.files.length} 处` : g.files[0], g.u.where, g.u.text, g.u.reason, g.refs.length || 1, curOf(g)]);
             })()]),
             [`source_${sourceLang}.lang`]: [...ctx.entries].map(([k, e]) => `${k}=${NS.toLangValue(e.value)}`).join('\n') + '\n',
             // 存档自带的行为包 / 资源包

@@ -240,7 +240,8 @@
             );
         };
         let ft;
-        onlyTodo.addEventListener('change', () => { page = 0; renderManual(); });
+        // 勾了“只看未修改”时，导出的翻译表也只含还没改过的
+        onlyTodo.addEventListener('change', () => { session.exportOnlyTodo = onlyTodo.checked; page = 0; renderManual(); });
         mergeSame.addEventListener('change', () => { page = 0; renderManual(); });
         kw.addEventListener('input', () => { clearTimeout(ft); ft = setTimeout(() => { page = 0; renderManual(); }, 200); });
         manual.append(
