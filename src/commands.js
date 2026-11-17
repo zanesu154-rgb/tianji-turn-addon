@@ -249,8 +249,32 @@
      * @returns {{ text: string, n: number }}
      */
     function renameSelectorNames(text, renames) {
-        if (!renames || !renames.size || typeof text !== 'string' || text.indexOf('name') < 0 || text.indexOf('@') < 0) return { text, n: 0 };
+        if (!renames || !renames.size || typeof text !== 'string') return { text, n: 0 };
+        const hasSel = text.indexOf('name') >= 0 && text.indexOf('@') >= 0, hasSummon = /\bsummon\s/i.test(text);
+        if (!hasSel && !hasSummon) return { text, n: 0 };
         let n = 0;
+        const quote = (nv, q, esc) => (q || /[\s,\]=!"@\[]/.test(nv) || /[^\x21-\x7e]/.test(nv) ? (esc ? `\\"${nv}\\"` : `"${nv}"`) : nv);
+        // summon 生成的实体名：summon <类型> <名字> [坐标] 或 summon <类型> [坐标] [朝向] [生成事件] <名字>
+        // 只改名字参数，不然 @e[name=新名] 找不到后来生成的实体
+        const summonFix = (src) => src.replace(/(?<!"(?:text|translate)"\s*:\s*\\?")(?<=^|[\s/"'`\[,(])(summon\s+[\w:.-]+)((?:[ \t]+(?:\\"(?:[^"\\\n]|\\[^"])*\\"|"[^"\n]*"|@[aeprsvc]\s*\[[^\]\n]*\]|[^\s"\\]+))*)/gi, (all, head, rest) => {
+            const toks = [];
+            rest.replace(/([ \t]+)(\\"(?:[^"\\\n]|\\[^"])*\\"|"[^"\n]*"|@[aeprsvc]\s*\[[^\]\n]*\]|[^\s"\\]+)/g, (m, sp, tk) => { toks.push([sp, tk]); return m; });
+            const coord = (t) => /^(?:[~^]?-?\d*\.?\d*)+$/.test(t) && /[~^\d]/.test(t);
+            const cand = toks.map((t, i) => i).filter(i => { const t = toks[i][1]; return !coord(t) && !/^facing$/i.test(t) && !t.startsWith('@'); });
+            if (!cand.length) return all;
+            let at = -1;
+            if (cand[0] === 0) at = 0;                      // summon <类型> <名字> [坐标]
+            else if (cand.length >= 2) at = cand[cand.length - 1];   // …… <生成事件> <名字>
+            if (at < 0) return all;
+            const tk = toks[at][1], esc = tk.startsWith('\\"'), q = esc || tk.startsWith('"');
+            const raw = esc ? tk.slice(2, -2) : q ? tk.slice(1, -1) : tk;
+            if (!renames.has(raw)) return all;
+            n++;
+            toks[at][1] = quote(renames.get(raw), q, esc);
+            return head + toks.map(([sp, t]) => sp + t).join('');
+        });
+        text = hasSummon ? summonFix(text) : text;
+        if (!hasSel) return { text, n };
         const out = text.replace(/(@[aeprsvc]\s*\[)([^\]]*)\]/g, (all, head, body) => {
             const nb = body.replace(/(\bname\s*=\s*!?\s*)(\\"(?:[^"\\]|\\[^"])*\\"|"(?:[^"\\]|\\.)*"|[^,\]]*)/g, (m, pre, val) => {
                 const esc = val.startsWith('\\"');
@@ -259,8 +283,7 @@
                 if (!renames.has(raw)) return m;
                 const nv = renames.get(raw);
                 n++;
-                const needQ = q || /[\s,\]=!"@\[]/.test(nv) || /[^\x21-\x7e]/.test(nv);
-                return pre + (needQ ? (esc ? `\\"${nv}\\"` : `"${nv}"`) : nv);
+                return pre + quote(nv, q, esc);
             });
             return head + nb + ']';
         });
@@ -268,6 +291,19 @@
     }
 
     NS.renameSelectorNames = renameSelectorNames;
+    /** JSON 文件：逐个字符串解码后再改（新名字要加引号时按 JSON 转义，不会弄坏文件） */
+    NS.renameNamesInJsonText = (text, renames) => {
+        let n = 0;
+        const out = text.replace(/"(?:[^"\\\n]|\\.)*"/g, (lit) => {
+            if (!/name|summon/i.test(lit)) return lit;
+            let v; try { v = JSON.parse(lit); } catch (e) { return lit; }
+            const r = renameSelectorNames(v, renames);
+            if (!r.n) return lit;
+            n += r.n;
+            return JSON.stringify(r.text);
+        });
+        return { text: out, n };
+    };
     NS.translateCommand = translateCommand;
     NS.looksLikeCommand = looksLikeCommand;
     NS.findCommandStart = findCommandStart;
