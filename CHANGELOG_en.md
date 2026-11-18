@@ -128,8 +128,8 @@ Grouped by date; each day shows the last version of that day (the current versio
 ### Improved
 
 - The sheet includes keys that exist in the pack but have no translation yet ([#67](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/67))
-- Bedrock Reimagined: crosshair block names, hover tips, quest screens and rewards ([#72](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/72), [#73](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/73), [#76](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/76))
-- RPG++: [object Object], action bar, item descriptions and formatted text ([#62](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/62), [#65](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/65), [#66](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/66))
+- Missed text in crosshair block names, UI hover tips, quest screens and reward item names ([#72](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/72), [#73](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/73), [#76](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/76))
+- RPG-style scripts: text showing as [object Object], action bar, item descriptions, colour codes in formatted text ([#62](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/62), [#65](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/65), [#66](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/66))
 - Script dictionary entries reuse existing keys with the same text in the resource pack lang ([#63](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/63))
 
 ### Fixed
@@ -170,7 +170,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 ### Fixed
 
 - The page froze after analysing large worlds with thousands of entries ([#38](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/38))
-- YTAUN Skill Tree: ternaries, joined lists and stat lines were missed ([#32](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/32), [#33](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/33), [#34](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/34), [#35](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/35))
+- Text in ternaries, joined lists and skill panel stat lines were missed ([#32](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/32), [#33](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/33), [#34](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/34), [#35](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/35))
 - Templates that build translation keys were extracted ([#36](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/36))
 - Error message when page files are partially loaded; write-back path for root-level structure packs ([#41](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/41))
 
@@ -186,7 +186,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
-- Bedrock Reimagined: per-language script dictionaries were not separated ([#28](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/28), [#30](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/30))
+- Script dictionaries registered per language were not separated ([#28](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/28), [#30](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/30))
 - %key references, keys with accented letters and commands like event entity were extracted as text ([#25](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/25), [#26](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/26), [#27](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/27), [#31](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/31))
 
 ## 2026.11.07-21 (2026-11-07)
