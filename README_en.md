@@ -4,7 +4,7 @@ English · [简体中文](README.md)
 
 Extracts the player-visible text from Minecraft Bedrock **add-ons** and **worlds**, replaces it with translation keys, and generates `.lang` files. Once the lang files are translated, the same add-on or map shows text in each player's game language.
 
-**Use it online:** <https://zanesu154-rgb.github.io/tianji-turn-addon/>
+**Use it online:** <https://zanesu154-rgb.github.io/tianji-turn-addon/> · [Changelog](CHANGELOG_en.md)
 
 - A pure web tool: everything runs in your browser and **files are never uploaded** to any server
 - Works on phones and computers; the interface is available in 简体中文, 繁體中文, English, 日本語, 한국어 and Русский

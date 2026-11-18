@@ -562,6 +562,11 @@ dropZone.addEventListener('drop', async (e) => {
     });
     const refresh = () => {
         if (bakeWrap) bakeWrap.hidden = NS.UI.lang !== 'zh_CN';
+        const ver = $('app-version');
+        if (ver) {   // 版本号链到更新日志：中文界面看中文版，其他看英文版
+            ver.href = `https://github.com/zanesu154-rgb/tianji-turn-addon/blob/main/${/^zh/.test(NS.UI.lang) ? 'CHANGELOG.md' : 'CHANGELOG_en.md'}`;
+            ver.title = NS.UI.t('changelog');
+        }
         $('footer-by').innerHTML = escapeHtml(NS.UI.t('footer_by', '\u0000')).replace('\u0000', '<a href="https://github.com/zanesu154-rgb" target="_blank" rel="noopener">栈主</a>');
         setMode(mode);
         progressText.textContent = NS.UI.t(...progressKey);

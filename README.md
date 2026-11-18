@@ -4,7 +4,7 @@
 
 把 Minecraft 基岩版**附加包**和**世界存档**里玩家能看到的文字提取出来，换成翻译键，生成 `.lang` 语言文件。翻译好 lang 文件后，同一个附加包 / 地图就能按玩家的游戏语言显示。
 
-**在线使用：** <https://zanesu154-rgb.github.io/tianji-turn-addon/>
+**在线使用：** <https://zanesu154-rgb.github.io/tianji-turn-addon/> · [更新日志](CHANGELOG.md)
 
 - 纯网页工具，所有处理都在你的浏览器里完成，**文件不会上传**到任何服务器
 - 手机、电脑都能用；界面支持简体中文、繁體中文、English、日本語、한국어、Русский
