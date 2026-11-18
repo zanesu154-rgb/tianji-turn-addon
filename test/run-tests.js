@@ -1543,6 +1543,20 @@ console.log(JSON.stringify(calls));`;
         } else check('存档：改了实体名，命令方块里的 name= 同步（样例存档缺少实体名或命令）', false);
     }
     {
+        // 物品自定义名称改了：掉落物实体就叫这个名字，@e[type=item,name=旧名] 要跟着改；同一旧名改成不同新名时提醒
+        const wm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
+        const ws = await NS.openWorld(wm, { baseName: 'w' }, () => {});
+        const items = ws.ctx.untranslatable.filter(u => /物品名/.test(u.where) && /display/.test(u.ref));
+        const cmd = ws.search('@', 50).find(x => /Command/.test(x.pathText));
+        if (items.length >= 2 && cmd) {
+            ws.setValue(cmd.ref, `kill @e[type=item,name="${items[1].text}"]`);
+            ws.setValue(items[1].ref, '新名字');
+            const logs = [];
+            await ws.build(new MemFS(new Map(wm.files)), (x, l) => logs.push(x));
+            check('存档：改了物品自定义名称，@e[type=item,name=] 同步', ws.getText(cmd.ref) === 'kill @e[type=item,name="新名字"]' && logs.some(l => /实体 \/ 物品的名字/.test(l)), ws.getText(cmd.ref));
+        } else check('存档：改了物品自定义名称（样例存档缺少物品名或命令）', false);
+    }
+    {
         // 已有名称条目合并：display_name 和 lang 里的默认名称不同 → 沿用默认名称键并更新原文；大小写不同的键也认；
         // 脚本里写的物品名用现成的物品名称键；同 ID 的投掷物实体名沿用物品名的译文
         const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));

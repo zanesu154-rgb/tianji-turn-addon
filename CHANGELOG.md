@@ -4,6 +4,12 @@
 
 [English](CHANGELOG_en.md)
 
+## 2026.11.19-79（2026-11-19）
+
+### 修复
+
+- 存档里改了物品自定义名称后，命令里按名字找掉落物的 `@e[type=item,name=…]` 没跟着改，导致地图逻辑失效 ([#133](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/133))
+
 ## 2026.11.18-78（2026-11-18）
 
 ### 新功能
