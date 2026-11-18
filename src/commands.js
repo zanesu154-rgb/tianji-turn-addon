@@ -98,7 +98,7 @@
         const sels = [];
         const value = text.replace(/%/g, '%%').replace(/@[aeprsvn](?:\[[^\]]*\])?|@initiator/g, (m) => { sels.push({ selector: m }); return `%${sels.length}$s`; });
         const literal = value.replace(/%\d+\$s/g, ' ');
-        if (!NS.looksLikeText(literal) && !NS.isPunctText(literal)) return null;
+        if (!NS.looksLikeText(literal) && !NS.isShownText(literal)) return null;
         const finalValue = sels.length ? value : text;
         const key = ctx.alloc(baseKey, finalValue, meta);
         const node = sels.length ? { translate: key, with: { rawtext: sels } } : { translate: key };
@@ -124,7 +124,7 @@
         const prefix = cmd.substring(0, start);
         const [kwRaw, afterKw] = readWord(cmd, start);
         const kw = kwRaw.toLowerCase();
-        const meta = { file, kind: 'command', scope: 'command', punct: true };   // 命令里的文字都是显示给玩家的，"???" 这类也翻译
+        const meta = { file, kind: 'command', scope: 'command', punct: true };   // 命令里的文字都是显示给玩家的，"???"、"Spawnpoint_Save" 这类也翻译
 
         if (kw === 'title') {
             const tStart = skipWs(cmd, afterKw);
@@ -191,7 +191,7 @@
             const mode = ctx.sayMode || 'keep';
             const conv = mode !== 'keep' ? convertSay(text, target, mode, ctx, baseKey, meta, opts.sender, kw === 'me') : null;
             if (conv) return { cmd: prefix + conv, changed: true };
-            if (NS.looksLikeText(text) || NS.isPunctText(text)) ctx.report(file, `/${kw}`, text, `${kw} 命令不支持翻译键（可在选项中设置转换为 tellraw / titleraw）`);
+            if (NS.looksLikeText(text) || NS.isShownText(text)) ctx.report(file, `/${kw}`, text, `${kw} 命令不支持翻译键（可在选项中设置转换为 tellraw / titleraw）`);
             return { cmd, changed: false };
         }
         if (kw === 'scoreboard') {

@@ -32,6 +32,19 @@
         return /^[?!？！.。…‽¿¡~～]{1,12}$/.test(t) && /[?!？！…‽]|\.\.\./.test(t);
     }
 
+    /** 用下划线连起来的词（"Spawnpoint_Save"、"Level_1_Complete"）：放在命令显示位置时是给玩家看的文字 */
+    function isUnderscoreWords(s) {
+        const t = stripFormatting(String(s)).trim();
+        if (!/^[\p{L}\d]+(?:_[\p{L}\d]+)+$/u.test(t)) return false;
+        const segs = t.split('_').filter(x => /\p{L}/u.test(x));
+        return segs.length >= 2 && segs.some(x => /\p{L}{3,}/u.test(x));
+    }
+
+    /** 命令显示位置（title / tellraw / say）里可以不像句子、但仍然是给玩家看的文字 */
+    function isShownText(s) {
+        return isPunctText(s) || isUnderscoreWords(s);
+    }
+
     function isEmptyText(s) {
         return typeof s !== 'string' || s.trim() === '';
     }
@@ -281,7 +294,7 @@
     }
 
     Object.assign(NS, {
-        stripFormatting, hasCJK, hasLetters, isPunctText, isEmptyText, isLikelyKey,
+        stripFormatting, hasCJK, hasLetters, isPunctText, isUnderscoreWords, isShownText, isEmptyText, isLikelyKey,
         looksLikeCode, looksLikeText,
         hash6, sanitizeKeyPart, sanitizeKey, fileBaseOf, humanizeIdentifier,
         stripBOM, parseLang, toLangValue, fixMixedPlaceholders, pctArgs, pctPlain,
