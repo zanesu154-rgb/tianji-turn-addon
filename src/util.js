@@ -192,6 +192,38 @@
     }
 
     /**
+     * 每个键在 .lang 里的注释：所在分节（上方最近的一段 # 注释行）和行尾注释（\t# / ##）
+     * 补全到其他语言时一起带过去，译者能看到“这是方块”“显示在物品栏”之类的提示
+     */
+    function langNotes(content, skipMark) {
+        const notes = new Map();
+        if (!content) return notes;
+        let section = null, block = [], lastWasComment = false;
+        for (let line of stripBOM(content).split('\n')) {
+            line = line.replace(/\r$/, '');
+            const t = line.trimStart();
+            if (!t) { lastWasComment = false; continue; }
+            if (t.startsWith('#')) {
+                if (skipMark && t.startsWith(skipMark)) { section = null; block = []; lastWasComment = false; continue; }
+                if (!lastWasComment) block = [];
+                block.push(line.trimEnd());
+                section = block.join('\n');
+                lastWasComment = true;
+                continue;
+            }
+            lastWasComment = false;
+            const eq = line.indexOf('=');
+            if (eq <= 0) continue;
+            const key = line.substring(0, eq).trim();
+            const value = line.substring(eq + 1);
+            const cut = [value.indexOf('##'), value.indexOf('\t#')].filter(i => i >= 0);
+            const tail = cut.length ? value.substring(Math.min(...cut)).trimEnd() : '';
+            if (key && !notes.has(key)) notes.set(key, { section, tail });
+        }
+        return notes;
+    }
+
+    /**
      * 把文本转换成 lang 值：
      *  - 真换行 → \n（lang 值不能包含真换行）
      *  - ## 和 \t# 会被游戏当作注释，做规避
@@ -297,7 +329,7 @@
         stripFormatting, hasCJK, hasLetters, isPunctText, isUnderscoreWords, isShownText, isEmptyText, isLikelyKey,
         looksLikeCode, looksLikeText,
         hash6, sanitizeKeyPart, sanitizeKey, fileBaseOf, humanizeIdentifier,
-        stripBOM, parseLang, toLangValue, fixMixedPlaceholders, pctArgs, pctPlain,
+        stripBOM, parseLang, langNotes, toLangValue, fixMixedPlaceholders, pctArgs, pctPlain,
         stripJsonCommentsAndCommas, parseJsonLenient, escapeRegex,
     });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

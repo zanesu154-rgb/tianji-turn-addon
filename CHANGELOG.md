@@ -4,7 +4,7 @@
 
 [English](CHANGELOG_en.md)
 
-## 2026.11.18-77（2026-11-18）
+## 2026.11.18-78（2026-11-18）
 
 ### 新功能
 
@@ -12,6 +12,7 @@
 
 ### 改进
 
+- 把缺失的键补全到其他语言文件时，带上英文文件里的分节注释和行尾说明，按原顺序排列 ([#132](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/132))
 - 访问计数改用 Vercount（沿用不蒜子的数字）；服务没响应时显示 --，不再整块消失 ([#125](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/125))
 
 ### 修复
