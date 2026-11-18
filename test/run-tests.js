@@ -179,6 +179,19 @@ function renderCommand(cmd, lang) {
         await NS.runPipeline(fm, { baseName: 'fixture' }, () => {});
         const zl = NS.parseLang(fm.files.get('RP/texts/zh_CN.lang').toString());
         check('  └ 转换时自动修正已有译文中的混用占位符', zl.get('mix.test') === '使用 %2$s 需要 %1$s 的知识' && zl.get('ok.test') === '%s 和 %s' && fm.files.get('RP/texts/zh_CN.lang').toString().startsWith('## 注释 %s %1$s'));
+        {
+            // 补全到其他语言时带上源语言的注释：所在分节、行尾说明
+            const cm = new MemFS(new Map([
+                ['RP/manifest.json', Buffer.from('{"format_version":2,"header":{"name":"rp","uuid":"11111111-1111-1111-1111-111111111111","version":[1,0,0]},"modules":[{"type":"resources","uuid":"11111111-1111-1111-1111-111111111112","version":[1,0,0]}]}')],
+                ['RP/texts/languages.json', Buffer.from('["en_US","zh_CN"]')],
+                ['RP/texts/en_US.lang', Buffer.from('## Items\nitem.t:sword.name=Ruby Sword\t# shown in inventory\n\n## Blocks\ntile.t:ore.name=Ruby Ore\n')],
+                ['RP/texts/zh_CN.lang', Buffer.from('## 物品\n')],
+            ]));
+            await NS.runPipeline(cm, { baseName: 'x' }, () => {});
+            const z = cm.files.get('RP/texts/zh_CN.lang').toString();
+            const fill = z.slice(z.indexOf('从其他语言补全'));
+            check('补全的键带上源语言的分节注释和行尾说明', /\n## Items\nitem\.t:sword\.name=Ruby Sword\t# shown in inventory\n## Blocks\ntile\.t:ore\.name=Ruby Ore/.test(fill) && NS.parseLang(z).get('item.t:sword.name') === 'Ruby Sword', fill);
+        }
     }
     {
         // DLCraft：cancelEvent(..., sourceName = 'item') 把参数拼进提示文字，调用处传 'block'

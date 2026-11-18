@@ -857,6 +857,24 @@
                 }
                 return null;
             };
+            // 补全时带上源语言文件里的注释（所在分节、行尾说明），并按源语言里的顺序排
+            const noteSrcs = [...new Set([sourceLang, 'en_US', ...langs.keys()])].map(l => langs.get(l)).filter(Boolean).map(e => NS.langNotes(e.raw, MARK));
+            const noteOf = (k) => { for (const n of noteSrcs) if (n.has(k)) return n.get(k); return null; };
+            const orderOf = new Map();
+            for (const n of noteSrcs) for (const k of n.keys()) if (!orderOf.has(k)) orderOf.set(k, orderOf.size);
+            const fmtFilled = (lines) => {
+                const rows = lines.map((line, i) => { const k = line.slice(0, line.indexOf('=')).trim(); return { line, k, i, o: orderOf.has(k) ? orderOf.get(k) : Infinity, n: noteOf(k) }; });
+                rows.sort((a, b) => (a.o - b.o) || (a.i - b.i));
+                const out = [];
+                let sec = null;
+                for (const r of rows) {
+                    const s = r.n && r.n.section;
+                    if (s && s !== sec) out.push(s);
+                    sec = s || sec;
+                    out.push(r.n && r.n.tail && !r.line.includes(r.n.tail) ? r.line + r.n.tail : r.line);
+                }
+                return out.join('\n');
+            };
             const allExistingKeys = new Set();
             for (const e of langs.values()) for (const k of e.map.keys()) allExistingKeys.add(k);
             const written = [];
@@ -968,7 +986,7 @@
                 if (!added.length && !filled.length && !fixedN && !junkN && !overN && !aliasN && !tagN && !copyN) { if (e) written.push(lang); continue; }
                 let out = e ? raw.replace(/\s*$/, '\n') : '';
                 if (added.length) out += `\n${MARK} 自动提取（源语言 ${sourceLang}${lang === sourceLang ? '' : '，待翻译'}）\n${added.join('\n')}\n`;
-                if (filled.length) out += `\n${MARK} 从其他语言补全（待翻译）\n${filled.join('\n')}\n`;
+                if (filled.length) out += `\n${MARK} 从其他语言补全（待翻译）\n${fmtFilled(filled)}\n`;
                 const path = e ? e.path : `${texts}/${lang}.lang`;
                 pending.set(path, out);
                 written.push(lang);

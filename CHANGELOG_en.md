@@ -4,7 +4,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.18-77 (2026-11-18)
+## 2026.11.18-78 (2026-11-18)
 
 ### New
 
@@ -12,6 +12,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Improved
 
+- Keys filled into other language files keep the section comments and inline notes from the English file, in the original order ([#132](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/132))
 - The visitor counter now uses Vercount (keeps the old Busuanzi numbers); shows -- instead of disappearing when the service is down ([#125](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/125))
 
 ### Fixed
