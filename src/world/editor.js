@@ -53,7 +53,7 @@
             if (!counter) return;
             const n = input.value.length, lines = input.value.split('\n').length;
             const over = n > limit.max || Boolean(limit.lines && lines > limit.lines);
-            counter.textContent = L('c_chars', n, limit.max) + (limit.lines ? L('c_lines', lines, limit.lines) : '') + (over ? t(limit.auto ? 'c_autopage' : 'c_over') : '');
+            counter.textContent = L('c_chars', n, limit.max) + (limit.lines ? L('c_lines', lines, limit.lines) : '') + (over ? L(limit.auto ? 'c_autopage' : 'c_over') : '');
             counter.classList.toggle('over', over);
         };
         updateCount();
