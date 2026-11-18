@@ -108,6 +108,15 @@ function renderCommand(cmd, lang) {
         const ct = new NS.ExtractContext({}); ct.sayMode = 'titleraw';
         const t1 = NS.translateCommand('say 欢迎 @p 来到村庄', ct, 'k', 'f').cmd;
         check('say → titleraw：选择器变成 %1$s 参数', /^titleraw @a title /.test(t1) && [...ct.entries.values()][0].value === '欢迎 %1$s 来到村庄');
+        {
+            // 只有标点的句子（"???"、"..."）：显示位置照样翻译，各语言写法不同；分隔线之类不算
+            const cp = new NS.ExtractContext({}); cp.sayMode = 'tellraw';
+            const p1 = NS.translateCommand('tellraw @a {"rawtext":[{"text":"§f[Player] "},{"text":"§c???"}]}', cp, 'k', 'f').cmd;
+            const p2 = NS.translateCommand('say ...', cp, 'k2', 'f').cmd;
+            const p3 = NS.translateCommand('tellraw @a {"rawtext":[{"text":"======"}]}', cp, 'k3', 'f');
+            const vals = [...cp.entries.values()].map(e => e.value);
+            check('只有标点的句子（???、...）也提取，分隔线不提取', vals.includes('???') && vals.includes('...') && /"translate"/.test(p1) && /"translate"/.test(p2) && !p3.changed, vals);
+        }
         const ca = new NS.ExtractContext({}); ca.sayMode = 'actionbar';
         check('tell @p → titleraw @p actionbar', /^titleraw @p actionbar /.test(NS.translateCommand('tell @p 小心背后', ca, 'k', 'f').cmd));
         check('say 100% / say @a 不转换', !NS.translateCommand('say 100%', ct, 'k', 'f').changed && !NS.translateCommand('say @a', ct, 'k', 'f').changed);

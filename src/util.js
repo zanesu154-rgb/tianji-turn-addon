@@ -26,6 +26,12 @@
         return /\p{L}/u.test(stripFormatting(s));
     }
 
+    /** 只有问号、感叹号、省略号的句子（"???"、"!!"、"..."、"？！"）：各语言写法不同（？？？ / ¿¡），显示位置照样翻译 */
+    function isPunctText(s) {
+        const t = stripFormatting(String(s)).replace(/\s+/g, '');
+        return /^[?!？！.。…‽¿¡~～]{1,12}$/.test(t) && /[?!？！…‽]|\.\.\./.test(t);
+    }
+
     function isEmptyText(s) {
         return typeof s !== 'string' || s.trim() === '';
     }
@@ -275,7 +281,7 @@
     }
 
     Object.assign(NS, {
-        stripFormatting, hasCJK, hasLetters, isEmptyText, isLikelyKey,
+        stripFormatting, hasCJK, hasLetters, isPunctText, isEmptyText, isLikelyKey,
         looksLikeCode, looksLikeText,
         hash6, sanitizeKeyPart, sanitizeKey, fileBaseOf, humanizeIdentifier,
         stripBOM, parseLang, toLangValue, fixMixedPlaceholders, pctArgs, pctPlain,

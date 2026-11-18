@@ -4,7 +4,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.18-74 (2026-11-18)
+## 2026.11.18-75 (2026-11-18)
 
 ### New
 
@@ -16,6 +16,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
+- Punctuation-only messages ("???", "...") were not extracted, so other languages could not use their own form ([#129](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/129))
 - Processing a world failed with "t is not a function" when a book page went over the length limit ([#126](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/126))
 - Added a site icon; no more favicon.ico 404 in the console ([#124](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/124))
 

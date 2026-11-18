@@ -4,7 +4,7 @@
 
 [English](CHANGELOG_en.md)
 
-## 2026.11.18-74（2026-11-18）
+## 2026.11.18-75（2026-11-18）
 
 ### 新功能
 
@@ -16,6 +16,7 @@
 
 ### 修复
 
+- 只有标点的句子（“???”“...”）没有提取，各语言里显示不了对应的写法 ([#129](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/129))
 - 书页超出字数限制时，存档处理报错“t is not a function” ([#126](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/126))
 - 加网站图标，控制台不再报 favicon.ico 404 ([#124](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/124))
 
