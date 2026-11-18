@@ -99,6 +99,11 @@ function renderCommand(cmd, lang) {
     check('mcfunction 注释行未动', fn.includes('# 注释 title @a title 不要动\r\n'));
     check('mcfunction tag … title 未动', fn.includes('tag @s add title\r\n'));
     check('mcfunction title times 未动', fn.includes('title @a times 10 20 10\r\n'));
+    {
+        // 老式 Mac 换行（只有 \r）的 mcfunction：不报错，按行转换并保留 \r
+        const om = out('BP/functions/old_mac.mcfunction');
+        check('只用 \\r 换行的 mcfunction 也能处理', om && !om.includes('\n') && om.split('\r').length === 4 && /^tellraw /m.test(om.split('\r')[1]) && /^titleraw @a title /.test(om.split('\r')[2]), om);
+    }
     check('mcfunction 缩进与 CRLF 保留', fn.includes('\r\n  execute as @a[tag=vip,scores={x=1..}] at @s run titleraw @s subtitle '));
     {
         const j = [...fn.matchAll(/^tellraw @a (\{.*\})\r$/gm)].map(x => JSON.parse(x[1])).find(x => x.rawtext[0].text === '[');
