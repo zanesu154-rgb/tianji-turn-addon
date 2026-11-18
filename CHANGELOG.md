@@ -4,7 +4,7 @@
 
 [English](CHANGELOG_en.md)
 
-## 2026.11.18-76（2026-11-18）
+## 2026.11.18-77（2026-11-18）
 
 ### 新功能
 
@@ -16,6 +16,7 @@
 
 ### 修复
 
+- 只用 `\r` 换行的 .mcfunction 文件导致存档自带包处理失败（Cannot read properties of null） ([#131](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/131))
 - 命令里用下划线连起来的显示文字（如 “Spawnpoint_Save”）没有提取 ([#130](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/130))
 - 只有标点的句子（“???”“...”）没有提取，各语言里显示不了对应的写法 ([#129](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/129))
 - 书页超出字数限制时，存档处理报错“t is not a function” ([#126](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/126))

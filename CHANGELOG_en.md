@@ -4,7 +4,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.18-76 (2026-11-18)
+## 2026.11.18-77 (2026-11-18)
 
 ### New
 
@@ -16,6 +16,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
+- .mcfunction files using only `\r` line breaks made processing a world's packs fail (Cannot read properties of null) ([#131](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/131))
 - Display text joined with underscores in commands (e.g. "Spawnpoint_Save") was not extracted ([#130](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/130))
 - Punctuation-only messages ("???", "...") were not extracted, so other languages could not use their own form ([#129](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/129))
 - Processing a world failed with "t is not a function" when a book page went over the length limit ([#126](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/126))

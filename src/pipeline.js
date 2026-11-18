@@ -427,14 +427,16 @@
                 const content = await fs.readText(p);
                 const base = `function.${fileBaseOf(p)}.message`;
                 let changed = false;
-                const out = content.split('\n').map(line => {
-                    const m = /^(\s*)(.*?)(\r?)$/.exec(line);
+                // 按行处理，保留原来的换行符（\r\n、\n，以及老式 Mac 的单独 \r）
+                const out = content.split(/(\r\n|\n|\r)/).map((line, i) => {
+                    if (i % 2) return line;
+                    const m = /^(\s*)([^]*?)(\s*)$/.exec(line);
                     if (!m[2] || m[2].startsWith('#')) return line;
                     const r = translateCommand(m[2], ctx, base, p);
                     if (!r.changed) return line;
                     changed = true;
                     return m[1] + r.cmd + m[3];
-                }).join('\n');
+                }).join('');
                 if (changed) { pending.set(p, out); processed++; log(`[函数] ${p}`); }
                 continue;
             }
