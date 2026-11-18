@@ -458,14 +458,25 @@
                     return chunks[0];
                 }
                 // 实体改名：记下旧名 → 新名，生成时同步命令里的 @e[name=旧名]
-                if (r.path[r.path.length - 1] === 'CustomName' && r.node.t === T.STRING) {
+                // 物品自定义名称（tag.display.Name）也算：掉在地上的物品实体就叫这个名字，地图常用 @e[type=item,name=…] 检测
+                const isItemName = r.path.length >= 2 && r.path[r.path.length - 1] === 'Name' && r.path[r.path.length - 2] === 'display';
+                if ((r.path[r.path.length - 1] === 'CustomName' || isItemName) && r.node.t === T.STRING) {
                     const owner = nodeAt(r.rec, r.path.slice(0, -1));
-                    if (owner && owner.t === T.COMPOUND && getStr(owner.v, 'identifier')) {
+                    if (owner && owner.t === T.COMPOUND && (isItemName || getStr(owner.v, 'identifier'))) {
                         if (!this.renames) this.renames = new Map();
                         const old = this.originalNames && this.originalNames.get(ref) != null ? this.originalNames.get(ref) : displayValue(r.node.t, r.node.v);
                         if (!this.originalNames) this.originalNames = new Map();
                         if (!this.originalNames.has(ref)) this.originalNames.set(ref, old);
-                        if (text === old) this.renames.delete(old); else this.renames.set(old, text);
+                        if (text === old) this.renames.delete(old);
+                        else {
+                            // 同一个旧名在不同地方改成了不同的新名：命令只能跟其中一个，提醒一下
+                            const prev = this.renames.get(old);
+                            if (prev != null && prev !== text) {
+                                if (!this.renameConflicts) this.renameConflicts = new Map();
+                                this.renameConflicts.set(old, new Set([...(this.renameConflicts.get(old) || []), prev, text]));
+                            }
+                            this.renames.set(old, text);
+                        }
                     }
                 }
                 r.node.set(parseValue(r.node.t, text));
@@ -1001,7 +1012,8 @@
                 const r = /\.js$/i.test(f) && NS.renameNameRefsInScript ? NS.renameNameRefsInScript(t, session.renames) : /\.json$/i.test(f) ? NS.renameNamesInJsonText(t, session.renames) : NS.renameSelectorNames(t, session.renames);
                 if (r.n) { fs.writeText(f, r.text); n += r.n; }
             }
-            if (n) log(`[实体名] 改了 ${session.renames.size} 个实体的名字，命令和脚本里按名字找实体的地方同步修改 ${n} 处`);
+            if (n) log(`[实体名] 改了 ${session.renames.size} 个实体 / 物品的名字，命令和脚本里按名字找实体的地方同步修改 ${n} 处`);
+            if (session.renameConflicts) for (const [o, set] of session.renameConflicts) log(`[实体名] “${o}”在不同地方改成了不同的名字（${[...set].join(' / ')}），命令里统一按最后一次改的“${session.renames.get(o)}”找，建议改成一致`, 'warn');
         }
 
         // ---- 数据库 ----

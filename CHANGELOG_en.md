@@ -4,6 +4,12 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.19-79 (2026-11-19)
+
+### Fixed
+
+- Renaming custom item names in a world did not update `@e[type=item,name=…]` in commands, breaking map logic ([#133](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/133))
+
 ## 2026.11.18-78 (2026-11-18)
 
 ### New
