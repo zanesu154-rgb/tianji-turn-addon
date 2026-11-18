@@ -408,7 +408,7 @@
             const hasSentinel = /\d+|\d+/.test(text);
             const literalOnly = text.replace(SENTINEL_RE, ' ');
             // mode 'display'：已确定是给玩家看的位置（告示牌、NPC 对话），只要有文字就翻译
-            const textOk = (t) => meta.mode === 'display' ? (NS.hasLetters(t) || NS.isPunctText(t)) : (looksLikeText(t, meta.mode || 'loose') || (meta.punct && NS.isPunctText(t)));
+            const textOk = (t) => meta.mode === 'display' ? (NS.hasLetters(t) || NS.isPunctText(t)) : (looksLikeText(t, meta.mode || 'loose') || (meta.punct && NS.isShownText(t)));
             if (!textOk(literalOnly)) return null;
             if (!hasSentinel && this.isKey(text)) { this.ref(text.trim(), meta.file); return null; }
 

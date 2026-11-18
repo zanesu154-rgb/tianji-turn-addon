@@ -117,6 +117,13 @@ function renderCommand(cmd, lang) {
             const vals = [...cp.entries.values()].map(e => e.value);
             check('只有标点的句子（???、...）也提取，分隔线不提取', vals.includes('???') && vals.includes('...') && /"translate"/.test(p1) && /"translate"/.test(p2) && !p3.changed, vals);
         }
+        {
+            // 作者用下划线连词（"§eSpawnpoint_Save"）：命令显示位置照样提取；tag / 计分板名不动
+            const cu = new NS.ExtractContext({});
+            const u1 = NS.translateCommand('title @a actionbar §eSpawnpoint_Save', cu, 'k', 'f');
+            const u2 = NS.translateCommand('tag @a add Spawnpoint_Save', cu, 'k2', 'f');
+            check('下划线连起来的词在 title 里也提取', u1.changed && [...cu.entries.values()].some(e => e.value === 'Spawnpoint_Save') && !u2.changed && !NS.isUnderscoreWords('abc_123') && !NS.isUnderscoreWords('minecraft:stone'), u1.cmd);
+        }
         const ca = new NS.ExtractContext({}); ca.sayMode = 'actionbar';
         check('tell @p → titleraw @p actionbar', /^titleraw @p actionbar /.test(NS.translateCommand('tell @p 小心背后', ca, 'k', 'f').cmd));
         check('say 100% / say @a 不转换', !NS.translateCommand('say 100%', ct, 'k', 'f').changed && !NS.translateCommand('say @a', ct, 'k', 'f').changed);
