@@ -149,7 +149,7 @@
                 try { const j = JSON.parse(text); if (j && (Array.isArray(j.rawtext) || typeof j.translate === 'string')) reason = '作者写成了翻译键，但这里游戏不支持（会显示键名 / 拿进背包后消失），需要改成纯文字'; } catch (e) { /* 不是 JSON */ }
             }
             const plain = NS.stripFormatting(text).trim();
-            if (!NS.hasLetters(plain) || (/^[\w.:-]+$/.test(plain) && /[_:]/.test(plain))) return;
+            if (!(NS.hasLetters(plain) || NS.isPunctText(plain)) || (/^[\w.:-]+$/.test(plain) && /[_:]/.test(plain))) return;
             ctx.untranslatable.push({ file: label, where, text, reason, ref: `${rec.id}|${JSON.stringify(path)}` });
         };
         const label = unitLabel(rec, c, kind);
