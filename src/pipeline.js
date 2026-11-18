@@ -372,7 +372,7 @@
         }
 
         // 包里自定义的物品 / 方块 / 实体 ID → 名称翻译键（给“把 ID 拼成英文名”的脚本函数用）
-        // 名字键的值带了说明行（"Copper Pillar~LINEBREAK~~LINEBREAK~§9Bedrock Reimagined"，物品栏悬停时显示）：
+        // 名字键的值带了说明行（"Copper Pillar~LINEBREAK~~LINEBREAK~§9Pack Name"，物品栏悬停时显示）：
         // 脚本拼名字（准星方块名、掉落物名…）时只要第一行 → 另建一个只有名字的键，各语言取各自译文的第一行
         const shortKeys = new Map();
         const nameOnly = (k) => {

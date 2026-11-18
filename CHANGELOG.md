@@ -128,8 +128,8 @@
 ### 改进
 
 - 翻译表补上包里已有、但目标语言还没译文的键 ([#67](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/67))
-- 基岩版重塑：准星方块名、悬停提示、任务界面与奖励等多处漏翻 ([#72](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/72), [#73](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/73), [#76](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/76))
-- RPG++：[object Object]、动作栏、物品描述、排版正文 ([#62](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/62), [#65](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/65), [#66](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/66))
+- 准星指向的方块名、界面悬停提示、任务界面与奖励物品名等漏翻 ([#72](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/72), [#73](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/73), [#76](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/76))
+- RPG 类脚本：显示成 [object Object]、动作栏、物品描述、排版正文的颜色码 ([#62](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/62), [#65](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/65), [#66](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/66))
 - 脚本字典条目沿用资源包 lang 里已有的同内容键 ([#63](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/63))
 
 ### 修复
@@ -170,7 +170,7 @@
 ### 修复
 
 - 大存档（数千条待翻译）分析后页面卡死 ([#38](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/38))
-- YTAUN Skill Tree：三元分支、join 拼接列表、技能面板属性行漏翻 ([#32](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/32), [#33](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/33), [#34](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/34), [#35](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/35))
+- 三元分支里的文字、join 拼接的列表、技能面板属性行漏翻 ([#32](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/32), [#33](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/33), [#34](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/34), [#35](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/35))
 - 拼出翻译键的模板被误提取 ([#36](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/36))
 - 页面文件没加载完整时的报错提示；根目录结构包写回路径 ([#41](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/41))
 
@@ -186,7 +186,7 @@
 
 ### 修复
 
-- Bedrock Reimagined：按语言分开登记的脚本翻译字典没分开 ([#28](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/28), [#30](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/30))
+- 按语言分开登记的脚本翻译字典没分开 ([#28](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/28), [#30](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/30))
 - %键 引用、带重音字母的键名、event entity 等命令被当成文字提取 ([#25](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/25), [#26](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/26), [#27](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/27), [#31](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/31))
 
 ## 2026.11.07-21（2026-11-07）
