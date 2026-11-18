@@ -36,7 +36,7 @@
         else return false;
         if (isEmptyText(text)) return false;
         if (ctx.isKey(text)) { ctx.ref(text.trim(), meta.file); return false; }
-        // 引用了别的键（"%tile.x.name\n§7%potion.wither II\n§9Bedrock Reimagined"）：游戏会解析里面的 %键，
+        // 引用了别的键（"%tile.x.name\n§7%potion.wither II\n§9Pack Name"）：游戏会解析里面的 %键，
         // 整段换成一个新键反而让引用失效。只把其中自己的文字换成 %新键，引用原样保留
         if (/(^|[^%])%[A-Za-z_][\w.:\-]*/.test(text)) {
             const REF = /%[A-Za-z_][\w.:\-]*/g;

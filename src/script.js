@@ -555,7 +555,7 @@
         });
 
         // (a2) 按语言分开的字典，用带语言代码的调用登记：
-        //      register("en_US", dictA, dictB); register("ja_JP", dictC, dictD)   （打包后的脚本常见，如 Bedrock Reimagined）
+        //      register("en_US", dictA, dictB); register("ja_JP", dictC, dictD)   （打包后的脚本常见）
         //      { en_US: dictA, ja_JP: dictC }（值是变量名）
         {
             const pairs = [];

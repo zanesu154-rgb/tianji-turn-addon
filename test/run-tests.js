@@ -300,7 +300,7 @@ function renderCommand(cmd, lang) {
             vp[0]['list@vc.text_desc'].$text !== '- Quick Container' && vp[1]['h@vc.hash_label'].$text === 'Color Code' && vp[2]['w@vc.wrapper'].$text === 'Wrapped Hash');
     }
     {
-        // Bedrock Reimagined：每种语言一个字典，Ns("en_US", a, b) 登记；u(lang, key, ...args) 用 {0} 填参数
+        // 大型整合包：每种语言一个字典，Ns("en_US", a, b) 登记；u(lang, key, ...args) 用 {0} 填参数
         const src = `var a,b,c,d,X;a={"ui.play":"How to Play","ui.lang":"§aLanguage set to {0}","ui.only":"Back"};
 c={"ui.play":"遊び方","ui.lang":"§a言語を {0} に設定しました"};
 d={"ui.play":"Как играть","ui.lang":"§aЯзык: {0}","ui.extra":"Секвойный олень","ui.old_ring":"Кольцо обжорства"};
@@ -369,7 +369,7 @@ function extra(p, lang){ p.sendMessage(u(lang,"ui.extra")); }`;
         NS.processScript('const o = {}; o.hasOwnProperty("Rotation"); o.toString("Hello there"); item.setLore(["Sharp blade"]);', 'scripts/x.js', cr, {});
         check('报告：hasOwnProperty / toString 等原型方法名不误报', !cr.untranslatable.some(u => /hasOwnProperty|toString|native/.test(u.where + u.reason)) && cr.untranslatable.some(u => u.text === 'Sharp blade'));
         const c2 = new NS.ExtractContext({});
-        ['§u', '0', 'ui:§burn0', '5fs_br:jungle_barrel.name', 'Maple Barrel'].forEach(t => c2.report('f', '实体名字标签', t, 'x'));
+        ['§u', '0', 'ui:§burn0', 'demo:jungle_barrel.name', 'Maple Barrel'].forEach(t => c2.report('f', '实体名字标签', t, 'x'));
         check('报告：格式码、数字、技术 ID、已有键不列入', c2.untranslatable.length === 1 && c2.untranslatable[0].text === 'Maple Barrel');
         const dm = new MemFS(readDir(path.join(__dirname, 'fixture')));
         dm.files.set('BP/scripts/dup.js', Buffer.from('item.setLore(["Dup lore"]); item.setLore(["Dup lore"]);'));
@@ -379,11 +379,11 @@ function extra(p, lang){ p.sendMessage(u(lang,"ui.extra")); }`;
     }
     {
         const ce = new NS.ExtractContext({});
-        NS.processScript('e.runCommand("event entity @s[tag=5fs_br:death] 5fs_br:death"); const x = "event entity @s 5fs_br:death"; d.runCommandAsync(x); p.runCommand("Some odd text here");', 'scripts/c.js', ce, {});
+        NS.processScript('e.runCommand("event entity @s[tag=demo:death] demo:death"); const x = "event entity @s demo:death"; d.runCommandAsync(x); p.runCommand("Some odd text here");', 'scripts/c.js', ce, {});
         check('命令：event entity … / runCommand 里原样执行的字符串不当作文本', ce.entries.size === 0 && NS.looksLikeCommand('time set 1000') && !NS.looksLikeCommand('event entity gets angry'));
     }
     {
-        // YTAUN Skill Tree：三元分支里的文字、join(", ") 拼起来的名称列表
+        // 技能树类包：三元分支里的文字、join(", ") 拼起来的名称列表
         const src = 'const PROF={combat:{name:"Combat"},miner:{name:"Miner"}};\nexport function f(p,m,kit,mine){ p.sendMessage(`§aYour path: §f${m}§a.${kit ? " Starter kit added to your pack." : ""}§r`); p.sendMessage(`§6Branch ${m} ${mine ? "mastered" : "complete"}.`); p.sendMessage(["combat","miner"].map(x=>"§f"+PROF[x].name).join("§7, ")); }';
         const cy = new NS.ExtractContext({});
         const r = NS.processScript(src, 'scripts/ui/picker.js', cy, { injectRuntime: true });
@@ -394,7 +394,7 @@ function extra(p, lang){ p.sendMessage(u(lang,"ui.extra")); }`;
         check('  └ 运行时：join(", ") 拼起来的名称列表逐项翻译', JSON.stringify(out[0]).split('"translate"').length === 3 && out[2].rawtext && out[2].rawtext.filter(x => x.translate).length === 2);
     }
     {
-        // YTAUN Skill Tree 原包：onLight 换颜色码、"§c" + reason、"+2.5 skill xp"、const kind = 条件 ? " only" : …
+        // 技能树类包：onLight 换颜色码、"§c" + reason、"+2.5 skill xp"、const kind = 条件 ? " only" : …
         const src = `const META={xp:["skill xp","%"]};
 function onLight(t){ return String(t).replace(/§7/g,"§8"); }
 function reason(c){ return { ok:false, reason: \`Needs \${c} skill point\${c > 1 ? "s" : ""}.\` }; }
@@ -412,7 +412,7 @@ export function f(p, b){ b.button(onLight("§7Quick buy: §8OFF")); p.sendMessag
         check('  └ 运行时：换过颜色码、前面加了颜色码的句式、数值 + 名称 都能翻译', out.length === 4 && out.every(tr), JSON.stringify(out));
     }
     {
-        // YTAUN：属性表名称列 + 常量标签 "§8[flat]" + 运行时按颜色分段
+        // 技能树类包：属性表名称列 + 常量标签 "§8[flat]" + 运行时按颜色分段
         const src = `const FLAT = "§8[flat]";
 const TREE = { stats: { mel: ["melee damage","flat",3,"added to every melee hit"], hp: ["max health","flat",20,"more hearts for you"], arm: ["armor","flat",10,"less damage taken from hits"] } };
 function fmt(k, v){ const [label] = TREE.stats[k]; return \`+\${v} \${label} \${FLAT}\`; }
@@ -695,7 +695,7 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
             !ks.some(k => /minecraft:(apple|zombie)/.test(k)) && ks.some(k => /minecraft:iron_sword/.test(k)) && /"item\.apple\.name"/.test(reg) && /"entity\.zombie\.name"/.test(reg));
     }
     {
-        // Bedrock Reimagined：om(id) 把 ID 拼成英文名（"minecraft:iron_sword" → "Iron Sword"），运行时按 ID 映射翻译键
+        // 大型整合包：om(id) 把 ID 拼成英文名（"minecraft:iron_sword" → "Iron Sword"），运行时按 ID 映射翻译键
         const src = 'import { world } from "@minecraft/server";\nfunction om(e){return(e.split(":").pop()??e).split("_").filter(Boolean).map(a=>a.charAt(0).toUpperCase()+a.slice(1)).join(" ")}\nconst nm = (id) => id.replace("x:", "").split("_").map(w => w[0].toUpperCase() + w.slice(1)).join(" ");\nexport function f(p, id) { p.sendMessage(`Added ${om(id)} to the filter.`); p.sendMessage(nm(id)); }\n';
         const ch = new NS.ExtractContext({});
         const out = NS.processScript(src, 'scripts/h.js', ch, { injectRuntime: true, runtimeKey: '__ADDON_I18N_h', idKeys: () => new Map([['x:ruby_gem', 'item.x:ruby_gem.name']]) }).content;
@@ -778,16 +778,16 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('/me → tellraw，保留 “* 发送者 消息” 格式', me === '/tellraw @a {"rawtext":[{"text":"* "},{"text":"Guide"},{"text":" "},{"translate":"cmd.me","with":{"rawtext":[{"selector":"@p"}]}}]}' && [...cm.entries.values()][0].value === 'waves at %1$s warmly', me);
     }
     {
-        // 基岩版重塑：名称里引用了别的键（%tile.x.name、%potion.wither），只把自己的文字换成 %新键
+        // 大型整合包：名称里引用了别的键（%tile.x.name、%potion.wither），只把自己的文字换成 %新键
         const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
-        xm.files.set('BP/blocks/spikes.json', Buffer.from(JSON.stringify({ format_version: '1.21.90', 'minecraft:block': { description: { identifier: '5fs_br:spikes' }, components: { 'minecraft:display_name': '%tile.5fs_br.spikes.name\n§7§c%potion.wither II (0:05)§r\n§9Bedrock Reimagined' } } })));
-        xm.files.set('BP/blocks/only.json', Buffer.from(JSON.stringify({ format_version: '1.21.90', 'minecraft:block': { description: { identifier: '5fs_br:only' }, components: { 'minecraft:display_name': '%tile.5fs_br.only.name\n§7%potion.wither II' } } })));
+        xm.files.set('BP/blocks/spikes.json', Buffer.from(JSON.stringify({ format_version: '1.21.90', 'minecraft:block': { description: { identifier: 'demo:spikes' }, components: { 'minecraft:display_name': '%tile.demo.spikes.name\n§7§c%potion.wither II (0:05)§r\n§9Pack Name' } } })));
+        xm.files.set('BP/blocks/only.json', Buffer.from(JSON.stringify({ format_version: '1.21.90', 'minecraft:block': { description: { identifier: 'demo:only' }, components: { 'minecraft:display_name': '%tile.demo.only.name\n§7%potion.wither II' } } })));
         const xr = await NS.runPipeline(xm, { baseName: 'fixture' }, () => {});
         const dn = JSON.parse(xm.files.get('BP/blocks/spikes.json').toString())['minecraft:block'].components['minecraft:display_name'];
         const d2 = JSON.parse(xm.files.get('BP/blocks/only.json').toString())['minecraft:block'].components['minecraft:display_name'];
         const vals = [...xr.ctx.entries.values()].map(e => e.value);
         check('名称里引用了别的 %键：引用原样保留，只把自己的文字换成 %新键；只有引用的不动',
-            dn === '%tile.5fs_br.spikes.name\n§7§c%potion.wither II (0:05)§r\n§9%tile.5fs_br.spikes.name.text' && vals.includes('Bedrock Reimagined') && !vals.some(v => /%tile|%potion/.test(v)) && d2 === '%tile.5fs_br.only.name\n§7%potion.wither II', JSON.stringify(dn));
+            dn === '%tile.demo.spikes.name\n§7§c%potion.wither II (0:05)§r\n§9%tile.demo.spikes.name.text' && vals.includes('Pack Name') && !vals.some(v => /%tile|%potion/.test(v)) && d2 === '%tile.demo.only.name\n§7%potion.wither II', JSON.stringify(dn));
     }
     {
         // 百分号：带参数的值 % → %%、已有的 %% 不再翻倍；不带参数的值 %% → %
@@ -797,7 +797,7 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('百分号：带参数时 %→%%、已转义的 %% 不翻倍；不带参数时 %%→%', JSON.stringify(pv) === JSON.stringify(['Full 100% safe now', 'Chance: %1$s%% to win', 'Rate 50% done here', 'Bonus %1$s%% extra power', 'Keep %%s as written']), JSON.stringify(pv));
     }
     {
-        // 基岩版重塑：界面用 (#title_text = 'Magic') 判断显示哪个自定义界面；manifest 的包设置 / 子包名称
+        // 大型整合包：界面用 (#title_text = 'Magic') 判断显示哪个自定义界面；manifest 的包设置 / 子包名称
         const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
         xm.files.set('RP/ui/server_form.json', Buffer.from(JSON.stringify({ namespace: 'server_form', panel: { type: 'panel', bindings: [{ binding_name: '#title_text' }, { binding_type: 'view', source_property_name: "((#title_text = 'Magic Quests') or (#title_text = 'The End'))", target_property_name: '#visible' }], controls: [{ lbl: { type: 'label', text: 'Magic Quests' } }, { lbl2: { type: 'label', text: 'Choose your path wisely' } }] } })));
         xm.files.set('BP/scripts/q.js', Buffer.from('import { ActionFormData } from "@minecraft/server-ui";\nexport function q(p, t) { new ActionFormData().title("Magic Quests").body("Pick a quest to start").button("The End").show(p); new ActionFormData().title(t).show(p); }\n'));
@@ -820,7 +820,7 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('  └ 运行时 keep：比较用的文字不翻译', rt.M('The End') === 'The End' && rt.M('§lThe End§r') === '§lThe End§r' && JSON.stringify(rt.M('Some text here')) === '{"rawtext":[{"translate":"k.s"}]}');
     }
     {
-        // 基岩版重塑：准星方块名（WAILA）"inspecting:" 前缀 + gy() 拼的英文名；界面悬停提示 #hover_text
+        // 大型整合包：准星方块名（WAILA）"inspecting:" 前缀 + gy() 拼的英文名；界面悬停提示 #hover_text
         const xm = new MemFS(readDir(path.join(__dirname, 'fixture')));
         xm.files.set('RP/ui/waila.json', Buffer.from(JSON.stringify({ namespace: 'waila', w: { type: 'label', text: '#t', bindings: [{ binding_type: 'view', source_property_name: "(#title_text - 'inspecting:')", target_property_name: '#t' }] }, lock: { 'hover@common.hover_text': { property_bag: { '#hover_text': 'Upgrade Accessory Bag to Unlock' } } } })));
         xm.files.set('BP/scripts/w.js', Buffer.from('import { world } from "@minecraft/server";\nfunction WN(w){return w.charAt(0).toUpperCase()+w.slice(1)}\nfunction gy(e){if(!e)return"";return String(e).replace(/^[^:]+:/,"").replace(/[._\\-]+/g," ").trim().split(/\\s+/).filter(Boolean).map(WN).join(" ")}\nexport function show(p, b) { p.runCommand(`titleraw @s title ${JSON.stringify({rawtext:[{text:"inspecting:§e§n§t" + gy(b) + "\\n§9§oMinecraft"}]})}`); }\n'));
@@ -928,7 +928,7 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('  └ 列出缺少的语言并留出补充列', norm && /zh_CN/.test(norm[6]) && rows[0].includes('add_zh_CN'));
         const trig = rows.find(r => r[1].startsWith('The Protestant'));
         check('  └ 触发条目关联到回答的翻译键', trig && trig[2] && zh.get(trig[2]) && zh.get(trig[2]).startsWith('The Protestant'));
-        check('  └ verity.js 中的正则和关键词保持原样', out('BP/scripts/verity.js').includes('/\\b(?:cuántos jugadores|cuantos jugadores|hay alguien más|hay alguien mas|estoy solo)\\b/gi, "how many players"') && out('BP/scripts/verity.js').includes('keywords: ["reformation", "luther", "protestant", "church"]'));
+        check('  └ chatbot.js 中的正则和关键词保持原样', out('BP/scripts/chatbot.js').includes('/\\b(?:cuántos jugadores|cuantos jugadores|hay alguien más|hay alguien mas|estoy solo)\\b/gi, "how many players"') && out('BP/scripts/chatbot.js').includes('keywords: ["reformation", "luther", "protestant", "church"]'));
     }
     {
         const c4 = new NS.ExtractContext({});
@@ -947,15 +947,15 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         check('整列判断语言：常用词很少的英文句子也能识别（s→en_US, v→fr_FR）', c5.entries.size === 2 && t5 && t5.get('fr_FR') && t5.get('fr_FR').startsWith('Le son'));
     }
     {
-        // Verity 风格的 locale 文件
+        // 聊天机器人类包的 locale 文件
         const esL = NS.parseLang(out('RP/texts/es_ES.lang'));
         const kv = (t) => [...en].find(([, v]) => v === t)?.[0];
-        check('Verity：${name} 占位符 → 句式键（%1$s），西语对应', esL.get(kv('Good afternoon, %1$s.')) === 'Buenas tardes, %1$s.');
-        check('Verity：短句成对数组（"Ouch!" → "¡Ay!"）', esL.get(kv('Ouch!')) === '¡Ay!');
-        check('Verity：逐条 .set("英文", "西语")', esL.get(kv('Evening. I\'m listening.')) === 'Buenas noches. Te escucho.');
-        check('Verity：名称字典（键为英文）', esL.get(kv('ocean monument')) === 'monumento oceánico');
-        check('Verity：句式规则 正则 → 模板', esL.get(kv('%1$s out of %2$s hearts.')) === '%1$s de %2$s corazones.');
-        check('Verity：输入归一化表 INPUT_TERMS 不合并、不登记', ![...zh.values()].includes('aldea') && ![...zh.values()].includes('portal del end') && !esL.get(kv('village')));
+        check('聊天机器人类包：${name} 占位符 → 句式键（%1$s），西语对应', esL.get(kv('Good afternoon, %1$s.')) === 'Buenas tardes, %1$s.');
+        check('聊天机器人类包：短句成对数组（"Ouch!" → "¡Ay!"）', esL.get(kv('Ouch!')) === '¡Ay!');
+        check('聊天机器人类包：逐条 .set("英文", "西语")', esL.get(kv('Evening. I\'m listening.')) === 'Buenas noches. Te escucho.');
+        check('聊天机器人类包：名称字典（键为英文）', esL.get(kv('ocean monument')) === 'monumento oceánico');
+        check('聊天机器人类包：句式规则 正则 → 模板', esL.get(kv('%1$s out of %2$s hearts.')) === '%1$s de %2$s corazones.');
+        check('聊天机器人类包：输入归一化表 INPUT_TERMS 不合并、不登记', ![...zh.values()].includes('aldea') && ![...zh.values()].includes('portal del end') && !esL.get(kv('village')));
     }
     {
         const lf = { mode: 'manual', map: new Map(), fileMaps: [['x_lang.js', new Map([['s', 'en_US'], ['v', 'fr_FR']])]] };
@@ -1007,7 +1007,7 @@ export class MessageFormData extends Base { constructor() { super('Message'); } 
     const driver = `
 import { calls, world, __H, makePlayer } from '@minecraft/server';
 const main = await import('./scripts/main.js');
-await import('./scripts/verity.js');
+await import('./scripts/chatbot.js');
 const p = makePlayer('Alex', 120);
 world.players = [p];
 __H.spawn({ player: p, initialSpawn: true });
@@ -1039,7 +1039,7 @@ console.log(JSON.stringify(calls));`;
         fs.writeFileSync(path.join(d, 'driver.js'), driver);
         return JSON.parse(execFileSync('node', [path.join(d, 'driver.js')], { cwd: d }).toString());
     };
-    const scripts = (get) => Object.fromEntries(['main', 'data', 'menu', 'verity'].map(n => [`scripts/${n}.js`, get(`BP/scripts/${n}.js`)]));
+    const scripts = (get) => Object.fromEntries(['main', 'data', 'menu', 'chatbot'].map(n => [`scripts/${n}.js`, get(`BP/scripts/${n}.js`)]));
     const origCalls = setup('orig', scripts(p => before.get(p).toString()));
     const newCalls = setup('new', scripts(out));
 
@@ -1075,8 +1075,8 @@ console.log(JSON.stringify(calls));`;
     const bc = newCalls.find(c => c[0] === 'dim.runCommand');
     check('数组里的命令在运行时转换为 titleraw', bc && renderCommand(bc[1], fake) === 'title @a title EN(服务器即将重启)', bc && bc[1]);
 
-    const verityReplies = newCalls.filter(c => c[0] === 'sendMessage').slice(-2).map(c => render(c[1], zh));
-    check('Verity：西语提问经正则归一化后仍触发正确回答（已翻译）', verityReplies[0] === 'There are a few players online right now.' && verityReplies[1].startsWith('The Protestant Reformation'), verityReplies.join(' / '));
+    const botReplies = newCalls.filter(c => c[0] === 'sendMessage').slice(-2).map(c => render(c[1], zh));
+    check('聊天机器人类包：西语提问经正则归一化后仍触发正确回答（已翻译）', botReplies[0] === 'There are a few players online right now.' && botReplies[1].startsWith('The Protestant Reformation'), botReplies.join(' / '));
     fs.rmSync(tmp, { recursive: true, force: true });
 
     // -----------------------------------------------------------
@@ -1255,7 +1255,7 @@ console.log(JSON.stringify(calls));`;
         const src = 'import { world } from "@minecraft/server";\n'
             + 'function $a(e){return kge(e?.replace(/\\w+:/,""))}function kge(e){return e?.replace(/[_.]/g," ")?.replace(/\\w\\S*/g,t=>t.charAt(0)?.toUpperCase()+t?.substr(1)?.toLowerCase())}\n'
             + 'function R_(e){let a=e.split(":").pop();let i=a.replace(/[_-]+/g," ").trim();return i.split(/\\s+/g).map(r=>r.charAt(0).toUpperCase()+r.slice(1)).join(" ")}\n'
-            + 'var Sg="5fs_br:illumination";we.registerEffect(Sg,{});\n'
+            + 'var Sg="demo:illumination";we.registerEffect(Sg,{});\n'
             + 'const D={t:"Advancements"};\n'
             + 'export function f(p,n,r,s,f){const e=[];e.push({translate:`§8- §8${R_(n)} §5(${r}-${s}) `});p.sendMessage({rawtext:e});f.title(D.t);p.setActionBar(`${$a(n)} ${r}`);}\n';
         const out = NS.processScript(src, 'scripts/br.js', ctx, { injectRuntime: true, runtimeKey: '__br_q', uiCompared: new Set(['Advancements']), idKeys: () => [] }).content;
