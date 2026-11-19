@@ -4,10 +4,15 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.19-79 (2026-11-19)
+## 2026.11.19-80 (2026-11-19)
+
+### Improved
+
+- When both the resource pack and the behavior pack have lang files, the resource pack wins (the game only reads text from resource packs) ([#134](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/134))
 
 ### Fixed
 
+- If the manifest sets the pack name/description directly but the lang files also have pack.name, the manifest now wins and the old line is removed ([#134](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/134))
 - Renaming custom item names in a world did not update `@e[type=item,name=…]` in commands, breaking map logic ([#133](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/133))
 
 ## 2026.11.18-78 (2026-11-18)

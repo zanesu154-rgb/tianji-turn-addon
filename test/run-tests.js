@@ -192,6 +192,18 @@ function renderCommand(cmd, lang) {
             const fill = z.slice(z.indexOf('从其他语言补全'));
             check('补全的键带上源语言的分节注释和行尾说明', /\n## Items\nitem\.t:sword\.name=Ruby Sword\t# shown in inventory\n## Blocks\ntile\.t:ore\.name=Ruby Ore/.test(fill) && NS.parseLang(z).get('item.t:sword.name') === 'Ruby Sword', fill);
         }
+        {
+            // manifest 写的是文字、lang 里另有 pack.name：以 manifest 为准，删掉原来的 pack.name（其他语言列为待翻译）
+            const pm = new MemFS(new Map([
+                ['BP/manifest.json', Buffer.from('{"format_version":2,"header":{"name":"Ruby BP","description":"Adds ruby","uuid":"21111111-1111-1111-1111-111111111111","version":[1,0,0]},"modules":[{"type":"data","uuid":"21111111-1111-1111-1111-111111111112","version":[1,0,0]}]}')],
+                ['BP/texts/languages.json', Buffer.from('["en_US","zh_CN"]')],
+                ['BP/texts/en_US.lang', Buffer.from('pack.name=Old Name\nitem.t:a.name=A\n')],
+                ['BP/texts/zh_CN.lang', Buffer.from('pack.name=旧名字\nitem.t:a.name=甲\n')],
+            ]));
+            await NS.runPipeline(pm, { baseName: 'x' }, () => {});
+            const pe = pm.files.get('BP/texts/en_US.lang').toString(), pz = pm.files.get('BP/texts/zh_CN.lang').toString();
+            check('manifest 写死的包名优先，lang 里原来的 pack.name 删掉', NS.parseLang(pe).get('pack.name') === 'Ruby BP' && (pe.match(/^pack\.name=/mg) || []).length === 1 && (pz.match(/^pack\.name=/mg) || []).length === 1 && NS.parseLang(pz).get('pack.name') === 'Ruby BP' && /pack\.name/.test(JSON.parse(pm.files.get('BP/manifest.json').toString()).header.name), pz);
+        }
     }
     {
         // DLCraft：cancelEvent(..., sourceName = 'item') 把参数拼进提示文字，调用处传 'block'

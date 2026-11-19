@@ -183,7 +183,8 @@
         const prevKeys = new Set();
         const authorKeys = new Set();
         const packLangs = new Map();   // 包根 → Map(语言 → {path, map, raw})
-        for (const pk of packs) {
+        // 资源包的 lang 优先：游戏显示文字只读资源包的；行为包里的 lang（作者放错位置）只在资源包没有时参考
+        for (const pk of [...packs].sort((a, b) => (a.type === 'RP' ? 0 : 1) - (b.type === 'RP' ? 0 : 1))) {
             const langs = new Map();
             for (const p of allFiles) {
                 if (packOf(p) !== pk) continue;
@@ -1022,13 +1023,20 @@
             if (pk.type === 'RP') entries = new Map([...(entriesByRp.get(pk.root) || []), ...own]);
             else entries = own;
             if (!entries.size && !(pk.type === 'RP' && opt.fillMissing) && !junkByPack.has(pk.root)) continue;
-            // 已存在但值不同的 pack.name：保留原值并提示
+            // lang 里已有 pack.name / pack.description，但 manifest 写的是文字（游戏显示的是 manifest）：
+            // 以 manifest 为准，删掉各语言里原来的这一行，按 manifest 原文重新写入（其他语言列为待翻译）
             const langs = packLangs.get(pk.root);
             for (const [k, v] of own) {
-                const src = langs && (langs.get(sourceLang) || langs.get('en_US'));
-                if (src && src.map.has(k) && src.map.get(k) !== v) {
-                    ctx.warn(`${pk.manifestPath}: lang 中已有 ${k}=${src.map.get(k)}，与 manifest 原文「${v}」不同，保留 lang 中的值`);
+                if (!langs || !(ctx.manifestHard && ctx.manifestHard.has(`${pk.root}\u0000${k}`))) continue;
+                if (prevKeys.has(k)) continue;   // 上次转换写进去的（放回的译文 lang）：保留译文
+                let dropped = 0;
+                for (const e of langs.values()) {
+                    if (!e.map.has(k)) continue;
+                    e.map.delete(k);
+                    e.raw = e.raw.split('\n').filter(line => { const t = line.trimStart(), eq = line.indexOf('='); return !(t && !t.startsWith('#') && eq > 0 && line.slice(0, eq).trim() === k); }).join('\n');
+                    dropped++;
                 }
+                if (dropped) ctx.warn(`${pk.manifestPath}: manifest 里直接写了${k === 'pack.name' ? '包名' : '简介'}「${v}」，lang 里另有 ${k}，以 manifest 为准，已删掉 ${dropped} 个语言里原来的 ${k}`);
             }
             const written = writeLangs(pk, entries, pk.type === 'RP');
             if (written.length) await writeLanguagesJson(pk, written);
