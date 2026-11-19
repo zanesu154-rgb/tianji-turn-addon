@@ -4,7 +4,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.19-81 (2026-11-19)
+## 2026.11.19-82 (2026-11-19)
 
 ### Improved
 
@@ -12,6 +12,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
+- Script messages that reference lang keys with `%key` (e.g. `§7%stats.total:`) were extracted as text and became `%%` in lang, breaking the reference ([#136](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/136))
 - A manifest.json with an extra `}` at the end made the whole pack be skipped (the game reads it fine); the log now warns when a manifest cannot be read ([#135](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/135))
 - If the manifest sets the pack name/description directly but the lang files also have pack.name, the manifest now wins and the old line is removed ([#134](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/134))
 - Renaming custom item names in a world did not update `@e[type=item,name=…]` in commands, breaking map logic ([#133](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/133))

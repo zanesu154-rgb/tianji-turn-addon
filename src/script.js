@@ -1876,7 +1876,7 @@
             });
         };
 
-        const wordy = (t) => /[A-Za-z]{2,}|[\u3040-\u30ff\u4e00-\u9fff]/.test(NS.stripFormatting(t)) && !looksLikeCommand(t);
+        const wordy = (t) => /[A-Za-z]{2,}|[\u3040-\u30ff\u4e00-\u9fff]/.test(NS.stripKeyRefs(NS.stripFormatting(t))) && !looksLikeCommand(t);
         const meta = (hint) => ({ file, kind: 'script', scope: 'script', hint });
         const keyBase = (hint) => `script.${fb}.${hint}`;
 
@@ -1892,12 +1892,22 @@
         function buildElements(parts, hint) {
             const lines = ctx.splitNewlines ? splitLines(parts) : [parts];
             const els = [];
-            let translated = false;
+            let translated = false, hadRef = false, refRuntime = false;
             lines.forEach((line, li) => {
                 if (li > 0) els.push(JSON.stringify({ text: '\n' }));
                 if (!line.length) return;
                 const lit = litText(line);
                 const dyn = line.some(p => !('lit' in p));
+                // 带 "%stats.total" 这类键引用：游戏显示 {text} 时会按键翻译，写进 lang 后 % 被转义就失效了 → 原样保留
+                if (NS.hasKeyRefs(lit)) {
+                    if (wordy(lit)) ctx.report(file, hint || '文本', lit, '含 %键 引用（游戏按键翻译），写进 lang 会失效，保持原样');
+                    hadRef = true;
+                    for (const p of line) {
+                        if ('lit' in p) els.push(JSON.stringify({ text: p.lit }));
+                        else { refRuntime = true; els.push(`${RT}.T(${renderPart(p)})`); }
+                    }
+                    return;
+                }
                 if (dyn && isKeyTemplate(line)) { els.push(...line.map(p => ('lit' in p) ? JSON.stringify({ text: p.lit }) : `${RT}.T(${renderPart(p)})`)); usesRuntime = true; return; }
                 if ((looksLikeText(lit, 'loose') || (dyn && wordy(lit))) && !(line.length === 1 && ctx.isKey(lit))) {
                     // 剥离首尾格式码
@@ -1937,6 +1947,9 @@
             });
             const hasDynamic = parts.some(p => !('lit' in p));
             if (!translated && !hasDynamic) return null;
+            // 整段只有键引用、没有要翻译的文字：保持作者原来的写法（游戏按键翻译），不改成 rawtext
+            if (!translated && hadRef) return null;
+            if (refRuntime) usesRuntime = true;
             return els;
         }
 
@@ -2390,6 +2403,7 @@
             if (opts.uiCompared && opts.uiCompared.has(String(text).replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) return;
             if (opts.refSyntax && (DICT_REF.lastIndex = 0, DICT_REF.test(text))) { DICT_REF.lastIndex = 0; registerPattern([{ lit: text }]); return; }
             if (isCodeNoise(text)) return;
+            if (NS.hasKeyRefs(text)) return;   // 带 %键 引用：游戏按键翻译，写进 lang 会被转义
             const lines = ctx.splitNewlines ? text.split(/\r?\n/) : [text];
             for (const line of lines) {
                 if (!looksLikeText(line, 'strict')) continue;
@@ -2451,6 +2465,7 @@
 
         const registerPattern = (parts, relaxed = false) => {
             if (isKeyTemplate(parts)) return;
+            if (NS.hasKeyRefs(parts.map(x => 'lit' in x ? x.lit : ' ').join(''))) return;   // 带 %键 引用：游戏按键翻译，不登记
             if (isCodeNoise(parts.map(x => 'lit' in x ? x.lit : '%s').join(''))) return;
             // 字典带 @引用 的包：代码里的 "@common.exp: §g" + n 这类拼接，引用部分当占位
             if (opts.refSyntax && !parts.refSplit) {

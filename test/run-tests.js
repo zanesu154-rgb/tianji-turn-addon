@@ -253,6 +253,14 @@ function renderCommand(cmd, lang) {
         check('  └ 勾选后照常提取和补全', v2.includes('Technical Marker') && v2.includes('Hidden Block') && /item\.mm:alyadvancement_big_shot\.name=Big Shot/.test(zh2) && /spawn_egg\.entity\.mm:dummy/.test(zh2));
     }
     {
+        // "%stats.total" 这类键引用：游戏按键翻译，不能写进 lang（% 会被转义成 %%）
+        const ck = new NS.ExtractContext({});
+        const src = 'import { world } from "@minecraft/server";\nexport function f(p, n) {\n p.sendMessage(`§a%potion.emptyPotion.name §7x${n}`);\n p.sendMessage(`§7%item.runecraft: §e${n} §7(%stats.total)`);\n p.sendMessage(`§7Total items: %item.runecraft ${n}`);\n p.sendMessage(`Hello ${n}`);\n}\n';
+        const out = NS.processScript(src, 'scripts/k.js', ck, { injectRuntime: true }).content;
+        const vals = [...ck.entries.values()].map(e => e.value);
+        check('含 %键 引用的消息不提取、保持原样', out.includes('p.sendMessage(`§a%potion.emptyPotion.name §7x${n}`)') && out.includes('p.sendMessage(`§7%item.runecraft: §e${n} §7(%stats.total)`)') && !vals.some(v => /%%/.test(v)) && vals.some(v => /^Hello/.test(v)) && ck.untranslatable.some(u => /Total items/.test(u.text)), vals);
+    }
+    {
         // PalCraft 小地图：每 tick 把字形画传给 setActionBar，运行时模糊匹配不能回溯卡死（Watchdog hang）
         const cx = new NS.ExtractContext({});
         const out = NS.processScript('import { world } from "@minecraft/server";\nexport function f(p, a) { p.onScreenDisplay.setActionBar(a); }\n', 'scripts/x.js', cx, { injectRuntime: true }).content;
