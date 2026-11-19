@@ -312,9 +312,30 @@
         try { return JSON.parse(s); } catch (e) { /* 继续 */ }
         try { return JSON.parse(stripJsonCommentsAndCommas(s)); } catch (e) { /* 继续 */ }
         if (root.JSON5) {
-            try { return root.JSON5.parse(s); } catch (e) { /* 放弃 */ }
+            try { return root.JSON5.parse(s); } catch (e) { /* 继续 */ }
+        }
+        // 根对象后面多了东西（常见：多写了一个 }）：游戏只读第一个完整的对象，这里也一样
+        const head = firstJsonValue(stripJsonCommentsAndCommas(s));
+        if (head) {
+            try { return JSON.parse(head); } catch (e) { /* 继续 */ }
+            if (root.JSON5) { try { return root.JSON5.parse(head); } catch (e) { /* 放弃 */ } }
         }
         return undefined;
+    }
+
+    /** 取出文本开头第一个完整的 {…} / […]（跳过字符串里的括号）；后面没有多余内容时返回 null */
+    function firstJsonValue(t) {
+        const start = t.search(/[{[]/);
+        if (start < 0) return null;
+        let depth = 0, inStr = false;
+        for (let i = start; i < t.length; i++) {
+            const c = t[i];
+            if (inStr) { if (c === '\\') i++; else if (c === '"') inStr = false; continue; }
+            if (c === '"') inStr = true;
+            else if (c === '{' || c === '[') depth++;
+            else if (c === '}' || c === ']') { if (--depth === 0) return /\S/.test(t.slice(i + 1)) ? t.slice(start, i + 1) : null; }
+        }
+        return null;
     }
 
     // ---------------------------------------------------------------

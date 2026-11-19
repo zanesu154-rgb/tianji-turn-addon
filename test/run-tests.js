@@ -204,6 +204,16 @@ function renderCommand(cmd, lang) {
             const pe = pm.files.get('BP/texts/en_US.lang').toString(), pz = pm.files.get('BP/texts/zh_CN.lang').toString();
             check('manifest 写死的包名优先，lang 里原来的 pack.name 删掉', NS.parseLang(pe).get('pack.name') === 'Ruby BP' && (pe.match(/^pack\.name=/mg) || []).length === 1 && (pz.match(/^pack\.name=/mg) || []).length === 1 && NS.parseLang(pz).get('pack.name') === 'Ruby BP' && /pack\.name/.test(JSON.parse(pm.files.get('BP/manifest.json').toString()).header.name), pz);
         }
+        {
+            // manifest 末尾多写了一个 }：游戏照样能读，之前整个行为包被跳过
+            const tm = new MemFS(new Map([
+                ['BP/manifest.json', Buffer.from('{"format_version":2,"header":{"name":"pack.name","description":"pack.description","uuid":"61111111-1111-1111-1111-111111111111","version":[1,0,0]},"modules":[{"type":"data","uuid":"61111111-1111-1111-1111-111111111112","version":[1,0,0]}]\n}\n}\n')],
+                ['BP/items/book.json', Buffer.from('{"format_version":"1.21.50","minecraft:item":{"description":{"identifier":"t:book"},"components":{"minecraft:display_name":{"value":"Old book"}}}}')],
+            ]));
+            await NS.runPipeline(tm, { baseName: 'x' }, () => {});
+            const bk = JSON.parse(tm.files.get('BP/items/book.json').toString());
+            check('manifest 末尾多了 } 也能识别成包', bk['minecraft:item'].components['minecraft:display_name'].value === 'item.t:book.name' && NS.parseJsonLenient('{"a":"}{"}\n}').a === '}{' && NS.parseJsonLenient('{"a":1') === undefined, bk);
+        }
     }
     {
         // DLCraft：cancelEvent(..., sourceName = 'item') 把参数拼进提示文字，调用处传 'block'

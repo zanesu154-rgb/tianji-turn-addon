@@ -4,7 +4,7 @@
 
 [English](CHANGELOG_en.md)
 
-## 2026.11.19-80（2026-11-19）
+## 2026.11.19-81（2026-11-19）
 
 ### 改进
 
@@ -12,6 +12,7 @@
 
 ### 修复
 
+- manifest.json 末尾多写了一个 `}` 时整个包被跳过（游戏能正常读取）；manifest 读不出来时日志会提示 ([#135](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/135))
 - manifest 里直接写了包名 / 简介，lang 里又另有 pack.name 时，改以 manifest 为准，删掉原来的那一行 ([#134](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/134))
 - 存档里改了物品自定义名称后，命令里按名字找掉落物的 `@e[type=item,name=…]` 没跟着改，导致地图逻辑失效 ([#133](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/133))
 
