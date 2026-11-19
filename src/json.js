@@ -618,6 +618,9 @@
             if (typeof v !== 'string' || isEmptyText(v)) continue;
             if (v === key || ctx.isKey(v)) continue;
             ctx.setPackEntry(info.packRoot, key, v);
+            // manifest 里直接写的名字 / 简介：游戏显示的就是它，lang 里同名的旧键以它为准
+            if (!ctx.manifestHard) ctx.manifestHard = new Set();
+            ctx.manifestHard.add(`${info.packRoot}\u0000${key}`);
             header[field] = key;
             changed = true;
         }

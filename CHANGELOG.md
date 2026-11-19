@@ -4,10 +4,15 @@
 
 [English](CHANGELOG_en.md)
 
-## 2026.11.19-79（2026-11-19）
+## 2026.11.19-80（2026-11-19）
+
+### 改进
+
+- 资源包和行为包都有语言文件时，以资源包的为准（游戏显示文字只读资源包） ([#134](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/134))
 
 ### 修复
 
+- manifest 里直接写了包名 / 简介，lang 里又另有 pack.name 时，改以 manifest 为准，删掉原来的那一行 ([#134](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/134))
 - 存档里改了物品自定义名称后，命令里按名字找掉落物的 `@e[type=item,name=…]` 没跟着改，导致地图逻辑失效 ([#133](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/133))
 
 ## 2026.11.18-78（2026-11-18）
