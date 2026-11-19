@@ -138,6 +138,7 @@
         for (const p of allFiles) {
             if (!(p === 'manifest.json' || p.endsWith('/manifest.json'))) continue;
             const data = await readJson(p);
+            if (data === undefined) log(`[跳过] ${p}：JSON 解析失败`, 'warn');   // 整个包都会被跳过，得让人看到
             if (!data || !data.header) continue;
             const rootDir = p === 'manifest.json' ? '' : p.slice(0, -'/manifest.json'.length);
             packs.push({ root: rootDir, type: packTypeOf(data), manifestPath: p, manifest: data });
