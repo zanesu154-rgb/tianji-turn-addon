@@ -109,10 +109,22 @@
      * mode = 'loose'  ：已确定是显示位置（如 form.title 的参数）—— 只排除明显的代码
      * mode = 'strict' ：不确定用途（如脚本里任意字符串）—— 需要更像自然语言
      */
+    /** 去掉 "%stats.total"、"%item.runecraft" 这类键引用（游戏显示时按键翻译）；%1$s、%s 不算 */
+    const KEY_REF_RE = /%(?![sd]\b)[A-Za-z_][\w:-]*(?:\.[\w:-]+)+/g;
+    function stripKeyRefs(s) {
+        return String(s).replace(KEY_REF_RE, ' ');
+    }
+    function hasKeyRefs(s) {
+        KEY_REF_RE.lastIndex = 0;
+        const r = KEY_REF_RE.test(String(s));
+        KEY_REF_RE.lastIndex = 0;
+        return r;
+    }
+
     function looksLikeText(s, mode = 'loose') {
         if (typeof s !== 'string') return false;
         // "%menu.serverGenericName" 这类是游戏内的键引用，显示时自动翻译；去掉后没剩文字 → 不是待提取的文本
-        const plain = stripFormatting(s).replace(/%[A-Za-z_][\w:-]*(?:\.[\w:-]+)+/g, ' ').trim();
+        const plain = stripKeyRefs(stripFormatting(s)).trim();
         if (!plain) return false;
         if (!hasLetters(plain)) return false;
         if (hasCJK(plain)) return !looksLikeCode(plain);
@@ -348,7 +360,7 @@
 
     Object.assign(NS, {
         stripFormatting, hasCJK, hasLetters, isPunctText, isUnderscoreWords, isShownText, isEmptyText, isLikelyKey,
-        looksLikeCode, looksLikeText,
+        looksLikeCode, looksLikeText, stripKeyRefs, hasKeyRefs,
         hash6, sanitizeKeyPart, sanitizeKey, fileBaseOf, humanizeIdentifier,
         stripBOM, parseLang, langNotes, toLangValue, fixMixedPlaceholders, pctArgs, pctPlain,
         stripJsonCommentsAndCommas, parseJsonLenient, escapeRegex,

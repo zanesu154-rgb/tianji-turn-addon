@@ -408,8 +408,14 @@
             const hasSentinel = /\d+|\d+/.test(text);
             const literalOnly = text.replace(SENTINEL_RE, ' ');
             // mode 'display'：已确定是给玩家看的位置（告示牌、NPC 对话），只要有文字就翻译
-            const textOk = (t) => meta.mode === 'display' ? (NS.hasLetters(t) || NS.isPunctText(t)) : (looksLikeText(t, meta.mode || 'loose') || (meta.punct && NS.isShownText(t)));
+            // "%stats.total" 这类键引用不算文字：只剩引用、格式码、标点的整段不提取
+            const textOk = (t) => meta.mode === 'display' ? (NS.hasLetters(NS.stripKeyRefs(t)) || NS.isPunctText(t)) : (looksLikeText(t, meta.mode || 'loose') || (meta.punct && NS.isShownText(t)));
             if (!textOk(literalOnly)) return null;
+            // 带键引用又有别的文字：写进 lang 后 % 会被转义成 %%，引用就失效了 → 不改，列入需人工翻译
+            if (NS.hasKeyRefs(literalOnly)) {
+                if (meta.file) this.report(meta.file, meta.where || '文本', text.replace(SENTINEL_RE, '…'), '含 %键 引用（游戏按键翻译），写进 lang 会失效，保持原样');
+                return null;
+            }
             if (!hasSentinel && this.isKey(text)) { this.ref(text.trim(), meta.file); return null; }
 
             const nodes = [];
