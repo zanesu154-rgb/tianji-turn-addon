@@ -4,7 +4,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.21-84 (2026-11-21)
+## 2026.11.21-85 (2026-11-21)
 
 ### Improved
 
@@ -12,6 +12,8 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
+- Text arguments in messages the author builds with translation keys (`{translate, with:["Wall"]}`) were not translated ([#139](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/139))
+- IDs shown directly in messages (`Slot: ${slot}`) could not be translated; they are now registered as translatable words, IDs used in logic are unaffected ([#139](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/139))
 - Selectors such as `@s` in `title … actionbar` text were written into lang as text, so the player name no longer showed ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
 - UI comparisons on `$variables` (e.g. `$temp_container_title = '…'`) were not detected, so baking Chinese broke custom container screens ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
 - Titles used by scripts to send data to a custom HUD (read by prefix and character position) were turned into translation keys, so the UI could not read them ([#137](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/137))

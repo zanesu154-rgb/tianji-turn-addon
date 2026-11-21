@@ -4,7 +4,7 @@
 
 [English](CHANGELOG_en.md)
 
-## 2026.11.21-84（2026-11-21）
+## 2026.11.21-85（2026-11-21）
 
 ### 改进
 
@@ -12,6 +12,8 @@
 
 ### 修复
 
+- 包作者自己用翻译键拼的消息（`{translate, with:["Wall"]}`），参数里的文字没翻译 ([#139](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/139))
+- 消息里直接显示的槽位等 ID（`Slot: ${slot}`）没法翻译；现在登记成可翻译的词，判断用的 ID 不受影响 ([#139](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/139))
 - `title … actionbar` 文字里的 `@s` 等选择器被当成文字写进 lang，游戏里不再显示玩家名 ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
 - 界面用 `$变量` 比较容器标题（如 `$temp_container_title = '…'`）时没识别，固定写入中文后自定义饰品栏界面失效 ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
 - 脚本用标题把数据发给自定义 HUD（界面按前缀判断、按字符位置截取）时被改成翻译键，界面读不出数据 ([#137](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/137))
