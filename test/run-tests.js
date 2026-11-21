@@ -214,6 +214,18 @@ function renderCommand(cmd, lang) {
             const bk = JSON.parse(tm.files.get('BP/items/book.json').toString());
             check('manifest 末尾多了 } 也能识别成包', bk['minecraft:item'].components['minecraft:display_name'].value === 'item.t:book.name' && NS.parseJsonLenient('{"a":"}{"}\n}').a === '}{' && NS.parseJsonLenient('{"a":1') === undefined, bk);
         }
+        {
+            // 标题当数据发给自定义界面（界面按 'Hp:' 前缀判断、按字符位置截取）：原样保留；普通标题照常翻译
+            const hm = new MemFS(new Map([
+                ['RP/manifest.json', Buffer.from('{"format_version":2,"header":{"name":"pack.name","description":"pack.description","uuid":"91111111-1111-1111-1111-111111111111","version":[1,0,0]},"modules":[{"type":"resources","uuid":"91111111-1111-1111-1111-111111111112","version":[1,0,0]}]}')],
+                ['RP/ui/hud_screen.json', Buffer.from('{"namespace":"hud","t":{"bindings":[{"binding_name":"#hud_title_text_string"},{"binding_type":"view","source_property_name":"((#hud_title_text_string - \'Hp:\') = #hud_title_text_string)","target_property_name":"#visible"},{"binding_type":"view","source_property_name":"(#hud_title_text_string - (\'%.13s\' * #hud_title_text_string))","target_property_name":"#text"}]}}')],
+                ['BP/manifest.json', Buffer.from('{"format_version":2,"header":{"name":"pack.name","description":"pack.description","uuid":"92111111-1111-1111-1111-111111111111","version":[1,0,0]},"modules":[{"type":"script","language":"javascript","entry":"scripts/main.js","uuid":"92111111-1111-1111-1111-111111111112","version":[1,0,0]}],"dependencies":[{"module_name":"@minecraft/server","version":"1.19.0"}]}')],
+                ['BP/scripts/main.js', Buffer.from('import { world } from "@minecraft/server";\nexport function hud(p) {\n p.onScreenDisplay.setTitle(`Hp:${p.hp}HpImage:${p.img}Armor:${p.armor}`);\n p.onScreenDisplay.setTitle(`Welcome back ${p.name}`);\n}\n')],
+            ]));
+            await NS.runPipeline(hm, { baseName: 'x' }, () => {});
+            const hs = hm.files.get('BP/scripts/main.js').toString();
+            check('发给自定义界面的标题数据原样保留', hs.includes('p.onScreenDisplay.setTitle(`Hp:${p.hp}HpImage:${p.img}Armor:${p.armor}`)') && /setTitle\(\{"rawtext":\[\{"translate"/.test(hs), hs.slice(hs.indexOf('export')));
+        }
     }
     {
         // DLCraft：cancelEvent(..., sourceName = 'item') 把参数拼进提示文字，调用处传 'block'
