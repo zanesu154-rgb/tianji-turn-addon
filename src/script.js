@@ -1043,7 +1043,25 @@
     cache.set(s, r);
     return r;
   };
-  const M = (v) => (typeof v === "string" ? lookup(v) || v : v);
+  // 作者自己拼的 RawMessage（{translate:"eb.bar.mode", with:["Wall"]}）：with 里的文字参数也按登记表换成译文
+  const R = (v, d) => {
+    if (d > 6 || v === null || typeof v !== "object") return v;
+    if (Array.isArray(v.rawtext)) {
+      let ch = false;
+      const a = v.rawtext.map((e) => {
+        if (e && typeof e.text === "string" && Object.keys(e).length === 1) { const r = lookup(e.text); if (r) { ch = true; return r; } return e; }
+        const x = R(e, d + 1); if (x !== e) ch = true; return x;
+      });
+      return ch ? Object.assign({}, v, { rawtext: a }) : v;
+    }
+    if (typeof v.translate === "string" && v.with) {
+      if (Array.isArray(v.with)) return v.with.some((x) => typeof x === "string" && lookup(x)) ? Object.assign({}, v, { with: { rawtext: v.with.map(T) } }) : v;
+      const w = R(v.with, d + 1);
+      return w !== v.with ? Object.assign({}, v, { with: w }) : v;
+    }
+    return v;
+  };
+  const M = (v) => (typeof v === "string" ? lookup(v) || v : R(v, 0));
   const MA = (a) => (Array.isArray(a) ? a.map(M) : a);
   const J = (v) => JSON.stringify(String(v)).slice(1, -1);
   const TJ = (v) => JSON.stringify(T(v));
@@ -1662,7 +1680,7 @@
             for (const x of path) debugMemo.set(x, res);
             return res;
         };
-        let debugSkipped = 0, uiDataKept = 0, loreWarned = false;
+        let debugSkipped = 0, uiDataKept = 0, loreWarned = false, nameTagWarned = false;
         const skipDebug = (node) => { walk(node, (x) => { if (isStr(x) && !handled.has(x) && looksLikeText(x.value, 'loose')) debugSkipped++; handled.add(x); }); };
 
         // 选一个文件中没出现过的运行时变量名
@@ -1888,6 +1906,35 @@
             const rest = t.replace(/[@%]?[A-Za-z_][\w:-]*(\.[\w:-]+)+/g, ' ').replace(/\bx\b/g, ' ');
             return /[@%][A-Za-z_][\w:-]*\.[\w:-]/.test(t) && !/[A-Za-z]{2,}/.test(rest);
         };
+        /**
+         * 显示时插进去的变量，取值是文件里一组对象的同名属性（{ slot: 'head' }, { slot: 'ring' } … → `Slot: ${slot}`）：
+         * 这些 ID 会原样显示给玩家，登记成可翻译的词（只在显示处查表，不影响拿 ID 做判断的代码）
+         */
+        let propVals = null;
+        const ID_PROP_SKIP = /^(id|ids|type|typeid|identifier|tag|tags|key|keys|icon|texture|sound|event|item|block|entity|path|file|namespace|component|permutation|state|states)$/i;
+        const registeredIdProps = new Set();
+        function registerIdDisplay(p) {
+            const x = p.expr;
+            if (!x) return;
+            const name = x.type === 'Identifier' ? x.name : (x.type === 'MemberExpression' && !x.computed && x.property.type === 'Identifier' ? x.property.name : null);
+            if (!name || ID_PROP_SKIP.test(name) || registeredIdProps.has(name)) return;
+            if (!propVals) {
+                propVals = new Map();
+                walk(ast, (n) => {
+                    if (n.type !== 'Property' || n.computed || !isStr(n.value)) return;
+                    const k = n.key.type === 'Identifier' ? n.key.name : (isStr(n.key) ? n.key.value : null);
+                    if (!k) return;
+                    if (!propVals.has(k)) propVals.set(k, new Set());
+                    propVals.get(k).add(n.value.value);
+                });
+            }
+            const vals = propVals.get(name);
+            if (!vals || vals.size < 3 || ![...vals].every(v => /^[a-z][a-z0-9_]{1,30}$/.test(v))) return;
+            registeredIdProps.add(name);
+            for (const v of vals) if (!exact.some(([t]) => t === v)) exact.push([v, ctx.alloc(keyBase(sanitizeKeyPart(name)), v, meta(name))]);
+            usesRuntime = true;
+        }
+
         /** 片段 → rawtext 元素代码数组；返回 null 表示没有可翻译文本且无动态部分 */
         function buildElements(parts, hint) {
             const lines = ctx.splitNewlines ? splitLines(parts) : [parts];
@@ -1910,6 +1957,7 @@
                 }
                 if (dyn && isKeyTemplate(line)) { els.push(...line.map(p => ('lit' in p) ? JSON.stringify({ text: p.lit }) : `${RT}.T(${renderPart(p)})`)); usesRuntime = true; return; }
                 if ((looksLikeText(lit, 'loose') || (dyn && wordy(lit))) && !(line.length === 1 && ctx.isKey(lit))) {
+                    if (injectRuntime) line.forEach(p => { if (!('lit' in p)) registerIdDisplay(p); });
                     // 剥离首尾格式码
                     const first = line[0], last = line[line.length - 1];
                     let lead = '', tail = '';
@@ -2136,6 +2184,12 @@
             if (n.type === 'AssignmentExpression' && n.left.type === 'MemberExpression' &&
                 UNTRANSLATABLE_ASSIGN.has(propName(n.left)) && isStr(n.right) && looksLikeText(n.right.value)) {
                 ctx.report(file, `.${propName(n.left)} =`, n.right.value, '名称标签只能是纯文本，不支持翻译键');
+            }
+            // 没选固定写入：变量赋给 nameTag（物品 / 实体名）只能是原文，提醒一次
+            if (!opts.bakeOf && !nameTagWarned && n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'MemberExpression' &&
+                UNTRANSLATABLE_ASSIGN.has(propName(n.left)) && !isStr(n.right) && n.right.type !== 'Literal' && !inDebug(n) && /[A-Z_]{3,}|name|label|title/i.test(src.slice(n.right.start, n.right.end))) {
+                nameTagWarned = true;
+                ctx.warn(`${file}: 脚本给物品 / 实体设置 nameTag，名称标签不支持翻译键，会保持原文；需要中文可勾选“固定写入简体中文”`);
             }
             // 固定写入简体中文：名字标签赋值的是运行时拼出来的文字时，按译文换成纯文字
             if (opts.bakeOf && injectRuntime && n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'MemberExpression' &&

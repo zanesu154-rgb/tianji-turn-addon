@@ -285,6 +285,16 @@ function renderCommand(cmd, lang) {
         check('  └ 勾选后照常提取和补全', v2.includes('Technical Marker') && v2.includes('Hidden Block') && /item\.mm:alyadvancement_big_shot\.name=Big Shot/.test(zh2) && /spawn_egg\.entity\.mm:dummy/.test(zh2));
     }
     {
+        // 作者自己拼的 RawMessage：with 里的文字参数按登记表换成译文；显示的槽位 ID 登记成可翻译的词
+        const cr = new NS.ExtractContext({});
+        const src = 'import { world } from "@minecraft/server";\nconst MODES = [{ id: "wall", label: "Wall" }];\nconst slots = [{ slot: "head", index: 0 }, { slot: "ring", index: 1 }, { slot: "charm", index: 2 }];\nfunction t(k, ...a) { return { translate: k, with: a.map(String) }; }\nexport function f(p, slot) {\n p.onScreenDisplay.setActionBar(t("eb.bar.mode", MODES[0].label));\n p.onScreenDisplay.setActionBar(`§fSlot: ${slot}`);\n p.addTag(`x_${slot}`);\n}\n';
+        const r = NS.processScript(src, 'scripts/r.js', cr, { injectRuntime: true });
+        const out = [], tags = [];
+        require('vm').runInNewContext(r.content.replace(/^import .*$/mg, '').replace(/export /g, '') + '\nf(p, "ring");', { p: { onScreenDisplay: { setActionBar: (m) => out.push(m) }, addTag: (x) => tags.push(x) } });
+        const vals = [...cr.entries.values()].map(e => e.value);
+        check('RawMessage 参数和显示的槽位 ID 也能翻译', /"with":\{"rawtext":\[\{"rawtext":\[\{"translate":"script\.r\./.test(JSON.stringify(out[0])) && /"translate":"script\.r\.slot/.test(JSON.stringify(out[1])) && vals.includes('ring') && tags[0] === 'x_ring', JSON.stringify(out));
+    }
+    {
         // "%stats.total" 这类键引用：游戏按键翻译，不能写进 lang（% 会被转义成 %%）
         const ck = new NS.ExtractContext({});
         const src = 'import { world } from "@minecraft/server";\nexport function f(p, n) {\n p.sendMessage(`§a%potion.emptyPotion.name §7x${n}`);\n p.sendMessage(`§7%item.runecraft: §e${n} §7(%stats.total)`);\n p.sendMessage(`§7Total items: %item.runecraft ${n}`);\n p.sendMessage(`Hello ${n}`);\n}\n';
