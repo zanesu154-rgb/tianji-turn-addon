@@ -246,6 +246,16 @@ function renderCommand(cmd, lang) {
             const ds = dm.files.get('BP/scripts/main.js').toString();
             check('界面用 $变量 比较的容器标题保持原文', ds.includes('e.nameTag = "dorios trinkets"'), ds.slice(ds.indexOf('export')));
         }
+        {
+            // "$slot_txt" 放进 property_bag 再显示成悬停提示：不支持翻译键，列进需人工翻译（不改原文）
+            const bm = new MemFS(new Map([
+                ['RP/manifest.json', Buffer.from('{"format_version":2,"header":{"name":"pack.name","description":"pack.description","uuid":"95111111-1111-1111-1111-111111111111","version":[1,0,0]},"modules":[{"type":"resources","uuid":"95111111-1111-1111-1111-111111111112","version":[1,0,0]}]}')],
+                ['RP/ui/trinkets_menu.json', Buffer.from('{"namespace":"trinkets","grid":{"type":"grid","controls":[{"s1@trinkets.item":{"$slot_txt":"§eFace Slot"}}]},"item":{"type":"panel","controls":[{"hover_text":{"type":"custom","renderer":"hover_text_renderer","property_bag":{"#text1":"$slot_txt"}}}]}}')],
+            ]));
+            const br = await NS.runPipeline(bm, { baseName: 'x' }, () => {});
+            const bj = bm.files.get('RP/ui/trinkets_menu.json').toString();
+            check('property_bag 里显示的界面变量列进需人工翻译', bj.includes('"$slot_txt":"§eFace Slot"') && br.ctx.untranslatable.some(u => u.text === '§eFace Slot'), br.ctx.untranslatable.map(u => u.text));
+        }
     }
     {
         // DLCraft：cancelEvent(..., sourceName = 'item') 把参数拼进提示文字，调用处传 'block'
