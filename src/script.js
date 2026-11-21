@@ -1662,7 +1662,7 @@
             for (const x of path) debugMemo.set(x, res);
             return res;
         };
-        let debugSkipped = 0;
+        let debugSkipped = 0, uiDataKept = 0;
         const skipDebug = (node) => { walk(node, (x) => { if (isStr(x) && !handled.has(x) && looksLikeText(x.value, 'loose')) debugSkipped++; handled.add(x); }); };
 
         // 选一个文件中没出现过的运行时变量名
@@ -1953,6 +1953,22 @@
             return els;
         }
 
+        /**
+         * 发给自定义界面的数据（"Hp:${hp}HpImage:${img}…"）：界面按前缀判断、按字符位置截取，
+         * 翻译或换成 rawtext 都会让界面读错 → 原样保留
+         * 判断：标题 / 动作栏的界面会截取文字，或开头是界面用来判断的前缀；并且字面部分都是“标签:”这类，没有成句的文字
+         */
+        function isUiData(parts, hint) {
+            const lits = parts.filter(p => 'lit' in p).map(p => NS.stripFormatting(p.lit));
+            const dyn = parts.length - lits.length;
+            if (dyn < 2) return false;
+            if (lits.some(l => /\p{L}{2,}[ \t]+\p{L}{2,}/u.test(l))) return false;
+            const head = (lits[0] || '').trim();
+            const prefixed = [...(opts.uiPrefixes || []), ...(opts.uiCompared || [])].some(x => x && head.startsWith(x.trim()));
+            const channel = opts.uiDataChannels && opts.uiDataChannels.has(hint);
+            return prefixed || (channel && dyn >= 3);
+        }
+
         /** 处理一个“显示参数”表达式 */
         function transformSinkExpr(e, hint) {
             if (!e || e.type === 'SpreadElement') return;
@@ -1961,6 +1977,7 @@
             if (opts.uiCompared && isStr(e) && opts.uiCompared.has(e.value.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) { handled.add(e); return; }
             if (isStr(e) || e.type === 'TemplateLiteral' || (e.type === 'BinaryExpression' && e.operator === '+')) {
                 const parts = isStr(e) ? [{ lit: e.value }] : flattenConcat(e);
+                if (parts && isUiData(parts, hint)) { markHandled(e); uiDataKept++; return; }
                 if (parts) {
                     if (!parts.some(p => 'lit' in p)) { wrapM(e); return; }
                     const els = buildElements(parts, hint);
@@ -2728,6 +2745,7 @@
         }
 
         if (debugSkipped) ctx.warn(`${file}: ${debugFile ? '调试脚本' : '调试分支'}里的 ${debugSkipped} 处文本未提取`);
+        if (uiDataKept) ctx.warn(`${file}: ${uiDataKept} 处发给自定义界面的数据（界面按前缀 / 字符位置读取），保持原样`);
 
         // ---- 生成输出 ----
         if (!usesGL) srcPats.length = 0;

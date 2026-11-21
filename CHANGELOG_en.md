@@ -4,6 +4,12 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.21-83 (2026-11-21)
+
+### Fixed
+
+- Titles used by scripts to send data to a custom HUD (read by prefix and character position) were turned into translation keys, so the UI could not read them ([#137](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/137))
+
 ## 2026.11.19-82 (2026-11-19)
 
 ### Improved

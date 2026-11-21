@@ -231,6 +231,7 @@
         // 这些文字翻译后比较就失败，自定义界面不再生效 → 脚本和界面里都保持原文
         ctx.uiCompared = new Set();
         ctx.uiPrefixes = new Set();
+        ctx.uiDataChannels = new Set();
         for (const p of allFiles) {
             const pk = packOf(p);
             if (!pk || pk.type !== 'RP' || !/^ui\/.+\.json$/i.test(relOf(p, pk))) continue;
@@ -241,6 +242,11 @@
                 if (v && /\p{L}{2,}/u.test(NS.stripFormatting(v))) ctx.uiCompared.add(v);
                 // (#title_text - 'inspecting:')：界面减掉这个前缀再显示，前缀后面的文字照常翻译
                 if (m[1] === '-' && m[2] && /[:|]$/.test(m[2])) ctx.uiPrefixes.add(m[2]);
+            }
+            // 界面把标题 / 动作栏文字当数据读（按字符位置截取 '%.172s' * #text）：脚本发过去的是数据，不能翻译
+            if (/'%\.\d+s'\s*\*/.test(txt)) {
+                if (/#hud_title_text_string/.test(txt)) ctx.uiDataChannels.add('settitle');
+                if (/#hud_actionbar_text_string/.test(txt)) ctx.uiDataChannels.add('setactionbar');
             }
         }
         if (ctx.uiCompared.size) log(`[界面] 资源包界面里有 ${ctx.uiCompared.size} 段文字用来判断显示哪个自定义界面（如标题等于 'Magic'），这些文字保持原文不翻译`, 'warn');
@@ -449,7 +455,7 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, bakeOf, localizers, localeBakeOf,
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, uiDataChannels: ctx.uiDataChannels, bakeOf, localizers, localeBakeOf,
                 });
                 if (r.changed) {
                     pending.set(p, r.content);
