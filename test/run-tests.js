@@ -223,6 +223,16 @@ function renderCommand(cmd, lang) {
             check('manifest 末尾多了 } 也能识别成包', bk['minecraft:item'].components['minecraft:display_name'].value === 'item.t:book.name' && NS.parseJsonLenient('{"a":"}{"}\n}').a === '}{' && NS.parseJsonLenient('{"a":1') === undefined, bk);
         }
         {
+            // 写回 JSON 时保留 1.0 这类小数写法：实体 float 属性写成整数时游戏判定定义无效
+            const fm = new MemFS(new Map([
+                ['BP/manifest.json', Buffer.from('{"format_version":2,"header":{"name":"pack.name","description":"pack.description","uuid":"96111111-1111-1111-1111-111111111111","version":[1,0,0]},"modules":[{"type":"data","uuid":"96111111-1111-1111-1111-111111111112","version":[1,0,0]}]}')],
+                ['BP/entities/d.json', Buffer.from('{"format_version":"1.21.70","minecraft:entity":{"description":{"identifier":"t:d","properties":{"t:scale":{"type":"float","range":[0.0,4.0],"default":1.0,"client_sync":true},"t:n":{"type":"int","range":[0,3],"default":0}}},"components":{"minecraft:interact":{"interactions":[{"interact_text":"Interact now"}]},"minecraft:health":{"value":1}}}}')],
+            ]));
+            await NS.runPipeline(fm, { baseName: 'x' }, () => {});
+            const ft = fm.files.get('BP/entities/d.json').toString();
+            check('写回 JSON 时保留 1.0 这类小数写法', /"range": \[\s*0\.0,\s*4\.0\s*\]/.test(ft) && /"default": 1\.0/.test(ft) && /"range": \[\s*0,\s*3\s*\]/.test(ft) && /"value": 1\s/.test(ft) && /action\.interact/.test(ft), ft);
+        }
+        {
             // 标题当数据发给自定义界面（界面按 'Hp:' 前缀判断、按字符位置截取）：原样保留；普通标题照常翻译
             const hm = new MemFS(new Map([
                 ['RP/manifest.json', Buffer.from('{"format_version":2,"header":{"name":"pack.name","description":"pack.description","uuid":"91111111-1111-1111-1111-111111111111","version":[1,0,0]},"modules":[{"type":"resources","uuid":"91111111-1111-1111-1111-111111111112","version":[1,0,0]}]}')],

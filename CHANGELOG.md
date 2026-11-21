@@ -4,7 +4,7 @@
 
 [English](CHANGELOG_en.md)
 
-## 2026.11.21-89（2026-11-21）
+## 2026.11.21-90（2026-11-21）
 
 ### 改进
 
@@ -12,6 +12,7 @@
 
 ### 修复
 
+- 写回 JSON 时 `1.0`、`0.0` 这类小数变成了整数，实体的 float 属性定义被游戏判为无效，后面的属性跟着失效（脚本报 “Property … does not exist”） ([#144](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/144))
 - 作者把 `·` `→` 等换成 ASCII 后显示的句式文字、前面带序号的标题（如“01  Unstable Sneeze - Practice 1”）找不到译文 ([#143](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/143))
 - 整页正文里一个句式把相邻几行吞进参数，显示串行；界面先把 `—` `·` `→` 换成 ASCII 再显示的文字找不到译文；代码截取升级说明冒号前半段再显示（“适用于：…”）时没有译文 ([#142](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/142))
 - 脚本把标题、多段说明和结尾拼成一整页显示时找不到译文（如能力手册的“关于你的能力”“操作”页）；全大写标题、“标签: 数值”、用 `->` 代替 `→` 的文字也能找到了 ([#141](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/141))

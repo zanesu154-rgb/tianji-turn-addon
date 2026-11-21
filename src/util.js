@@ -319,7 +319,77 @@
         return out;
     }
 
+    /**
+     * 记下原文里写成小数的整数（"default": 1.0、"range": [0.0, 4.0]）：JSON.parse 之后它们和 1、4 分不出来，
+     * 写回时会变成整数。实体属性 "type": "float" 写成整数时游戏会判定定义无效，后面的属性也一起没了，
+     * 所以写回时要保持小数写法。按路径记（同一个文件里别处真正的整数不受影响）
+     */
+    const floatPaths = new WeakMap();
+    function recordFloatPaths(obj, text) {
+        if (!obj || typeof obj !== 'object' || !/\d\.0*[\s,\]}]|\d[eE]/.test(text)) return obj;
+        const set = new Set();
+        const stack = [];   // { arr: bool, idx, key }
+        let i = 0, pendingKey = null;
+        const pathNow = () => stack.map(f => f.arr ? f.idx : f.key).join('\u0001');
+        const n = text.length;
+        while (i < n) {
+            const c = text[i];
+            if (c === '"') {
+                let j = i + 1;
+                while (j < n && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+                const str = text.slice(i, j + 1);
+                i = j + 1;
+                let k = i; while (k < n && /\s/.test(text[k])) k++;
+                if (text[k] === ':' && stack.length && !stack[stack.length - 1].arr) { try { pendingKey = JSON.parse(str); } catch (e) { pendingKey = str.slice(1, -1); } }
+                continue;
+            }
+            if (c === '{' || c === '[') {
+                if (stack.length) { const top = stack[stack.length - 1]; if (!top.arr) top.key = pendingKey; }
+                stack.push({ arr: c === '[', idx: 0, key: null });
+                i++; continue;
+            }
+            if (c === '}' || c === ']') { stack.pop(); i++; continue; }
+            if (c === ',') { const top = stack[stack.length - 1]; if (top && top.arr) top.idx++; i++; continue; }
+            if (c === '-' || (c >= '0' && c <= '9')) {
+                const m = /^-?\d+(\.\d+)?([eE][+-]?\d+)?/.exec(text.slice(i, i + 40));
+                if (m) {
+                    if ((m[1] || m[2]) && Number.isInteger(Number(m[0]))) {
+                        const top = stack[stack.length - 1];
+                        if (top && !top.arr) top.key = pendingKey;
+                        set.add(pathNow());
+                    }
+                    i += m[0].length; continue;
+                }
+            }
+            i++;
+        }
+        if (set.size) floatPaths.set(obj, set);
+        return obj;
+    }
+
+    /** 写回 JSON：按 recordFloatPaths 记下的位置保留 1.0 这类小数写法 */
+    function stringifyJson(obj, indent = 2) {
+        const set = obj && typeof obj === 'object' ? floatPaths.get(obj) : null;
+        if (!set) return JSON.stringify(obj, null, indent);
+        const paths = new WeakMap();
+        const MARK = '\u0000F';
+        const out = JSON.stringify(obj, function (key, value) {
+            const base = this === undefined || key === '' ? null : paths.get(this);
+            const p = key === '' ? '' : (base ? base + '\u0001' : '') + key;
+            if (value && typeof value === 'object') { paths.set(value, p); return value; }
+            if (typeof value === 'number' && Number.isInteger(value) && set.has(p)) return MARK + value;
+            return value;
+        }, indent);
+        return out.replace(/"\\u0000F(-?\d+)"/g, '$1.0');
+    }
+
     function parseJsonLenient(content) {
+        const r = parseJsonLenientRaw(content);
+        if (r && typeof r === 'object') { try { recordFloatPaths(r, stripJsonCommentsAndCommas(stripBOM(content))); } catch (e) { /* 记不下来就按整数写 */ } }
+        return r;
+    }
+
+    function parseJsonLenientRaw(content) {
         const s = stripBOM(content);
         try { return JSON.parse(s); } catch (e) { /* 继续 */ }
         try { return JSON.parse(stripJsonCommentsAndCommas(s)); } catch (e) { /* 继续 */ }
@@ -363,6 +433,6 @@
         looksLikeCode, looksLikeText, stripKeyRefs, hasKeyRefs,
         hash6, sanitizeKeyPart, sanitizeKey, fileBaseOf, humanizeIdentifier,
         stripBOM, parseLang, langNotes, toLangValue, fixMixedPlaceholders, pctArgs, pctPlain,
-        stripJsonCommentsAndCommas, parseJsonLenient, escapeRegex,
+        stripJsonCommentsAndCommas, parseJsonLenient, stringifyJson, escapeRegex,
     });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

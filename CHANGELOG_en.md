@@ -4,7 +4,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.21-89 (2026-11-21)
+## 2026.11.21-90 (2026-11-21)
 
 ### Improved
 
@@ -12,6 +12,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
+- Writing JSON back turned decimals such as `1.0` and `0.0` into integers, so float entity properties became invalid and later properties went missing (scripts reported "Property … does not exist") ([#144](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/144))
 - Pattern text shown after the author replaced `·` `→` etc. with ASCII, and titles with a leading number (e.g. "01  Unstable Sneeze - Practice 1"), were not matched ([#143](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/143))
 - On full-page text, one pattern could swallow neighbouring lines into its arguments; text that the UI turns into ASCII (`—` `·` `→`) before showing was not matched; the part before the colon of upgrade descriptions, cut out by code ("Applies to: …"), had no translation ([#142](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/142))
 - Pages that scripts build by joining a title, several paragraphs and a footer were not matched to translations (e.g. ability guide pages); all-caps titles, "label: value" lines and `->` used instead of `→` are matched too ([#141](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/141))
