@@ -4,7 +4,7 @@
 
 [English](CHANGELOG_en.md)
 
-## 2026.11.21-87（2026-11-21）
+## 2026.11.21-88（2026-11-21）
 
 ### 改进
 
@@ -12,6 +12,7 @@
 
 ### 修复
 
+- 整页正文里一个句式把相邻几行吞进参数，显示串行；界面先把 `—` `·` `→` 换成 ASCII 再显示的文字找不到译文；代码截取升级说明冒号前半段再显示（“适用于：…”）时没有译文 ([#142](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/142))
 - 脚本把标题、多段说明和结尾拼成一整页显示时找不到译文（如能力手册的“关于你的能力”“操作”页）；全大写标题、“标签: 数值”、用 `->` 代替 `→` 的文字也能找到了 ([#141](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/141))
 - 自定义界面里通过 property_bag 显示的悬停文字（如饰品栏的“Face Slot”）没有列出来；现在列进需人工翻译 ([#140](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/140))
 - 包作者自己用翻译键拼的消息（`{translate, with:["Wall"]}`），参数里的文字没翻译 ([#139](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/139))

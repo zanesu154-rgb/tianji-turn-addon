@@ -4,7 +4,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.21-87 (2026-11-21)
+## 2026.11.21-88 (2026-11-21)
 
 ### Improved
 
@@ -12,6 +12,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
+- On full-page text, one pattern could swallow neighbouring lines into its arguments; text that the UI turns into ASCII (`—` `·` `→`) before showing was not matched; the part before the colon of upgrade descriptions, cut out by code ("Applies to: …"), had no translation ([#142](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/142))
 - Pages that scripts build by joining a title, several paragraphs and a footer were not matched to translations (e.g. ability guide pages); all-caps titles, "label: value" lines and `->` used instead of `→` are matched too ([#141](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/141))
 - Hover text shown through property_bag in custom UIs (e.g. "Face Slot" in a trinket screen) was not listed; it is now listed for manual translation ([#140](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/140))
 - Text arguments in messages the author builds with translation keys (`{translate, with:["Wall"]}`) were not translated ([#139](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/139))
