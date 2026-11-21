@@ -4,10 +4,16 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.21-83 (2026-11-21)
+## 2026.11.21-84 (2026-11-21)
+
+### Improved
+
+- When an older `setLore` cannot use translation keys, the log suggests "Bake Simplified Chinese" ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
 
 ### Fixed
 
+- Selectors such as `@s` in `title … actionbar` text were written into lang as text, so the player name no longer showed ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
+- UI comparisons on `$variables` (e.g. `$temp_container_title = '…'`) were not detected, so baking Chinese broke custom container screens ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
 - Titles used by scripts to send data to a custom HUD (read by prefix and character position) were turned into translation keys, so the UI could not read them ([#137](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/137))
 
 ## 2026.11.19-82 (2026-11-19)

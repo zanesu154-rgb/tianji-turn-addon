@@ -129,6 +129,14 @@ function renderCommand(cmd, lang) {
             const u2 = NS.translateCommand('tag @a add Spawnpoint_Save', cu, 'k2', 'f');
             check('下划线连起来的词在 title 里也提取', u1.changed && [...cu.entries.values()].some(e => e.value === 'Spawnpoint_Save') && !u2.changed && !NS.isUnderscoreWords('abc_123') && !NS.isUnderscoreWords('minecraft:stone'), u1.cmd);
         }
+        {
+            // title 文字里的 @s 会被换成实体名：转换后作为 selector 参数，不写死进 lang；邮箱不算选择器
+            const cs = new NS.ExtractContext({});
+            const t1 = NS.translateCommand('execute as @a run title @s actionbar §3The Deku Tree wants to talk to you! @s, get up!', cs, 'k', 'f').cmd;
+            const t2 = NS.translateCommand('title @a title Mail me at me@pack.com please', cs, 'k2', 'f').cmd;
+            const vals = [...cs.entries.values()].map(e => e.value);
+            check('title 文字里的选择器转成 selector 参数', /"with":\{"rawtext":\[\{"selector":"@s"\}\]\}/.test(t1) && vals.includes('§3The Deku Tree wants to talk to you! %1$s, get up!') && !/selector/.test(t2) && vals.includes('Mail me at me@pack.com please'), [t1, vals]);
+        }
         const ca = new NS.ExtractContext({}); ca.sayMode = 'actionbar';
         check('tell @p → titleraw @p actionbar', /^titleraw @p actionbar /.test(NS.translateCommand('tell @p 小心背后', ca, 'k', 'f').cmd));
         check('say 100% / say @a 不转换', !NS.translateCommand('say 100%', ct, 'k', 'f').changed && !NS.translateCommand('say @a', ct, 'k', 'f').changed);
@@ -225,6 +233,18 @@ function renderCommand(cmd, lang) {
             await NS.runPipeline(hm, { baseName: 'x' }, () => {});
             const hs = hm.files.get('BP/scripts/main.js').toString();
             check('发给自定义界面的标题数据原样保留', hs.includes('p.onScreenDisplay.setTitle(`Hp:${p.hp}HpImage:${p.img}Armor:${p.armor}`)') && /setTitle\(\{"rawtext":\[\{"translate"/.test(hs), hs.slice(hs.indexOf('export')));
+        }
+        {
+            // 界面用 $变量 比较容器标题（chest_screen："($temp_container_title = 'dorios trinkets')"）：脚本里的名字保持原文
+            const dm = new MemFS(new Map([
+                ['RP/manifest.json', Buffer.from('{"format_version":2,"header":{"name":"pack.name","description":"pack.description","uuid":"93111111-1111-1111-1111-111111111111","version":[1,0,0]},"modules":[{"type":"resources","uuid":"93111111-1111-1111-1111-111111111112","version":[1,0,0]}]}')],
+                ['RP/ui/chest_screen.json', Buffer.from('{"namespace":"chest","small_chest_screen":{"$screen_content":"chest.small_chest_panel","variables":[{"requires":"($temp_container_title = \'dorios trinkets\')","$screen_content":"trinkets.panel"}]}}')],
+                ['BP/manifest.json', Buffer.from('{"format_version":2,"header":{"name":"pack.name","description":"pack.description","uuid":"94111111-1111-1111-1111-111111111111","version":[1,0,0]},"modules":[{"type":"script","language":"javascript","entry":"scripts/main.js","uuid":"94111111-1111-1111-1111-111111111112","version":[1,0,0]}],"dependencies":[{"module_name":"@minecraft/server","version":"1.19.0"}]}')],
+                ['BP/scripts/main.js', Buffer.from('import { world } from "@minecraft/server";\nexport function inv(e) { e.nameTag = "dorios trinkets"; }\n')],
+            ]));
+            await NS.runPipeline(dm, { baseName: 'x', bakeZh: true, bakeLang: new Map([['script.main.str', '多里奥的饰品']]) }, () => {});
+            const ds = dm.files.get('BP/scripts/main.js').toString();
+            check('界面用 $变量 比较的容器标题保持原文', ds.includes('e.nameTag = "dorios trinkets"'), ds.slice(ds.indexOf('export')));
         }
     }
     {

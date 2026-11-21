@@ -237,7 +237,8 @@
             if (!pk || pk.type !== 'RP' || !/^ui\/.+\.json$/i.test(relOf(p, pk))) continue;
             let txt;
             try { txt = await fs.readText(p); } catch (e) { continue; }
-            for (const m of txt.matchAll(/#[\w.]+\s*(=|-)\s*'([^']+)'|'([^']+)'\s*=\s*#[\w.]+/g)) {
+            // 也认 $变量（chest_screen 里常见："requires": "($temp_container_title = 'dorios trinkets')"）
+            for (const m of txt.matchAll(/[#$][\w.]+\s*(=|-)\s*'([^']+)'|'([^']+)'\s*=\s*[#$][\w.]+/g)) {
                 const v = (m[2] || m[3]).trim();
                 if (v && /\p{L}{2,}/u.test(NS.stripFormatting(v))) ctx.uiCompared.add(v);
                 // (#title_text - 'inspecting:')：界面减掉这个前缀再显示，前缀后面的文字照常翻译
