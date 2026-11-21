@@ -398,6 +398,7 @@
     function collectUiVarUsage(uiFiles) {
         const textVars = new Set(BUILTIN_TEXT_VARS);
         const nonText = new Set();
+        const bagVars = new Set();      // 放进 property_bag（"#text1": "$slot_txt"）再由绑定显示的变量：游戏按原文显示，不支持翻译键
         const alias = [];          // [被赋值的变量, 引用的变量]
         const consumers = new Map(); // 变量名 → [{ obj, key, ns, path }]（"text": "$变量" 的标签）
         const elements = new Map();  // "命名空间.控件名" → { obj, key, ns }
@@ -422,7 +423,7 @@
                                 if (!consumers.has(exact[1])) consumers.set(exact[1], []);
                                 consumers.get(exact[1]).push({ obj: node, key: nodeKey, ns, path });
                             } else if (k.startsWith('$')) alias.push([varNameOf(k), exact[1]]);
-                            else if (!TTS_PROPS.test(k)) nonText.add(exact[1]);
+                            else if (!TTS_PROPS.test(k)) { nonText.add(exact[1]); if (k.startsWith('#')) bagVars.add(exact[1]); }
                             continue;
                         }
                         const re = /\$([A-Za-z0-9_]+)/g;
@@ -457,7 +458,7 @@
                 }
             }
         }
-        return { textVars, nonText, consumers, elements };
+        return { textVars, nonText, consumers, elements, bagVars };
     }
 
     /**
@@ -593,6 +594,9 @@
                             node[k] = ctx.alloc(`ui.${fileBase}.${ctrl}.${name}`, v, { file, kind: 'ui', scope: 'ui' });
                             for (const c of usage.consumers.get(name) || []) ensureLocalized(c.obj, c.key, c.ns, c.path);
                             changed = true;
+                        } else if (usage.bagVars && usage.bagVars.has(name) && okText(v)) {
+                            // 如 "$slot_txt": "§eFace Slot" → property_bag "#text1" → 悬停提示：只能改原文，列进需人工翻译
+                            ctx.report(file, `${ctrl} ${k}`, v, '界面悬停提示只显示纯文字，不支持翻译键');
                         }
                     }
                 } else {

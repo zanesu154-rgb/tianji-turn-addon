@@ -4,7 +4,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.21-85 (2026-11-21)
+## 2026.11.21-86 (2026-11-21)
 
 ### Improved
 
@@ -12,6 +12,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
+- Hover text shown through property_bag in custom UIs (e.g. "Face Slot" in a trinket screen) was not listed; it is now listed for manual translation ([#140](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/140))
 - Text arguments in messages the author builds with translation keys (`{translate, with:["Wall"]}`) were not translated ([#139](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/139))
 - IDs shown directly in messages (`Slot: ${slot}`) could not be translated; they are now registered as translatable words, IDs used in logic are unaffected ([#139](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/139))
 - Selectors such as `@s` in `title … actionbar` text were written into lang as text, so the player name no longer showed ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
