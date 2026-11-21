@@ -295,6 +295,16 @@ function renderCommand(cmd, lang) {
         check('  └ 勾选后照常提取和补全', v2.includes('Technical Marker') && v2.includes('Hidden Block') && /item\.mm:alyadvancement_big_shot\.name=Big Shot/.test(zh2) && /spawn_egg\.entity\.mm:dummy/.test(zh2));
     }
     {
+        // 运行时：几段拼成一页（标题 + 多段说明 + 结尾）、全大写标题、"标签: 数值"、"->" 代替 "→"
+        const cm = new NS.ExtractContext({});
+        const src = 'import { world } from "@minecraft/server";\nconst D = { name: "Explosive Sneezes", details: "Pressure builds slowly.\\n\\nRelease spends it all.", up: "Release radius: 2 → 3 blocks" };\nconst L = ["Hit radius"];\nexport function f(p, n) {\n p.sendMessage(D.details);\n p.sendMessage(D.name);\n p.sendMessage(D.up);\n p.sendMessage(L[0]);\n p.sendMessage("Hello there friend");\n}\nexport function g(p, n) { p.sendMessage(n); }\n';
+        const r = NS.processScript(src, 'scripts/m.js', cm, { injectRuntime: true });
+        const out = [];
+        const code = r.content.replace(/^import .*$/mg, '').replace(/export /g, '') + '\ng(p, "§lBig Title§r\\n\\nPressure builds slowly.\\n\\nRelease spends it all.\\n\\nHello there friend"); g(p, "EXPLOSIVE SNEEZES"); g(p, "Hit radius: 1.25 blocks"); g(p, "Release radius: 2 -> 3 blocks");';
+        require('vm').runInNewContext(code, { p: { sendMessage: (m) => out.push(JSON.stringify(m)) } });
+        check('运行时：拼成一页的多段说明、全大写、标签: 数值、-> 箭头都能找到', /script\.m\.[a-z_0-9]+"\}.*script\.m\./.test(out[0]) && !/Pressure builds/.test(out[0]) && /"translate":"script\.m\./.test(out[1]) && /"translate":"script\.m\.[^"]*"\},\{"text":": "\}/.test(out[2]) && /"translate":"script\.m\./.test(out[3]), out);
+    }
+    {
         // 作者自己拼的 RawMessage：with 里的文字参数按登记表换成译文；显示的槽位 ID 登记成可翻译的词
         const cr = new NS.ExtractContext({});
         const src = 'import { world } from "@minecraft/server";\nconst MODES = [{ id: "wall", label: "Wall" }];\nconst slots = [{ slot: "head", index: 0 }, { slot: "ring", index: 1 }, { slot: "charm", index: 2 }];\nfunction t(k, ...a) { return { translate: k, with: a.map(String) }; }\nexport function f(p, slot) {\n p.onScreenDisplay.setActionBar(t("eb.bar.mode", MODES[0].label));\n p.onScreenDisplay.setActionBar(`§fSlot: ${slot}`);\n p.addTag(`x_${slot}`);\n}\n';
