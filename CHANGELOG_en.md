@@ -4,7 +4,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
-## 2026.11.21-86 (2026-11-21)
+## 2026.11.21-87 (2026-11-21)
 
 ### Improved
 
@@ -12,6 +12,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
+- Pages that scripts build by joining a title, several paragraphs and a footer were not matched to translations (e.g. ability guide pages); all-caps titles, "label: value" lines and `->` used instead of `→` are matched too ([#141](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/141))
 - Hover text shown through property_bag in custom UIs (e.g. "Face Slot" in a trinket screen) was not listed; it is now listed for manual translation ([#140](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/140))
 - Text arguments in messages the author builds with translation keys (`{translate, with:["Wall"]}`) were not translated ([#139](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/139))
 - IDs shown directly in messages (`Slot: ${slot}`) could not be translated; they are now registered as translatable words, IDs used in logic are unaffected ([#139](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/139))

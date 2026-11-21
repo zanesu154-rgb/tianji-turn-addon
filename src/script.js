@@ -842,6 +842,7 @@
   };
   // 多行文本按“每行去掉首尾空白”再比一次（代码常先 trim 每行再显示）
   const N = (s) => s.split("\\n").map((l) => l.trim()).join("\\n");
+  let upper = null;   // 全大写 → 键（第一次用到时才建；登记新文字时清掉重建）
   const one = (s) => {
     let k = m.get(s);
     if (k) return [{ translate: k }];
@@ -853,11 +854,25 @@
       if (mm[3]) r.push({ text: mm[3] });
       return r;
     }
+    // 全大写显示的标题（"EXPLOSIVE SNEEZES"、ability.toUpperCase()）：按不分大小写再找一次
+    const up = mm ? mm[2] : s;
+    if (up.length < 120 && /\\p{Lu}/u.test(up) && up === up.toUpperCase() && up !== up.toLowerCase()) {
+      if (!upper) { upper = new Map(); for (const [t, kk] of m) { const u = t.toUpperCase(); if (u !== t && !upper.has(u)) upper.set(u, kk); } }
+      if ((k = upper.get(up))) {
+        const r = [{ translate: k }];
+        if (mm && mm[1]) r.unshift({ text: mm[1] });
+        if (mm && mm[3]) r.push({ text: mm[3] });
+        return r;
+      }
+    }
     // 下面是模糊匹配：太长、或去掉颜色码和图标字形后没有字母的（小地图、进度条这类字形画）直接放弃，
     // 否则每 tick 刷新的长字符串会让正则回溯卡死脚本（Watchdog hang）
-    if (s.length > FUZZY_MAX || !/\\p{L}/u.test(s.replace(/\\u00a7./g, "").replace(/[\\ue000-\\uf8ff]/g, ""))) return null;
+    if (!/\\p{L}/u.test(s.replace(/\\u00a7./g, "").replace(/[\\ue000-\\uf8ff]/g, ""))) return null;
+    // 太长的（整页说明拼起来的）只试占位符少的句式：字面片段先排除，正则回溯有限
+    const long = s.length > FUZZY_MAX;
     const pat = (t) => {
       for (const [pk, re, , ord, lits] of p) {
+        if (long && lits.length > 4) continue;
         // 先用字面量片段快速排除：开头、结尾、中间片段按顺序都得出现
         const last = lits[lits.length - 1];
         if (!t.startsWith(lits[0]) || !t.endsWith(last)) continue;
@@ -874,6 +889,7 @@
     };
     let r = pat(s);
     if (r) return r;
+    if (long) return null;
     // 句式两端多了颜色码（如 "§c" + reason）
     if (mm && mm[2] !== s && mm[2] && (r = pat(mm[2]))) {
       if (mm[1]) r.unshift({ text: mm[1] });
@@ -887,6 +903,15 @@
       if (nm[1]) r3.unshift({ text: nm[1] });
       if (nm[3]) r3.push({ text: nm[3] });
       return r3;
+    }
+    // "标签: 数值"（"Hit radius: 1.25 blocks"）：标签认识时翻译标签，后面的数值部分能找到就一起换
+    const lv = /^((?:\\u00a7.)*)([^:\\n]{2,40}?)(\\s*[:：]\\s*)([^\\n]+)$/.exec(s);
+    if (lv && (k = m.get(lv[2].trim()))) {
+      const r4 = [{ translate: k }, { text: lv[3] }];
+      if (lv[1]) r4.unshift({ text: lv[1] });
+      const rest = m.get(lv[4]);
+      r4.push(rest ? { translate: rest } : { text: lv[4] });
+      return r4;
     }
     // 颜色码被代码替换过（如浅色背景下把 §7 换成 §8）：忽略颜色码再比一次，用原文的颜色
     const core = mm ? mm[2] : s;
@@ -922,7 +947,8 @@
     }
     return hit ? els : null;
   };
-  const F = (t) => t.replace(/\u00a7./g, "").trim();
+  // 比较用的写法：去掉颜色码；箭头 "->" 和 "→" 当成一样（有的界面字体没有 → 字形，作者会替换掉）
+  const F = (t) => t.replace(/\u00a7./g, "").replace(/\s*(?:\u2192|->)\s*/g, " -> ").trim();
   const F2 = (t) => t.replace(/\u00a7./g, "");
   let cf = null;
   // 用逗号 / 分号 / 竖线等拼起来的列表（如 names.join(", ")）：每一项都认识时逐项翻译
@@ -1012,12 +1038,30 @@
       const lines = (t, els, endR) => {
         let hit = false;
         const ls = t.split("\\n");
-        ls.forEach((l, i) => {
+        // 作者把几段拼成一页（"标题\\n\\n" + 说明 + "\\n\\n结尾"）：先找连续几行合起来正好是一条登记文字的（只查表，不做模糊匹配）
+        const exactRun = (x) => {
+          let k = m.get(x) || m.get(N(x));
+          if (k) return [{ translate: k }];
+          const mm = /^((?:\\u00a7.)*)([\\s\\S]*?)((?:\\u00a7.)*)$/.exec(x);
+          if (mm && mm[2] !== x && mm[2] && (k = m.get(mm[2]))) return [mm[1] ? { text: mm[1] } : null, { translate: k }, mm[3] ? { text: mm[3] } : null].filter(Boolean);
+          return null;
+        };
+        for (let i = 0; i < ls.length; i++) {
           if (i) els.push({ text: "\\n" });
-          if (!l) return;
+          let run = null, end = i;
+          if (ls.length > 2) {
+            for (let j = Math.min(ls.length - 1, i + 40); j > i; j--) {
+              if (!ls[j]) continue;
+              const x = exactRun(ls.slice(i, j + 1).join("\\n"));
+              if (x) { run = x; end = j; break; }
+            }
+          }
+          if (run) { hit = true; els.push(...run); i = end; continue; }
+          const l = ls[i];
+          if (!l) continue;
           const x = one(l) || tailOne(l) || (endR && i === ls.length - 1 && one(l + "\\u00a7r")) || pieces(l);
           if (x) { hit = true; els.push(...x); } else els.push({ text: l });
-        });
+        }
         return hit;
       };
       if (s.indexOf("\\u00a7r\\n") < 0) r = un(s);
@@ -1112,7 +1156,7 @@
     return it.getLore();
   };
   const reg = (exact, pats, sp, srcs) => {
-    cf = null;
+    cf = null; upper = null;
     for (const [k, lits] of srcs || []) if (!srcPat.has(k)) srcPat.set(k, [lits, null]);
     if (sp) for (const x of sp) if (seps.indexOf(x) < 0) seps.push(x);
     for (const [s, k] of exact) {
