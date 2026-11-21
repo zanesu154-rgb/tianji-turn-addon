@@ -887,9 +887,34 @@
       }
       return null;
     };
+    // 句式按 ASCII 化的写法再比一次（作者把 · → — 换掉了，如 "Unstable Sneeze - Practice 1"）：只在原样找不到时用
+    const patF = (t) => {
+      if (!pf) pf = p.map(([pk, , , ord, lits]) => { const fl = lits.map(G); return [pk, new RegExp("^" + fl.map(esc).join(fl.some((x) => x.indexOf("\\n") >= 0) ? "([\\s\\S]*?)" : "([^\\n]*?)") + "$"), ord, fl]; });
+      // 只用于去掉了颜色码的文字（中间还有颜色码的，说明没被 ASCII 化过，别放宽）
+      if (/§/.test(t.replace(/^(?:§.)+|(?:§.)+$/g, ""))) return null;
+      const g = G(t);
+      if (g === t && !/[-'"]/.test(t)) return null;
+      for (const [pk, re, ord, fl] of pf) {
+        if (long && fl.length > 4) continue;
+        if (!g.startsWith(fl[0]) || !g.endsWith(fl[fl.length - 1])) continue;
+        const x = re.exec(g);
+        if (!x) continue;
+        let caps = x.slice(1);
+        if (ord && ord.length) { const a = []; ord.forEach((gi, i) => { if (a[gi - 1] === undefined) a[gi - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
+        return [{ translate: pk, with: { rawtext: caps.map(T) } }];
+      }
+      return null;
+    };
     let r = pat(s);
     if (r) return r;
     if (long) return null;
+    // 前面带序号（"01  Unstable Sneeze · Practice 1"）：序号原样，后面的整句再找
+    const ix = /^((?:\\u00a7.)*\\d{1,3}[\\s.)]+)(\\S[^\\n]*)$/.exec(s);
+    if (ix && /\\p{L}/u.test(ix[2])) {
+      const kk = m.get(ix[2]);
+      const r5 = kk ? [{ translate: kk }] : (pat(ix[2]) || patF(ix[2]));
+      if (r5) return [{ text: ix[1] }, ...r5];
+    }
     // 句式两端多了颜色码（如 "§c" + reason）
     if (mm && mm[2] !== s && mm[2] && (r = pat(mm[2]))) {
       if (mm[1]) r.unshift({ text: mm[1] });
@@ -927,7 +952,7 @@
         return r2;
       }
     }
-    return runs(s) || list(s);
+    return patF(s) || (mm && mm[2] !== s && mm[2] && patF(mm[2])) || runs(s) || list(s);
   };
   // 按颜色码分段，每段都认识（或没有文字）时逐段翻译："§a+2 max health §8[flat]§r"
   const runs = (s) => {
@@ -951,7 +976,9 @@
   // 有的界面字体只有 ASCII，作者会先把 → — · 弯引号换掉、删掉其余非 ASCII 字符再显示：比较时两边都这样折一遍
   const F = (t) => t.replace(/\u00a7./g, "").replace(/\\s*(?:\u2192|->)\\s*/g, " -> ").replace(/[\u2014\u2013\u00b7]/g, "-").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^\\x20-\\x7e\\n\\p{L}\\p{N}]/gu, "").replace(/~/g, "-").replace(/[ \\t]+/g, " ").trim();
   const F2 = (t) => t.replace(/\u00a7./g, "");
-  let cf = null;
+  let cf = null, pf = null;
+  // 句式比较用：和 F 一样折成 ASCII，但不去首尾空白（保持片段边界）
+  const G = (t) => t.replace(/§./g, "").replace(/\\s*(?:→|->)\\s*/g, " -> ").replace(/[—–·]/g, "-").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^\\x20-\\x7e\\n\\p{L}\\p{N}]/gu, "").replace(/~/g, "-");
   // 用逗号 / 分号 / 竖线等拼起来的列表（如 names.join(", ")）：每一项都认识时逐项翻译
   // join("§7 or §f") 这类带文字的分隔符（静态扫描时登记）
   const seps = [];
@@ -1157,7 +1184,7 @@
     return it.getLore();
   };
   const reg = (exact, pats, sp, srcs) => {
-    cf = null; upper = null;
+    cf = null; upper = null; pf = null;
     for (const [k, lits] of srcs || []) if (!srcPat.has(k)) srcPat.set(k, [lits, null]);
     if (sp) for (const x of sp) if (seps.indexOf(x) < 0) seps.push(x);
     for (const [s, k] of exact) {

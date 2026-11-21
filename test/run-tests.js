@@ -295,6 +295,15 @@ function renderCommand(cmd, lang) {
         check('  └ 勾选后照常提取和补全', v2.includes('Technical Marker') && v2.includes('Hidden Block') && /item\.mm:alyadvancement_big_shot\.name=Big Shot/.test(zh2) && /spawn_egg\.entity\.mm:dummy/.test(zh2));
     }
     {
+        // 句式按 ASCII 化写法匹配（· 被换成 -），前面带序号的标题
+        const cz = new NS.ExtractContext({});
+        const src = 'import { world } from "@minecraft/server";\nexport const P = (a, n) => `${a} · Practice ${n}`;\nexport function g(p, n) { p.sendMessage(n); }\nexport function f(p) { p.sendMessage("Unstable Sneeze"); }\n';
+        const r = NS.processScript(src, 'scripts/z.js', cz, { injectRuntime: true });
+        const out = [];
+        require('vm').runInNewContext(r.content.replace(/^import .*$/mg, '').replace(/export /g, '') + '\ng(p, "01  Unstable Sneeze - Practice 1"); g(p, "Rage - not a pattern here");', { p: { sendMessage: (m) => out.push(JSON.stringify(m)) } });
+        check('ASCII 化的句式和带序号的标题也能找到', /^\{"rawtext":\[\{"text":"01  "\},\{"translate":"script\.z\.fmt"/.test(out[0]) && out[1] === '"Rage - not a pattern here"', out);
+    }
+    {
         // 整页正文：单行句式的占位符不跨行（不吞别的行）；ASCII 化的文字（— · → 被替换）也能找到；升级说明冒号前半段单独登记
         const cq = new NS.ExtractContext({});
         const src = 'import { world } from "@minecraft/server";\nconst U = ["Release radius: 2 → 3 blocks"];\nexport function f(p, a, b) {\n p.sendMessage("Rage — burns hotter · fast");\n p.sendMessage(U[0]);\n}\nexport const S = (a, b) => `${a} / ${b} challenges done`;\nexport const A = (a) => `Applies to: ${a}.`;\nexport function g(p, n) { p.sendMessage(n); }\nconst cut = (l) => l.slice(0, l.indexOf(":"));\n';
