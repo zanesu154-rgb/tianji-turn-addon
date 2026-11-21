@@ -1662,7 +1662,7 @@
             for (const x of path) debugMemo.set(x, res);
             return res;
         };
-        let debugSkipped = 0, uiDataKept = 0;
+        let debugSkipped = 0, uiDataKept = 0, loreWarned = false;
         const skipDebug = (node) => { walk(node, (x) => { if (isStr(x) && !handled.has(x) && looksLikeText(x.value, 'loose')) debugSkipped++; handled.add(x); }); };
 
         // 选一个文件中没出现过的运行时变量名
@@ -2097,6 +2097,11 @@
                     });
                     else if (a.type !== 'Literal' && a.type !== 'SpreadElement') { usesRuntime = true; overrides.set(a, () => `${RT}.MA(${renderOrig(a)})`); }
                     return;
+                }
+                // 不支持 RawMessage 的 setLore，又没选固定写入：lore 只能是原文，提醒一次（字面量的已在需人工翻译里列出）
+                if (name === 'setLore' && !opts.rawLore && !opts.bakeOf && n.arguments[0] && !inDebug(n) && !isStr(n.arguments[0]) && !(n.arguments[0].type === 'ArrayExpression' && n.arguments[0].elements.every(e => !e || isStr(e))) && !loreWarned) {
+                    loreWarned = true;
+                    ctx.warn(`${file}: 用 setLore 写物品描述，@minecraft/server 低于 2.2.0 时不支持翻译键，描述会保持原文；需要中文可勾选“固定写入简体中文”`);
                 }
                 // 不支持 RawMessage 的 setLore：选了“按简体中文固定写入”时逐行换成译文
                 if (name === 'setLore' && !opts.rawLore && opts.bakeOf && injectRuntime && n.callee.type === 'MemberExpression' && n.arguments[0] && !inDebug(n)) {

@@ -4,10 +4,16 @@
 
 [English](CHANGELOG_en.md)
 
-## 2026.11.21-83（2026-11-21）
+## 2026.11.21-84（2026-11-21）
+
+### 改进
+
+- 低版本 `setLore` 不能用翻译键时，日志提示可用“固定写入简体中文” ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
 
 ### 修复
 
+- `title … actionbar` 文字里的 `@s` 等选择器被当成文字写进 lang，游戏里不再显示玩家名 ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
+- 界面用 `$变量` 比较容器标题（如 `$temp_container_title = '…'`）时没识别，固定写入中文后自定义饰品栏界面失效 ([#138](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/138))
 - 脚本用标题把数据发给自定义 HUD（界面按前缀判断、按字符位置截取）时被改成翻译键，界面读不出数据 ([#137](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/137))
 
 ## 2026.11.19-82（2026-11-19）

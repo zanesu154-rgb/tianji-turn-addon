@@ -94,9 +94,12 @@
      *  - 消息里的选择器（@p、@a[…]）保留为 selector，作为翻译参数 %1$s …
      *  - tellraw 保留 say 的“[发送者] ”前缀；发送者默认为执行者 @s，命令方块传入它的名字
      */
+    // 消息里的选择器（say / title 的文字会把它换成实体名）："@s，起来！"、"@p[r=5]"；邮箱一类的 a@pack 不算
+    const SEL_RE = /@(?:[aeprsvn](?![\w])(?:\[[^\]]*\])?|initiator\b)/g;
+
     function convertSay(text, target, mode, ctx, baseKey, meta, sender, isMe) {
         const sels = [];
-        const value = text.replace(/%/g, '%%').replace(/@[aeprsvn](?:\[[^\]]*\])?|@initiator/g, (m) => { sels.push({ selector: m }); return `%${sels.length}$s`; });
+        const value = text.replace(/%/g, '%%').replace(SEL_RE, (m) => { sels.push({ selector: m }); return `%${sels.length}$s`; });
         const literal = value.replace(/%\d+\$s/g, ' ');
         if (!NS.looksLikeText(literal) && !NS.isShownText(literal)) return null;
         const finalValue = sels.length ? value : text;
@@ -135,6 +138,14 @@
             const textStart = skipWs(cmd, sEnd);
             const text = cmd.substring(textStart).replace(/\s+$/, '');
             if (!text || text.startsWith('{')) return { cmd, changed: false };
+            // title 的文字和 say 一样会把选择器换成实体名：@s 等改成 selector 参数，不能写死进 lang
+            SEL_RE.lastIndex = 0;
+            if (SEL_RE.test(text)) {
+                SEL_RE.lastIndex = 0;
+                const r = convertSay(text, cmd.substring(tStart, tEnd), sub.toLowerCase() === 'actionbar' ? 'actionbar' : 'title', ctx, baseKey, meta);
+                if (!r) return { cmd, changed: false };
+                return { cmd: prefix + (sub.toLowerCase() === 'subtitle' ? r.replace(/^titleraw (\S+(?:\[[^\]]*\])?) title /, 'titleraw $1 subtitle ') : r), changed: true };
+            }
             const parts = ctx.rawParts(markForJson(text), baseKey, meta);
             if (!parts) return { cmd, changed: false };
             const out = `${prefix}titleraw ${cmd.substring(tStart, tEnd)} ${sub} ${JSON.stringify({ rawtext: parts })}`;
