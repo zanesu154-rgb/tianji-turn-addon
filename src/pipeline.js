@@ -503,7 +503,7 @@
                 }
             }
             if (changed) {
-                pending.set(p, JSON.stringify(data, null, 2));
+                pending.set(p, NS.stringifyJson(data, 2));
                 processed++;
                 if (rel !== 'manifest.json') log(`[JSON] ${p}`);
             }
@@ -513,7 +513,7 @@
         if (info.uiDirty && info.uiDirty.size) {
             for (const p of info.uiDirty) {
                 if (!pending.has(p)) processed++;
-                pending.set(p, JSON.stringify(jsonCache.get(p), null, 2));
+                pending.set(p, NS.stringifyJson(jsonCache.get(p), 2));
             }
             log(`[UI] ${info.localizeFlips} 个标签原为 "localize": false，已改为 true，否则会直接显示键名`, 'warn');
         }
@@ -578,13 +578,13 @@
                 const ci = [...knownKeys].find(k => lower.has(k.toLowerCase()));
                 if (ci) {
                     it.data['minecraft:item'].components['minecraft:display_name'] = { value: ci };
-                    pending.set(it.file, JSON.stringify(it.data, null, 2));
+                    pending.set(it.file, NS.stringifyJson(it.data, 2));
                     ctx.ref(ci, it.file);
                     continue;
                 }
                 const key = `item.${it.id}.name`;
                 it.data['minecraft:item'].components['minecraft:display_name'] = { value: key };
-                pending.set(it.file, JSON.stringify(it.data, null, 2));
+                pending.set(it.file, NS.stringifyJson(it.data, 2));
                 addPh(key, it.id, 'item', it.file);
             }
             if (placeholders.length) log(`为 ${placeholders.length} 个没有名称的物品/方块/实体生成了占位名称（按 ID 推测，建议人工确认）`, 'warn');
