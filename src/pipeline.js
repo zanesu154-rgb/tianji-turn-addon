@@ -271,6 +271,7 @@
         // ---------------- 3. 预扫描 UI / 脚本 ----------------
         const uiData = [];
         const scriptInfos = new Map();
+        let colonPrefix = false;
         const convertedScripts = new Set();
         let upgradedRuntimes = 0;
         for (const p of allFiles) {
@@ -292,6 +293,8 @@
                     continue;
                 }
                 scriptInfos.set(p, NS.collectScriptInfo(txt));
+                // 代码按冒号截取前半段（label.slice(0, label.indexOf(":"))、split(":")[0]）再显示
+                if (/\.indexOf\(\s*["'`]:["'`]\s*\)|\.split\(\s*["'`]:["'`]\s*\)\s*\[\s*0\s*\]/.test(txt)) colonPrefix = true;
             }
         }
         if (convertedScripts.size) {
@@ -456,7 +459,7 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, uiDataChannels: ctx.uiDataChannels, bakeOf, localizers, localeBakeOf,
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, uiDataChannels: ctx.uiDataChannels, colonPrefix, bakeOf, localizers, localeBakeOf,
                 });
                 if (r.changed) {
                     pending.set(p, r.content);

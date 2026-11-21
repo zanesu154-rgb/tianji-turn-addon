@@ -948,7 +948,8 @@
     return hit ? els : null;
   };
   // 比较用的写法：去掉颜色码；箭头 "->" 和 "→" 当成一样（有的界面字体没有 → 字形，作者会替换掉）
-  const F = (t) => t.replace(/\u00a7./g, "").replace(/\s*(?:\u2192|->)\s*/g, " -> ").trim();
+  // 有的界面字体只有 ASCII，作者会先把 → — · 弯引号换掉、删掉其余非 ASCII 字符再显示：比较时两边都这样折一遍
+  const F = (t) => t.replace(/\u00a7./g, "").replace(/\\s*(?:\u2192|->)\\s*/g, " -> ").replace(/[\u2014\u2013\u00b7]/g, "-").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^\\x20-\\x7e\\n\\p{L}\\p{N}]/gu, "").replace(/~/g, "-").replace(/[ \\t]+/g, " ").trim();
   const F2 = (t) => t.replace(/\u00a7./g, "");
   let cf = null;
   // 用逗号 / 分号 / 竖线等拼起来的列表（如 names.join(", ")）：每一项都认识时逐项翻译
@@ -1170,7 +1171,9 @@
       const wd = lits.join(" ").replace(/\\u00a7./g, " ").match(/\\p{L}[\\p{L}'’-]*/gu) || [];
       if (lits.length > 2 && !/\\p{L}/u.test(lits[0]) && !/\\p{L}/u.test(lits[lits.length - 1]) && wd.length <= 1 && !/[^\\s\\p{L}'’-]/u.test(lits.join("").replace(/\\u00a7./g, ""))) continue;
       const len = lits.join("").length;
-      p.push([k, new RegExp("^" + lits.map(esc).join("([\\\\s\\\\S]*?)") + "$"), len, ord, lits]);
+      // 句式本身不跨行时，占位符也不跨行：不然整页正文里一个句式会把别的几行吞进参数（显示串行）
+      const cap = lits.some((x) => x.indexOf("\\n") >= 0) ? "([\\\\s\\\\S]*?)" : "([^\\\\n]*?)";
+      p.push([k, new RegExp("^" + lits.map(esc).join(cap) + "$"), len, ord, lits]);
     }
     p.sort((a, b) => b[2] - a[2]);
     cache.clear();
@@ -2535,6 +2538,12 @@
                 const multi = lines.length > 1 || fromSplit || line.indexOf('\n') >= 0;
                 const t = (lines.length > 1 || fromSplit || !multi) ? line.trim() : line;
                 const k = ctx.alloc(keyBase('str'), t, meta('str'));
+                // 别处代码会取“xxx: 数值”冒号前那段单独显示（"Applies to: " + 前半段）：前半段也登记
+                if (opts.colonPrefix) {
+                    // 只认“名称: 旧值 → 新值”这种升级说明（数值 + 箭头），免得普通“标签: 说明”都多出一条
+                    const cp = /^((?:\u00a7.)*)([A-Za-z][^:\n]{2,58}?)\s*:\s+[^\n]*\d[^\n]*(?:\u2192|->)/.exec(t);
+                    if (cp && /\s/.test(cp[2]) && !/\d/.test(cp[2]) && !exact.some(([x]) => x === cp[2].trim())) exact.push([cp[2].trim(), ctx.alloc(keyBase('str'), cp[2].trim(), meta('str'))]);
+                }
                 if (multi) { exact.push([line, k]); if (t !== line) exact.push([t, k]); }
                 // 单行首尾空格（如 " Starter kit added."）：lang 里存去空格的文字，运行时找到后再把空格补回
                 else exact.push([t, k]);

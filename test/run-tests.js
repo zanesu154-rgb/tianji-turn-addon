@@ -295,6 +295,16 @@ function renderCommand(cmd, lang) {
         check('  └ 勾选后照常提取和补全', v2.includes('Technical Marker') && v2.includes('Hidden Block') && /item\.mm:alyadvancement_big_shot\.name=Big Shot/.test(zh2) && /spawn_egg\.entity\.mm:dummy/.test(zh2));
     }
     {
+        // 整页正文：单行句式的占位符不跨行（不吞别的行）；ASCII 化的文字（— · → 被替换）也能找到；升级说明冒号前半段单独登记
+        const cq = new NS.ExtractContext({});
+        const src = 'import { world } from "@minecraft/server";\nconst U = ["Release radius: 2 → 3 blocks"];\nexport function f(p, a, b) {\n p.sendMessage("Rage — burns hotter · fast");\n p.sendMessage(U[0]);\n}\nexport const S = (a, b) => `${a} / ${b} challenges done`;\nexport const A = (a) => `Applies to: ${a}.`;\nexport function g(p, n) { p.sendMessage(n); }\nconst cut = (l) => l.slice(0, l.indexOf(":"));\n';
+        const r = NS.processScript(src, 'scripts/q.js', cq, { injectRuntime: true, colonPrefix: true });
+        const out = [];
+        require('vm').runInNewContext(r.content.replace(/^import .*$/mg, '').replace(/export /g, '') + '\ng(p, S(1, 4) + "\\nSome other line"); g(p, "Rage - burns hotter - fast"); g(p, A(cut(U[0])));', { p: { sendMessage: (m) => out.push(JSON.stringify(m)) } });
+        const vals = [...cq.entries.values()].map(e => e.value);
+        check('整页正文：占位符不跨行、ASCII 化文字、升级说明前半段', /"text":"Some other line"/.test(out[0]) && !/Some other line"\}\]\}\}/.test(out[0]) && /"translate":"script\.q\./.test(out[1]) && vals.includes('Release radius') && /"with":\{"rawtext":\[\{"rawtext":\[\{"translate"/.test(out[2]), out);
+    }
+    {
         // 运行时：几段拼成一页（标题 + 多段说明 + 结尾）、全大写标题、"标签: 数值"、"->" 代替 "→"
         const cm = new NS.ExtractContext({});
         const src = 'import { world } from "@minecraft/server";\nconst D = { name: "Explosive Sneezes", details: "Pressure builds slowly.\\n\\nRelease spends it all.", up: "Release radius: 2 → 3 blocks" };\nconst L = ["Hit radius"];\nexport function f(p, n) {\n p.sendMessage(D.details);\n p.sendMessage(D.name);\n p.sendMessage(D.up);\n p.sendMessage(L[0]);\n p.sendMessage("Hello there friend");\n}\nexport function g(p, n) { p.sendMessage(n); }\n';
