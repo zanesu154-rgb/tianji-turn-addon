@@ -298,7 +298,9 @@
     function partsToValue(parts) {
         const hasExpr = parts.some(p => !('lit' in p));
         let n = 0;
-        return parts.map(p => ('lit' in p) ? (hasExpr ? NS.pctArgs(p.lit) : NS.pctPlain(p.lit)) : `%${++n}$s`).join('');
+        // 带参数时不再把字面 % 写成 %%。自定义表单会把 %% 原样画出来（20%%）。
+        // 作者自己写成 %% 的保持不变。紧挨插值的 % 已经留在参数里。
+        return parts.map(p => ('lit' in p) ? (hasExpr ? p.lit : NS.pctPlain(p.lit)) : `%${++n}$s`).join('');
     }
 
     function templateEscape(s) {
@@ -910,7 +912,7 @@
     const pat = (t) => {
       // 最长的句式如果以占位符开头，会把更具体的句子吞进参数（"- Goal:" + 整句目标）。
       // 这种匹配留下成句的原文时，继续找以文字开头的句式。普通句式仍用第一条（最长）匹配。
-      const score = patDepth < 1;
+      const score = patDepth < 2;
       patDepth++;
       try {
         let best = null, bestR = 1e9;
@@ -1004,6 +1006,12 @@
     }
     if (glued && (!r || residue(glued) < residue(r))) return glued;
     if (r) return r;
+    // "Poison … · 30s"：奖品说明后面再拼持续时间。整句对不上时，先翻译前面的说明。
+    const dur = /^(.*\\S)( · \\d+(?:\\.\\d+)?s)$/.exec(s);
+    if (dur) {
+      const head = one(dur[1]);
+      if (head && residue(head) === 0) return head.concat([{ text: dur[2] }]);
+    }
     if (long) return null;
     // 前面带序号（"01  Unstable Sneeze · Practice 1"）：序号原样，后面的整句再找
     const ix = /^((?:\\u00a7.)*\\d{1,3}[\\s.)]+)(\\S[^\\n]*)$/.exec(s);
@@ -1128,7 +1136,9 @@
           if (!bound(x.index, x[0].length)) continue;
           let caps = x.slice(1);
           if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
-          spans.push([x.index, x.index + x[0].length, [{ translate: pk, with: { rawtext: caps.map((v) => T(v == null ? "" : v)) } }]]);
+          // 参数再翻译时不能被外层 cover 挡住，否则 "Lucky Shot - Luck 1" 对不上自己的句式，还会把失败结果缓存下来
+          const Tfree = (v) => { const d = coverDepth; coverDepth = 0; try { return T(v == null ? "" : v); } finally { coverDepth = d; } };
+          spans.push([x.index, x.index + x[0].length, [{ translate: pk, with: { rawtext: caps.map(Tfree) } }]]);
         }
       }
       if (spans.length < 2) return null;

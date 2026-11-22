@@ -298,6 +298,7 @@ function renderCommand(cmd, lang) {
             const m = new MemFS(readDir(path.join(__dirname, 'fixture')));
             m.files.set('BP/items/adv.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:item': { description: { identifier: 'mm:alyadvancement_big_shot', menu_category: { category: 'none', is_hidden_in_commands: true } }, components: { 'minecraft:icon': 'stick', 'minecraft:display_name': { value: 'item.mm:alyadvancement_big_shot.name' } } } })));
             m.files.set('BP/items/tech.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:item': { description: { identifier: 'mm:tech_marker', menu_category: { category: 'none' } }, components: { 'minecraft:display_name': { value: 'Technical Marker' } } } })));
+            m.files.set('BP/items/hulk.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:item': { description: { identifier: 'mm:hulk_calm', menu_category: { category: 'none', is_hidden_in_commands: true } }, components: { 'minecraft:display_name': { value: '§a§lHulk · §r§fCalm Down' } } } })));
             m.files.set('BP/items/sword.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:item': { description: { identifier: 'mm:real_sword', menu_category: { category: 'equipment' } }, components: { 'minecraft:display_name': { value: 'Real Sword' } } } })));
             m.files.set('BP/blocks/hb.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:block': { description: { identifier: 'mm:hidden_block', menu_category: { category: 'none' } }, components: { 'minecraft:display_name': 'Hidden Block' } } })));
             m.files.set('BP/entities/dummy.json', Buffer.from(JSON.stringify({ format_version: '1.21.50', 'minecraft:entity': { description: { identifier: 'mm:dummy', is_spawnable: false }, components: {} } })));
@@ -311,8 +312,9 @@ function renderCommand(cmd, lang) {
         const v1 = [...r1.ctx.entries.values()].map(e => e.value);
         const zh1 = m1.files.get('RP/texts/zh_CN.lang').toString();
         check('隐藏物品：默认不提取创造栏隐藏的物品 / 方块名，不补全它们和不显示刷怪蛋的已有键',
-            v1.includes('Real Sword') && !v1.includes('Technical Marker') && !v1.includes('Hidden Block') && !/alyadvancement_big_shot|spawn_egg\.entity\.mm:dummy/.test(zh1)
-            && /"Technical Marker"/.test(m1.files.get('BP/items/tech.json').toString()), JSON.stringify(v1));
+            v1.includes('Real Sword') && v1.includes('§a§lHulk · §r§fCalm Down') && !v1.includes('Technical Marker') && !v1.includes('Hidden Block') && !/alyadvancement_big_shot|spawn_egg\.entity\.mm:dummy/.test(zh1)
+            && /"Technical Marker"/.test(m1.files.get('BP/items/tech.json').toString())
+            && !/"§a§lHulk/.test(m1.files.get('BP/items/hulk.json').toString()), JSON.stringify(v1));
         const m2 = mk();
         const r2 = await NS.runPipeline(m2, { baseName: 'fixture', targetLangs: ['en_US', 'zh_CN'], includeHiddenItems: true }, () => {});
         const v2 = [...r2.ctx.entries.values()].map(e => e.value);
@@ -1012,9 +1014,9 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
     {
         // 百分号：带参数的值 % → %%、已有的 %% 不再翻倍；不带参数的值 %% → %
         const cp = new NS.ExtractContext({});
-        NS.processScript('import { world } from "@minecraft/server";\nexport function f(p, a) { p.sendMessage("Full 100% safe now"); p.sendMessage("Chance: " + a + "% to win"); p.sendMessage("Rate 50%% done here"); p.sendMessage(`Bonus ${a}%% extra power`); p.sendMessage("Keep %%s as written"); }\n', 'scripts/pct.js', cp, { injectRuntime: true, runtimeKey: '__ADDON_I18N_pct' });
+        NS.processScript('import { world } from "@minecraft/server";\nexport function f(p, a) { p.sendMessage("Full 100% safe now"); p.sendMessage("Chance: " + a + "% to win"); p.sendMessage("Rate 50%% done here"); p.sendMessage(`Bonus ${a}%% extra power`); p.sendMessage("Keep %%s as written"); p.sendMessage("Special chance: " + a + "% (train 20% → 80%)."); }\n', 'scripts/pct.js', cp, { injectRuntime: true, runtimeKey: '__ADDON_I18N_pct' });
         const pv = [...cp.entries.values()].map(e => e.value);
-        check('百分号：插值后面的 % 留在参数里，不写进带参数的译文；已转义的 %% 不翻倍；不带参数时 %%→%', JSON.stringify(pv) === JSON.stringify(['Full 100% safe now', 'Chance: %1$s to win', 'Rate 50% done here', 'Bonus %1$s%% extra power', 'Keep %%s as written']), JSON.stringify(pv));
+        check('百分号：插值后面的 % 留在参数里；句子里其余的 % 不再写成 %%；已转义的 %% 不翻倍', JSON.stringify(pv) === JSON.stringify(['Full 100% safe now', 'Chance: %1$s to win', 'Rate 50% done here', 'Bonus %1$s%% extra power', 'Keep %%s as written', 'Special chance: %1$s (train 20% → 80%).']), JSON.stringify(pv));
     }
     {
         // 大型整合包：界面用 (#title_text = 'Magic') 判断显示哪个自定义界面；manifest 的包设置 / 子包名称
@@ -2468,6 +2470,51 @@ export function show(player, item) {
         };
         const pull = rt.M('Pull: 0.3');
         const push = rt.M('Push: 0.7');
+        check('奖品说明去掉末尾的 · 300s 后能对上；奖励行里的 Luck 不再留在原文里', (() => {
+            const key = '__ADDON_I18N_TEST_PRIZE__';
+            delete globalThis[key];
+            const src = [
+                'export const ABILITY = "Lucky Shot";',
+                'export function prize(level) { return "+" + level * 25 + "% dice damage; no Strength potion"; }',
+                'export function hunger() { return "Blindness + Hunger"; }',
+                'export function rewardText(v) { return "Luck " + v; }',
+                'export function rewardLine(ability, v) { return "§6- Reward: §e" + ability + " · " + rewardText(v) + "§r"; }',
+                'export function show(p, level, ability, v, seconds) {',
+                '  p.sendMessage(prize(level) + " · " + seconds + "s");',
+                '  p.sendMessage(hunger() + " · " + seconds + "s");',
+                '  p.sendMessage(rewardLine(ability, v));',
+                '}',
+                ''
+            ].join('\n');
+            const ctx = new NS.ExtractContext({ splitNewlines: false });
+            const out = NS.processScript(src, 'BP/scripts/jackpotGuide.js', ctx, { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button']) });
+            const vals = [...ctx.entries.values()].map(e => e.value);
+            const end = out.content.indexOf('// ---- end i18n runtime ----');
+            const rt = new Function(out.content.slice(0, end).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+            const rawWords = (r) => {
+                const hit = [];
+                const walk = (n) => {
+                    if (!n || typeof n === 'string') { if (typeof n === 'string' && /\p{L}/u.test(n)) hit.push(n); return; }
+                    if (!n) return;
+                    if (Array.isArray(n)) { n.forEach(walk); return; }
+                    if (typeof n.text === 'string' && /\p{L}/u.test(n.text.replace(/\u00a7./g, ''))) hit.push(n.text);
+                    if (n.with) walk(n.with);
+                    if (n.rawtext) n.rawtext.forEach(walk);
+                };
+                walk(r);
+                return hit;
+            };
+            const dice = rt.M('+50% dice damage; no Strength potion · 300s');
+            const blind = rt.M('Blindness + Hunger · 15s');
+            const reward = rt.M('§6- Reward: §eLucky Shot · Luck 1§r');
+            const ok = !!(dice && !rawWords(dice).some(t => /dice|Strength|potion/.test(t))
+                && blind && !rawWords(blind).some(t => /Blindness|Hunger/.test(t))
+                && reward && !rawWords(reward).some(t => /Lucky|Luck|Reward/.test(t))
+                && !vals.some(v => /20%%/.test(v)));
+            delete globalThis[key];
+            if (!ok) console.log('      prize', JSON.stringify({ dice, blind, reward, vals }));
+            return ok;
+        })());
         check('内部编号 _seconds / Push 不登记成句式；说明表键名 Pull、Push 能对上',
             !vals.some(v => /_seconds|%1\$sPush|%1\$s_seconds/.test(v))
             && vals.includes('Pull') && vals.includes('Push')
