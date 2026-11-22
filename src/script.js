@@ -849,6 +849,18 @@
   // 多行文本按“每行去掉首尾空白”再比一次（代码常先 trim 每行再显示）
   const N = (s) => s.split("\\n").map((l) => l.trim()).join("\\n");
   let upper = null;   // 全大写 → 键（第一次用到时才建；登记新文字时清掉重建）
+  // 占位符里还剩多少字母。颜色码里的字母（§a）不算。
+  const lettersOf = (s) => (String(s).replace(/\\u00a7./g, "").match(/\\p{L}/gu) || []).length;
+  const residue = (n) => {
+    if (n == null) return 0;
+    if (typeof n === "string") return lettersOf(n);
+    if (Array.isArray(n)) { let c = 0; for (const x of n) c += residue(x); return c; }
+    if (typeof n.text === "string") return lettersOf(n.text);
+    if (Array.isArray(n.rawtext)) return residue(n.rawtext);
+    if (n.with) return residue(n.with);
+    return 0;
+  };
+  let patDepth = 0;
   const one = (s) => {
     let k = m.get(s);
     if (k) return [{ translate: k }];
@@ -877,21 +889,35 @@
     // 太长的（整页说明拼起来的）只试占位符少的句式：字面片段先排除，正则回溯有限
     const long = s.length > FUZZY_MAX;
     const pat = (t) => {
-      for (const [pk, re, , ord, lits] of p) {
-        if (long && lits.length > 4) continue;
-        // 先用字面量片段快速排除：开头、结尾、中间片段按顺序都得出现
-        const last = lits[lits.length - 1];
-        if (!t.startsWith(lits[0]) || !t.endsWith(last)) continue;
-        let at = lits[0].length, ok = true;
-        for (let i = 1; i < lits.length - 1; i++) { if (!lits[i]) continue; const j = t.indexOf(lits[i], at); if (j < 0) { ok = false; break; } at = j + lits[i].length; }
-        if (!ok || at > t.length - last.length) continue;
-        const x = re.exec(t);
-        if (!x) continue;
-        let caps = x.slice(1);
-        if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
-        return [{ translate: pk, with: { rawtext: caps.map(T) } }];
-      }
-      return null;
+      // 最长的句式如果以占位符开头，会把更具体的句子吞进参数（"- Goal:" + 整句目标）。
+      // 这种匹配留下成句的原文时，继续找以文字开头的句式。普通句式仍用第一条（最长）匹配。
+      const score = patDepth < 1;
+      patDepth++;
+      try {
+        let best = null, bestR = 1e9;
+        for (const [pk, re, , ord, lits] of p) {
+          if (long && lits.length > 4) continue;
+          const last = lits[lits.length - 1];
+          if (!t.startsWith(lits[0]) || !t.endsWith(last)) continue;
+          let at = lits[0].length, ok = true;
+          for (let i = 1; i < lits.length - 1; i++) { if (!lits[i]) continue; const j = t.indexOf(lits[i], at); if (j < 0) { ok = false; break; } at = j + lits[i].length; }
+          if (!ok || at > t.length - last.length) continue;
+          const x = re.exec(t);
+          if (!x) continue;
+          let caps = x.slice(1);
+          if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
+          const result = [{ translate: pk, with: { rawtext: caps.map(T) } }];
+          if (!score) return result;
+          const r = residue(result);
+          if (r === 0) return result;
+          const openLead = !/\\p{L}/u.test(lits[0]);
+          // 单行、并且字面量开头：最长的那条就是最具体的。整页里参数还剩一大段原文时继续找，找不到就按行拆。
+          if (!openLead && (t.indexOf("\\n") < 0 || r <= 40)) return result;
+          if (r < bestR) { best = result; bestR = r; }
+        }
+        if (best && t.indexOf("\\n") >= 0 && bestR > 40) return null;
+        return best;
+      } finally { patDepth--; }
     };
     // 句式按 ASCII 化的写法再比一次（作者把 · → — 换掉了，如 "Unstable Sneeze - Practice 1"）：只在原样找不到时用
     const patF = (t) => {
@@ -1173,7 +1199,8 @@
         }
         return hit;
       };
-      if (s.indexOf("\\u00a7r\\n") < 0) r = un(s);
+      // 把换行还原成空格再匹配，是为了对上被按宽度折行的同一句。对上以后参数里还剩一大段原文，说明是整页被句式吞掉，改为逐行。
+      if (s.indexOf("\\u00a7r\\n") < 0) { const u = un(s); if (u && residue(u) <= 40) r = u; }
       if (!r) {
         // 多条拼在一起的（动作栏 "§r\\n" 分隔）：逐条找，每条再试还原换行、逐行
         const blocks = s.split("\\u00a7r\\n");
@@ -1182,7 +1209,8 @@
           if (i) els.push({ text: "\\u00a7r\\n" });
           if (!b) return;
           // 句尾的 §r 被当成了分隔符的一部分：补回来再找一次
-          const x = blocks.length > 1 ? (one(b) || (i < blocks.length - 1 && one(b + "\u00a7r")) || un(b)) : null;
+          const u = un(b);
+          const x = blocks.length > 1 ? (one(b) || (i < blocks.length - 1 && one(b + "\u00a7r")) || (u && residue(u) <= 40 ? u : null)) : null;
           if (x) { hit = true; els.push(...x); return; }
           if (lines(b, els, i < blocks.length - 1)) hit = true;
         });
@@ -2640,7 +2668,9 @@
             if (NS.hasKeyRefs(text)) return;   // 带 %键 引用：游戏按键翻译，写进 lang 会被转义
             const lines = ctx.splitNewlines ? text.split(/\r?\n/) : [text];
             for (const line of lines) {
-                if (!looksLikeText(line, 'strict')) continue;
+                // "§a [READY]"：动作栏状态。去掉颜色码后是 [READY]，strict 当成没有空格的标识，这里仍是给玩家看的。
+                const hud = /^(?:\u00a7.)+\s*\[[A-Za-z][A-Za-z0-9 ]{1,24}\]$/.test(String(line).trim());
+                if (!looksLikeText(line, 'strict') && !hud) continue;
                 if (ctx.isKey(line)) continue;
                 // WaterGun、MeleeAttack 这种没有空格的驼峰词：代码里的标识符
                 if (/^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+$/.test(line.trim())) continue;
@@ -2651,13 +2681,24 @@
                 const k = ctx.alloc(keyBase('str'), t, meta('str'));
                 // 别处代码会取“xxx: 数值”冒号前那段单独显示（"Applies to: " + 前半段）：前半段也登记
                 if (opts.colonPrefix) {
-                    // 只认“名称: 旧值 → 新值”这种升级说明（数值 + 箭头），免得普通“标签: 说明”都多出一条
-                    const cp = /^((?:\u00a7.)*)([A-Za-z][^:\n]{2,58}?)\s*:\s+[^\n]*\d[^\n]*(?:\u2192|->)/.exec(t);
-                    if (cp && /\s/.test(cp[2]) && !/\d/.test(cp[2]) && !exact.some(([x]) => x === cp[2].trim())) exact.push([cp[2].trim(), ctx.alloc(keyBase('str'), cp[2].trim(), meta('str'))]);
+                    // 升级说明会把冒号前半段单独拿出来显示（"Applies to: " + 前半段）。
+                    // 数值 + 箭头，或用 "2 to 3" 代替箭头，或 "25 resource" 这种数值加单位。普通“标签: 一句话”不登记。
+                    const cp = /^((?:\u00a7.)*)([A-Za-z][^:\n]{2,58}?)\s*:\s+([^\n]+)$/.exec(t);
+                    const rest = cp && cp[3].trim();
+                    const upgrade = !!rest && /\d/.test(rest) && ((/\u2192|->/.test(rest)) || (/\d[^:\n]*\bto\b[^:\n]*\d/.test(rest)) || (/^\d+(?:\.\d+)?(?:\s+[A-Za-z][A-Za-z ]{0,24})?$/.test(rest)));
+                    if (cp && upgrade && /\s/.test(cp[2]) && !/\d/.test(cp[2]) && !exact.some(([x]) => x === cp[2].trim())) exact.push([cp[2].trim(), ctx.alloc(keyBase('str'), cp[2].trim(), meta('str'))]);
                 }
                 if (multi) { exact.push([line, k]); if (t !== line) exact.push([t, k]); }
                 // 单行首尾空格（如 " Starter kit added."）：lang 里存去空格的文字，运行时找到后再把空格补回
                 else exact.push([t, k]);
+                // "句子\n" 被拼进多行正文：显示时换行已经被拆掉，按去掉首尾空白的每一行再登记
+                if (line.includes('\n')) {
+                    for (const part of line.split(/\r?\n/)) {
+                        const p = part.trim();
+                        if (!p || p === t || p === line || !looksLikeText(p, 'strict') || ctx.isKey(p) || exact.some(([x]) => x === p)) continue;
+                        exact.push([p, ctx.alloc(keyBase('str'), p, meta('str'))]);
+                    }
+                }
             }
         };
         // ${cond ? " only" : " · gate"}、或 const kind = cond ? … : …; `${where}${kind}`：
@@ -2727,7 +2768,9 @@
             if (!relaxed) {
                 const vs = expandChoices(parts);
                 if (vs) {
-                    if (!looksLikeText(litText(parts), 'loose') && !vs.some(v => looksLikeText(litText(v), 'loose'))) return;
+                    // "§a" + 名字 + " challenges"：去掉颜色码后只剩一个小写词，loose 会当成标识符。中间有空格就是给玩家看的短语。
+                    const phrasey = (t) => wordy(t) && /\s/.test(NS.stripFormatting(t));
+                    if (!looksLikeText(litText(parts), 'loose') && !vs.some(v => looksLikeText(litText(v), 'loose') || phrasey(litText(v)))) return;
                     for (const v of vs) {
                         if (!v.length) continue;
                         if (!v.some(p => !('lit' in p))) {
@@ -2743,13 +2786,15 @@
                 if (!line.length) continue;
                 const hasExpr = line.some(p => !('lit' in p));
                 if (!hasExpr) { registerExact(litText(line), lines.length > 1); continue; }
-                if (relaxed ? !wordy(litText(line)) : !looksLikeText(litText(line), 'strict')) continue;
                 // 字面量片段：表达式之间的文字（相邻表达式之间为空串）
                 const lits = [''];
                 for (const p of line) {
                     if ('lit' in p) lits[lits.length - 1] += p.lit;
                     else lits.push('');
                 }
+                // "§7 [" + 秒数 + "s]"：动作栏冷却。字面量本身不像句子，整段仍是状态。
+                const hudPat = /^(?:\u00a7.)+\s*\[[^\n]*\]$/.test(lits.join('').trim());
+                if ((relaxed ? !wordy(litText(line)) : !looksLikeText(litText(line), 'strict')) && !hudPat) continue;
                 // `${DOT} ${A}Settings${R}`：两头都是变量、中间只有一个词的句式能匹配几乎任何含这个词的文字，
                 // 运行时会把整段正文吞进占位符；只登记这个词本身（显示时按分隔符逐段翻译）
                 const words = lits.join(' ').replace(/\u00a7./g, ' ').match(/\p{L}[\p{L}'’-]*/gu) || [];
@@ -2759,6 +2804,27 @@
                 }
                 const key = ctx.alloc(keyBase('fmt'), partsToValue(line), meta('fmt'));
                 patterns.push([key, lits]);
+                // 整段正文是一条句式时，显示时往往按行拼起来（还可能先换掉颜色码）。每一行再单独登记，短按钮名才不会把说明吞掉。
+                if (lits.some(s => s.includes('\n'))) {
+                    const rows = [[]];
+                    for (let i = 0; i < lits.length; i++) {
+                        const bits = lits[i].split('\n');
+                        for (let b = 0; b < bits.length; b++) {
+                            if (b) rows.push([]);
+                            if (bits[b]) rows[rows.length - 1].push({ lit: bits[b] });
+                            if (b === bits.length - 1 && i < lits.length - 1) rows[rows.length - 1].push({ expr: true });
+                        }
+                    }
+                    if (rows.length > 1) {
+                        for (const row of rows) {
+                            if (!row.length) continue;
+                            if (!row.some(p => !('lit' in p))) {
+                                const t = row.map(p => p.lit).join('').trim();
+                                if (t) registerExact(t);
+                            } else registerPattern(row, true);
+                        }
+                    }
+                }
             }
         };
         const commandTexts = (cmd) => {
