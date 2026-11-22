@@ -4,6 +4,13 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.22-93 (2026-11-22)
+
+### Fixed
+
+- Identifier fragments with no space, such as `prefix + "_seconds"` and `kind + "Push"`, were registered as patterns (`%1$s_seconds`, `%1$sPush`). Those fragments are no longer registered
+- Keys in a move's explanation table (`pull`, `push`) are shown on the number line as `Pull` and `Push`. Those labels are registered, so `Pull: 0.3` can match
+
 ## 2026.11.22-92 (2026-11-22)
 
 ### Fixed

@@ -2888,20 +2888,23 @@
                 }
                 // "§7 [" + 秒数 + "s]"：动作栏冷却。字面量本身不像句子，整段仍是状态。
                 const hudPat = /^(?:\u00a7.)+\s*\[[^\n]*\]$/.test(lits.join('').trim());
-                const unitWords = (lits.join(' ').replace(/\u00a7./g, ' ').match(/\p{L}[\p{L}'’-]*/gu) || []);
+                const words = lits.join(' ').replace(/\u00a7./g, ' ').match(/\p{L}[\p{L}'’-]*/gu) || [];
+                // `${DOT} ${A}Settings${R}`：两头都是变量、中间只有一个词的句式能匹配几乎任何含这个词的文字，
+                // 运行时会把整段正文吞进占位符；只登记这个词本身（显示时按分隔符逐段翻译）
+                if (!/\p{L}/u.test(lits[0]) && !/\p{L}/u.test(lits[lits.length - 1]) && words.length <= 1 && !/[^\s\p{L}'’-]/u.test(lits.join('').replace(/\u00a7./g, ''))) {
+                    if (words.length && words[0].length >= 3 && !ctx.isKey(words[0]) && !exact.some(([x]) => x === words[0])) exact.push([words[0], ctx.alloc(keyBase('str'), words[0], meta('str'))]);
+                    continue;
+                }
+                // prefix + "_seconds"、kind + "Push"：字面量贴在编号上，没有空格，是内部键不是句子
+                const gluedId = (lit) => { const plain = lit.replace(/\u00a7./g, ''); return /\p{L}/u.test(plain) && !/\s/.test(plain); };
+                if (!hudPat && lits.some(gluedId) && lits.every(lit => !/\p{L}/u.test(lit.replace(/\u00a7./g, '')) || gluedId(lit))) continue;
+                const unitWords = words;
                 // "3" + " health"、number(v / 20) + " seconds"：单位是小写单词，strict 不收，但数值后面就是它
                 const unitPat = unitWords.length > 0 && unitWords.every(w => UNIT_WORD.test(w.toLowerCase()));
                 if ((relaxed ? !wordy(litText(line)) : !looksLikeText(litText(line), 'strict')) && !hudPat && !unitPat) continue;
                 if (unitPat) for (const w of unitWords) {
                     const u = w.toLowerCase();
                     if (!ctx.isKey(u) && !exact.some(([x]) => x === u)) exact.push([u, ctx.alloc(keyBase('str'), u, meta('str'))]);
-                }
-                // `${DOT} ${A}Settings${R}`：两头都是变量、中间只有一个词的句式能匹配几乎任何含这个词的文字，
-                // 运行时会把整段正文吞进占位符；只登记这个词本身（显示时按分隔符逐段翻译）
-                const words = lits.join(' ').replace(/\u00a7./g, ' ').match(/\p{L}[\p{L}'’-]*/gu) || [];
-                if (!/\p{L}/u.test(lits[0]) && !/\p{L}/u.test(lits[lits.length - 1]) && words.length <= 1 && !/[^\s\p{L}'’-]/u.test(lits.join('').replace(/\u00a7./g, ''))) {
-                    if (words.length && words[0].length >= 3 && !ctx.isKey(words[0]) && !exact.some(([x]) => x === words[0])) exact.push([words[0], ctx.alloc(keyBase('str'), words[0], meta('str'))]);
-                    continue;
                 }
                 const key = ctx.alloc(keyBase('fmt'), partsToValue(line), meta('fmt'));
                 patterns.push([key, lits]);
@@ -3073,6 +3076,22 @@
                 }
             });
         }
+        // const help = { pull: "How strongly…", push: "The horizontal…" }
+        // 数值行的标签是 words(键)（"Pull"），说明在另一行。键名本身不是画面上的词。
+        const labelOfKey = (k) => k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase());
+        walk(ast, (n) => {
+            if (n.type !== 'VariableDeclarator' || !n.init || n.init.type !== 'ObjectExpression') return;
+            const props = n.init.properties.filter(p => p.type === 'Property' && !p.computed && isStr(p.value));
+            if (props.length < 4) return;
+            const sentences = props.filter(p => looksLikeText(p.value.value, 'strict'));
+            if (sentences.length < props.length * 0.6) return;
+            for (const p of props) {
+                const k = p.key.type === 'Identifier' ? p.key.name : (isStr(p.key) ? p.key.value : null);
+                if (!k || !/^[a-z][A-Za-z0-9]*$/.test(k)) continue;
+                const label = labelOfKey(k);
+                if (looksLikeText(label, 'strict')) forceText(label);
+            }
+        });
         // const units = { damage: "health", range: "blocks" }; text += " " + units[key]
         // 数值后面的单位是小写单词，strict 不收，画面上会留着 "3 health"、"12 blocks"
         walk(ast, (n) => {
