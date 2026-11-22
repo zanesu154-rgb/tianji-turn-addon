@@ -1,0 +1,290 @@
+[
+  {
+    "msg": 2,
+    "tool": "Bash",
+    "lines": [
+      4743,
+      4770
+    ],
+    "preview": "Exit code 2 已有翻译键：0 条 源语言：zh_CN（自动识别） ⚠ [结构] 行为包移入 fixture_BP/ 以便附带新的资源包 ⚠ [新建] 附加包没有资源包，翻译只能放在资源包里 → 已新建 fixture_texts_RP/ 并让行为包依赖它 { \"packs\": [ { \"root\": \"fi…"
+  },
+  {
+    "msg": 6,
+    "tool": "mcp__claude-code-remote__add_repo",
+    "lines": [
+      5787,
+      5814
+    ],
+    "preview": "add_repo: link your GitHub account to let Claude access repositories"
+  },
+  {
+    "msg": 14,
+    "tool": "Bash",
+    "lines": [
+      8231,
+      8258
+    ],
+    "preview": "Exit code 1 HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api repos/{owner}/{repo}/...). For review threads, auto-m…"
+  },
+  {
+    "msg": 36,
+    "tool": "Bash",
+    "lines": [
+      18651,
+      18678
+    ],
+    "preview": "Exit code 1 status: 完成！可在下方编辑后下载 node:internal/process/promises:394 triggerUncaughtException(err, true /* fromPromise */); ^ locator.textContent: Timeout 30000…"
+  },
+  {
+    "msg": 44,
+    "tool": "Bash",
+    "lines": [
+      23401,
+      23428
+    ],
+    "preview": "Exit code 1 结果：145 通过，0 失败 remote: https://github.com/zanesu154-rgb/tianji-turn-addon/pull/new/feat/say-convert remote: HTTP 403: GitHub GraphQL is not availab…"
+  },
+  {
+    "msg": 133,
+    "tool": "Bash",
+    "lines": [
+      61438,
+      61465
+    ],
+    "preview": "Exit code 1 16: const { looksLikeText, fileBaseOf, translateCommand, looksLikeCommand } = NS; 17- 18- const FORM_CLASSES = new Set(['ActionFormData', 'ModalFor…"
+  },
+  {
+    "msg": 152,
+    "tool": "Bash",
+    "lines": [
+      73324,
+      73351
+    ],
+    "preview": "Exit code 1 curl: (6) Could not resolve host: registry.npmjs.org ls: cannot access 'mcs.json': No such file or directory Traceback (most recent call last): Fil…"
+  },
+  {
+    "msg": 152,
+    "tool": "WebFetch",
+    "lines": [
+      73409,
+      73436
+    ],
+    "preview": "{\"error_type\":\"URL_NOT_ON_ALLOWLIST\",\"source\":\"target\",\"message\":\"This URL is not on the session's allowlist, so it was not fetched. Do not repeat the same fet…"
+  },
+  {
+    "msg": 154,
+    "tool": "Bash",
+    "lines": [
+      75546,
+      75573
+    ],
+    "preview": "Exit code 1 // ================================================================ // 界面语言 · 访问计数 // =============================================================…"
+  },
+  {
+    "msg": 154,
+    "tool": "Bash",
+    "lines": [
+      75605,
+      75632
+    ],
+    "preview": "Exit code 1 17 /home/claude/tianji-turn-addon/src/pipeline.js:127 const raw = await fs.readText(p); ^^^^^ SyntaxError: await is only valid in async functions a…"
+  },
+  {
+    "msg": 158,
+    "tool": "Bash",
+    "lines": [
+      77453,
+      77480
+    ],
+    "preview": "Exit code 1 /bin/bash: line 5: #A-Za-z: syntax error: operand expected (error token is \"#A-Za-z\")"
+  },
+  {
+    "msg": 162,
+    "tool": "Bash",
+    "lines": [
+      81862,
+      81889
+    ],
+    "preview": "Exit code 1 0"
+  },
+  {
+    "msg": 166,
+    "tool": "WebFetch",
+    "lines": [
+      86374,
+      86401
+    ],
+    "preview": "{\"error_type\":\"URL_NOT_ON_ALLOWLIST\",\"source\":\"target\",\"message\":\"This URL is not on the session's allowlist, so it was not fetched. Do not repeat the same fet…"
+  },
+  {
+    "msg": 166,
+    "tool": "WebFetch",
+    "lines": [
+      86433,
+      86460
+    ],
+    "preview": "{\"error_type\":\"URL_NOT_ON_ALLOWLIST\",\"source\":\"target\",\"message\":\"This URL is not on the session's allowlist, so it was not fetched. Do not repeat the same fet…"
+  },
+  {
+    "msg": 166,
+    "tool": "WebFetch",
+    "lines": [
+      86492,
+      86519
+    ],
+    "preview": "{\"error_type\":\"URL_NOT_ON_ALLOWLIST\",\"source\":\"target\",\"message\":\"This URL is not on the session's allowlist, so it was not fetched. Do not repeat the same fet…"
+  },
+  {
+    "msg": 166,
+    "tool": "Bash",
+    "lines": [
+      87153,
+      87180
+    ],
+    "preview": "Exit code 1 913: const seps = []; 914: const list = (s) => { 915: const alt = seps.filter((x) => s.indexOf(x) >= 0).map(esc); 1002: if (sp) for (const x of sp)…"
+  },
+  {
+    "msg": 184,
+    "tool": "Bash",
+    "lines": [
+      94468,
+      94495
+    ],
+    "preview": "Exit code 1 ui.* keys 60 ['ui.elevator.no_target_above', 'ui.elevator.no_target_below', 'ui.smelter', 'ui.furnace', 'ui.smoker', 'ui.accessories.6', 'ui.access…"
+  },
+  {
+    "msg": 197,
+    "tool": "Bash",
+    "lines": [
+      108029,
+      108056
+    ],
+    "preview": "Exit code 1 function $a(e){return kge(e?.replace(/\\w+:/,\"\"))}function kge(e){return e?.replace(/[_.]/g,\" \")?.replace(/\\w\\S*/g,t=>t.charAt(0)?.toUpperCase()+t?.…"
+  },
+  {
+    "msg": 203,
+    "tool": "Bash",
+    "lines": [
+      112262,
+      112289
+    ],
+    "preview": "Exit code 1 sed: -e expression #1, char 1: unknown command: `,'"
+  },
+  {
+    "msg": 209,
+    "tool": "Bash",
+    "lines": [
+      114754,
+      114781
+    ],
+    "preview": "Exit code 1 3: * title <目标> title|subtitle|actionbar <文本> → titleraw ... {\"rawtext\":[{\"translate\":...}]} 104: const node = sels.length ? { translate: key, with…"
+  },
+  {
+    "msg": 217,
+    "tool": "Bash",
+    "lines": [
+      120714,
+      120741
+    ],
+    "preview": "Exit code 1 466: // ---------------- 7. 行为包与资源包配对；没有资源包的行为包新建一个 ---------------- 475: const pairOf = new Map(); // BP.root → RP 482: if (rp) pairOf.set(bp.root…"
+  },
+  {
+    "msg": 294,
+    "tool": "Bash",
+    "lines": [
+      175818,
+      175845
+    ],
+    "preview": "Exit code 1 sed: -e expression #1, char 1: unknown command: `,'"
+  },
+  {
+    "msg": 310,
+    "tool": "Bash",
+    "lines": [
+      183254,
+      183281
+    ],
+    "preview": "Exit code 1 sed: -e expression #1, char 1: unknown command: `,'"
+  },
+  {
+    "msg": 310,
+    "tool": "Bash",
+    "lines": [
+      184847,
+      184874
+    ],
+    "preview": "Exit code 1 ['（世界设置）', ' (world settings)', '（ワールド設定）', ' (월드 설정)', ' (настройк� ['结构 ', 'structure ', 'ストラクチャー ', '구조물 ', 'структура '], ['玩家：', 'player: ', '…"
+  },
+  {
+    "msg": 323,
+    "tool": "WebFetch",
+    "lines": [
+      189663,
+      189690
+    ],
+    "preview": "{\"error_type\":\"URL_NOT_ON_ALLOWLIST\",\"source\":\"target\",\"message\":\"This URL is not on the session's allowlist, so it was not fetched. Do not repeat the same fet…"
+  },
+  {
+    "msg": 349,
+    "tool": "Bash",
+    "lines": [
+      198375,
+      198402
+    ],
+    "preview": "Exit code 1 non-200 OK status code: 403 Forbidden body: \"{\\\"message\\\":\\\"GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api rep…"
+  },
+  {
+    "msg": 353,
+    "tool": "Bash",
+    "lines": [
+      201639,
+      201666
+    ],
+    "preview": "Exit code 1 [eval]:1 require('./src/log-i18n.js');const L=globalThis.NS.LogI18n;console.log(L.tr('BP/manifest.json: manifest 里直接写了包名「Ruby BP」，lang 里另有 pack.nam…"
+  },
+  {
+    "msg": 359,
+    "tool": "Bash",
+    "lines": [
+      203202,
+      203229
+    ],
+    "preview": "Exit code 1 src/pipeline.js:139: if (!(p === 'manifest.json' || p.endsWith('/manifest.json'))) continue; src/pipeline.js:142: const rootDir = p === 'manifest.j…"
+  },
+  {
+    "msg": 361,
+    "tool": "Bash",
+    "lines": [
+      206822,
+      206849
+    ],
+    "preview": "Exit code 1 2465: const registerPattern = (parts, relaxed = false) => { sed: -e expression #1, char 1: unknown command: `,'"
+  },
+  {
+    "msg": 365,
+    "tool": "Bash",
+    "lines": [
+      208414,
+      208441
+    ],
+    "preview": "Exit code 1 footer v2026.11.21-83 errors [] ✓ 发给自定义界面的标题数据原样保留 ✓ 结构：搜索结果导出 / 导入批量修改 结果：289 通过，0 失败 5123d5122 < slider_%1$s,%2$s [agent-proxy] While this comman…"
+  },
+  {
+    "msg": 369,
+    "tool": "Bash",
+    "lines": [
+      211647,
+      211674
+    ],
+    "preview": "Exit code 1 1046: const M = (v) => (typeof v === \"string\" ? lookup(v) || v : v); sed: -e expression #1, char 1: unknown command: `,'"
+  },
+  {
+    "msg": 379,
+    "tool": "Bash",
+    "lines": [
+      219902,
+      219929
+    ],
+    "preview": "Exit code 1 /tmp/rt.mjs:121 const F = (t) => t.replace(/§./g, \"\").replace(/s*(?:→|->)s*/g, \" -> \").replace(/[—–·]/g, \"-\").replace(/[‘’]/g, \"'\").replace(/[“”]/g…"
+  }
+]
