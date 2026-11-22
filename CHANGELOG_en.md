@@ -8,12 +8,12 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
-- A second `- Goal:` pattern that ends with a period cut the objective at that period, so the sentence no longer matched its own pattern and stayed in the original language. The period is tried as part of the argument
-- Short patterns such as `%1$s power` and `%1$s unlocked from this power` cut buttons and descriptions in the middle of a word (`About your power`, `Not unlocked from this power`). When the full sentence is registered, that sentence is used
-- Unit words after a move's numbers (`health`, `blocks`, `seconds`) stayed in the original language. Those units are registered, so a value like `3 health` can match
-- `How long {x} lasts before ending.` is only shown after `{x}` is replaced, so the brace form never matched. The filled-in sentence matches as a pattern, and the word that replaces `{x}` is registered too
-- When an upgrade line uses `I → II` instead of digits, the name before the colon is registered too
-- `${n}%` became `%%` inside a translation that has arguments, and a custom form drew both percent signs. That one percent sign stays on the argument
+- A second `- Goal:` pattern that ends with a period cut the objective at that period, so the sentence no longer matched its own pattern and stayed in the original language. The period is tried as part of the argument ([#156](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/156))
+- Short patterns such as `%1$s power` and `%1$s unlocked from this power` cut buttons and descriptions in the middle of a word (`About your power`, `Not unlocked from this power`). When the full sentence is registered, that sentence is used ([#156](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/156))
+- Unit words after a move's numbers (`health`, `blocks`, `seconds`) stayed in the original language. Those units are registered, so a value like `3 health` can match ([#156](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/156))
+- `How long {x} lasts before ending.` is only shown after `{x}` is replaced, so the brace form never matched. The filled-in sentence matches as a pattern, and the word that replaces `{x}` is registered too ([#156](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/156))
+- When an upgrade line uses `I → II` instead of digits, the name before the colon is registered too ([#156](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/156))
+- `${n}%` became `%%` inside a translation that has arguments, and a custom form drew both percent signs. That one percent sign stays on the argument ([#156](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/156))
 
 ## 2026.11.22-91 (2026-11-22)
 
