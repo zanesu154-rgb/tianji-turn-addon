@@ -17,9 +17,9 @@
 
 选它是因为历史档案里它被反复重转，并且同时踩过误提取、多语言字典和规则误伤。这是样本角色，不是「今天再转一次必然得到某次历史 lang」的证明。助手当时说的「提取结果没变」保持为历史声明。
 
-2026-11-22 核对私有仓库 `origin/HEAD`：`ADD-ON/基岩版重塑 Bedrock Reimagined/` 只有 `notes.md`（4,705 字节）。该目录没有 `.mcaddon` 或 `.mcpack`。公开仓库 `main` 也没有这个原包。笔记仍写着回归检查项「待整理」，没有附件名、字节数或 SHA-256。
+用户于 2026-11-22 确认：私有仓库 Release `Sample` 的附件 `ADDON_Bedrock.Reimagined.mcaddon` 就是历史测试使用的基岩版重塑原包，不是相似版本或替代样本。身份不再待核实。
 
-私有仓库 Release `Sample` 上有附件 `ADDON_Bedrock.Reimagined.mcaddon`（88,057,900 字节）。它不在 git 树里，笔记也没有登记它。在登记写出文件名和 SHA-256 之前，不下载、不转换、不用其它包或相似文件名代替。
+该文件已保存到私有样本目录 `BUG-Test-addon-world/ADD-ON/基岩版重塑 Bedrock Reimagined/ADDON_Bedrock.Reimagined.mcaddon`。大小 88,057,900 字节，SHA-256 为 `1dd39f1424881a94348805984818f5073acd23f45bdb83ec418bb29fdbfa4be9`。包内清单版本是 1.0.6。机器可读登记在私有仓库 `knowledge/samples/registry.json`。公开产品仓库不存放这个原包。本阶段不开始转换。
 
 它是附加包，不是世界存档。世界再转换、告示牌和命令方块不放进这个样本。那些继续由合成存档和私人 `test/world-fixture` 负责。
 
