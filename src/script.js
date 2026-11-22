@@ -49,7 +49,9 @@
         'has', 'delete', 'require', 'getDimension', 'matches', 'getEffect', 'addEffect', 'removeEffect',
         'log', 'warn', 'error', 'info', 'debug', 'trace', 'sendScriptEvent', 'getTypeId', 'setGameRule',
         'getBlockAbove', 'setPermutation', 'withState', 'getState', 'registerCommand', 'registerEnum',
-        'Error', 'TypeError', 'RangeError', 'RegExp', 'ItemStack', 'BlockPermutation', 'MolangVariableMap',
+        // Error("给玩家看的句子") 会经 e.message 进聊天或动作栏。原文照样抛出，只登记运行时查找。
+        // TypeError / RangeError / ReferenceError 仍是开发者错误，不在这里。
+        'TypeError', 'RangeError', 'RegExp', 'ItemStack', 'BlockPermutation', 'MolangVariableMap',
         'test', 'exec', 'Symbol', 'parseInt', 'parseFloat', 'Number', 'Date', 'setItem', 'getItem', 'querySelector',
         // 装备栏位（"Mainhand"、"Offhand"、"Head"…）、方块状态、游戏规则等枚举值
         'getEquipment', 'getEquipmentSlot', 'setEquipment', 'getBlockState', 'setBlockState', 'getStates',
@@ -909,6 +911,8 @@
       }
       return null;
     };
+    const glued = cover(s);
+    if (glued) return glued;
     let r = pat(s);
     if (r) return r;
     if (long) return null;
@@ -980,7 +984,80 @@
   // 有的界面字体只有 ASCII，作者会先把 → — · 弯引号换掉、删掉其余非 ASCII 字符再显示：比较时两边都这样折一遍
   const F = (t) => t.replace(/\u00a7./g, "").replace(/\\s*(?:\u2192|->)\\s*/g, " -> ").replace(/[\u2014\u2013\u00b7]/g, "-").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^\\x20-\\x7e\\n\\p{L}\\p{N}]/gu, "").replace(/~/g, "-").replace(/[ \\t]+/g, " ").trim();
   const F2 = (t) => t.replace(/\u00a7./g, "");
-  let cf = null, pf = null;
+  let cf = null, pf = null, coverRes = null;
+
+  let coverDepth = 0;
+  const noWords = (s) => !/\\p{L}/u.test(String(s).replace(/\\u00a7./g, ""));
+  // 动作栏把几段已经登记的文字直接拼成一行（"§bCélula " + 序号 + " §8• §f" + "§7Vazia"）。
+  // 整句对不上句式，短句式又会把后面的句子吞进占位符。每段都对上、空隙里没有单词时，按段翻译。
+  const cover = (t) => {
+    if (coverDepth > 0 || t.length > 240 || t.indexOf("\\n") >= 0 || !/\\p{L}/u.test(t)) return null;
+    coverDepth++;
+    try {
+      const spans = [];
+      const isLetterAt = (i) => i >= 0 && i < t.length && t[i - 1] !== "\\u00a7" && /\\p{L}/u.test(t[i]);
+      // 颜色码可以贴着下一个词（"§f" + "Bancada"）。只有字母连着字母才算词的中间。
+      const bound = (i, n) => !(isLetterAt(i) && isLetterAt(i - 1)) && !(isLetterAt(i + n - 1) && isLetterAt(i + n));
+      for (const [s, k] of m) {
+        if (s.length < 4 || s.length > t.length || !/\\p{L}/u.test(s)) continue;
+        let i = 0;
+        while ((i = t.indexOf(s, i)) >= 0) {
+          if (bound(i, s.length)) spans.push([i, i + s.length, [{ translate: k }]]);
+          i += s.length;
+        }
+      }
+      if (!coverRes || coverRes.src !== p) {
+        coverRes = { src: p, list: [] };
+        for (const [pk, , , ord, lits] of p) {
+          if (!lits[0]) continue;
+          const last = lits.length - 1;
+          const trail = lits[last] === "";
+          const cap = lits.some((x) => x.indexOf("\\n") >= 0) ? "([\\\\s\\\\S]*?)" : "([^\\\\n]*?)";
+          let src = esc(lits[0]);
+          for (let i = 1; i < last; i++) src += cap + esc(lits[i]);
+          // 句式以占位符结尾时，只吃数字和颜色码，停在下一个词前面，避免把后面整句吞进去。
+          if (trail) src += "((?:\\\\u00a7.(?!\\\\p{L})|[^\\\\u00a7\\\\p{L}\\\\n])*)";
+          else if (last > 0) src += cap + esc(lits[last]);
+          coverRes.list.push([pk, new RegExp(src, "gu"), ord]);
+        }
+      }
+      for (const [pk, re, ord] of coverRes.list) {
+        re.lastIndex = 0;
+        let x;
+        while ((x = re.exec(t))) {
+          if (!x[0]) { re.lastIndex++; continue; }
+          if (!bound(x.index, x[0].length)) continue;
+          let caps = x.slice(1);
+          if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
+          spans.push([x.index, x.index + x[0].length, [{ translate: pk, with: { rawtext: caps.map((v) => T(v == null ? "" : v)) } }]]);
+        }
+      }
+      if (spans.length < 2) return null;
+      spans.sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]) || a[0] - b[0]);
+      const chosen = [];
+      for (const sp of spans) {
+        if (chosen.some((c) => sp[0] < c[1] && c[0] < sp[1])) continue;
+        chosen.push(sp);
+      }
+      if (chosen.length < 2) return null;
+      chosen.sort((a, b) => a[0] - b[0]);
+      const els = [];
+      let at = 0, hit = false;
+      for (const [st, en, el] of chosen) {
+        if (st < at) continue;
+        const gap = t.slice(at, st);
+        if (!noWords(gap)) return null;
+        if (gap) els.push({ text: gap });
+        els.push(...el);
+        at = en;
+        hit = true;
+      }
+      const tail = t.slice(at);
+      if (!noWords(tail)) return null;
+      if (tail) els.push({ text: tail });
+      return hit ? els : null;
+    } finally { coverDepth--; }
+  };
   // 句式比较用：和 F 一样折成 ASCII，但不去首尾空白（保持片段边界）
   const G = (t) => t.replace(/§./g, "").replace(/\\s*(?:→|->)\\s*/g, " -> ").replace(/[—–·]/g, "-").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^\\x20-\\x7e\\n\\p{L}\\p{N}]/gu, "").replace(/~/g, "-");
   // 用逗号 / 分号 / 竖线等拼起来的列表（如 names.join(", ")）：每一项都认识时逐项翻译
@@ -1188,7 +1265,7 @@
     return it.getLore();
   };
   const reg = (exact, pats, sp, srcs) => {
-    cf = null; upper = null; pf = null;
+    cf = null; upper = null; pf = null; coverRes = null;
     for (const [k, lits] of srcs || []) if (!srcPat.has(k)) srcPat.set(k, [lits, null]);
     if (sp) for (const x of sp) if (seps.indexOf(x) < 0) seps.push(x);
     for (const [s, k] of exact) {
@@ -1724,9 +1801,9 @@
                     return c !== p.callee && mentionsDebug(p.callee);
                 case 'FunctionDeclaration': case 'FunctionExpression': case 'ArrowFunctionExpression':
                     return DEBUG_ID.test(fnName(p)) || debugWrappers.has(fnName(p));
-                // throw new ReferenceError("…")：开发者看的错误信息
+                // throw new ReferenceError("…")：开发者看的错误信息。new Error("…") 可能被送进聊天，不在这里排除。
                 case 'NewExpression':
-                    return c !== p.callee && p.callee.type === 'Identifier' && /Error$/.test(p.callee.name);
+                    return c !== p.callee && p.callee.type === 'Identifier' && /Error$/.test(p.callee.name) && p.callee.name !== 'Error';
                 // const errors = { DURABILITY_MISSING: `Item must have …` }：错误信息表
                 case 'VariableDeclarator':
                     return c === p.init && p.id.type === 'Identifier' && /^(errors?|errs?|error_?messages?|errorMsgs?)$/i.test(p.id.name);
