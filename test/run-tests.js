@@ -1184,6 +1184,34 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const k = [...c3.entries.keys()][0];
         check('按文件手动指定：x_lang.js:v=fr_FR', c3.translations.get(k)?.get('fr_FR') === "Salut l'ami");
     }
+    {
+        const src = [
+            'function register() {}',
+            'const en = { "ui.rate.normal": "Normal", "ui.size.normal": "Normal", "ui.rate.slow": "Slow" };',
+            'const ru = { "ui.rate.normal": "Обычная", "ui.size.normal": "Обычный", "ui.rate.slow": "Медленно" };',
+            'register("en_US", en);',
+            'register("ru_RU", ru);',
+            'const first = { en_US: { menu: { open: "Open" } }, ru_RU: { menu: { open: "Открыть" } } };',
+            'const second = { en_US: { menu: { open: "Open" } }, ru_RU: { menu: { open: "Открыть меню" } } };',
+            'const note = "Keep this sentence visible.";',
+        ].join('\n');
+        const ctx = new NS.ExtractContext({});
+        const file = 'scripts/dict_paths.js';
+        NS.processScript(src, file, ctx, {});
+        const before = ctx.entries.size;
+        NS.processScript(src, file, ctx, {});
+        const rows = [...ctx.translations.entries()].map(([key, langs]) => ({ key, en: langs.get('en_US'), ru: langs.get('ru_RU') }));
+        const rate = rows.find(row => row.ru === 'Обычная');
+        const size = rows.find(row => row.ru === 'Обычный');
+        const openMenu = rows.find(row => row.ru === 'Открыть');
+        const openOther = rows.find(row => row.ru === 'Открыть меню');
+        const slow = rows.filter(row => row.en === 'Slow' && row.ru === 'Медленно');
+        check('不同路径的相同英文各自成键', !!(rate && size && rate.key !== size.key && rate.en === 'Normal' && size.en === 'Normal'));
+        check('  └ 同一字典条目的各语言共用一个键', slow.length === 1 && rate.ru === 'Обычная' && size.ru === 'Обычный');
+        check('  └ 相同属性路径位于不同对象时也分开', !!(openMenu && openOther && openMenu.key !== openOther.key && openMenu.en === 'Open' && openOther.en === 'Open'));
+        check('  └ 同一条目再处理一次不另开键', ctx.entries.size === before);
+        check('  └ 字典外的普通句子仍只提取一次', [...ctx.entries.values()].filter(entry => entry.value === 'Keep this sentence visible.').length === 1);
+    }
 
     console.log('\n[5] 脚本运行时对比（原脚本 vs 改写后，模拟 @minecraft/server）');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'i18n-'));
