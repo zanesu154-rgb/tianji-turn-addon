@@ -148,8 +148,11 @@
         const meta = { file, kind: 'item' };
         let changed = false;
         const hidden = isHiddenFromCreative(item.description);
-        // 创造物品栏里不显示的物品（技术物品、进度图标等）：默认不提取名称，已有键也不补全
-        const skipName = hidden && !ctx.includeHiddenItems;
+        // 创造物品栏里不显示的物品（技术物品、进度图标等）：默认不提取名称，已有键也不补全。
+        // 名字里带颜色码的仍会拿在手里给玩家看（浩克技能物品 "§a§lHulk · §r§fCalm Down"），照常提取。
+        const writtenName = (() => { const dn = comps['minecraft:display_name']; const t = typeof dn === 'string' ? dn : dn && typeof dn.value === 'string' ? dn.value : ''; return t; })();
+        const shownInHand = /§/.test(writtenName) && looksLikeText(writtenName.replace(/§./g, ''), 'loose');
+        const skipName = hidden && !ctx.includeHiddenItems && !shownInHand;
         if (skipName) hideKeys(ctx, [`item.${id}.name`, `item.${id}`, `tile.${id}.name`, keyOfField(comps, 'minecraft:display_name')]);
 
         if (!skipName && replaceKeyField(comps, 'minecraft:display_name', `item.${id}.name`, ctx, meta)) changed = true;
