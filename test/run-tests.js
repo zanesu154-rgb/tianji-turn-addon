@@ -2170,6 +2170,76 @@ export function show(player, item) {
         const todo = ms.workbook()['untranslatable.csv'];
         check('勾了只看未修改时导出只含未改过的', all.includes('Old Guard') && all.includes('Young Guard') && !todo.includes('Old Guard') && todo.includes('Young Guard'), todo);
     }
+    {
+        // 沉浸式工作台：动作栏把前缀和格子内容拼成一行；聊天栏把 Error.message 发出去。
+        // 物品名在另一个文件里登记，运行时共用一份查找表。
+        const key = '__ADDON_I18N_TEST_STATION__';
+        delete globalThis[key];
+        const opt = { injectRuntime: true, runtimeKey: key };
+        const names = NS.processScript(
+            'export const NAMES = { "minecraft:crafting_table": "Bancada de Trabalho" };\n',
+            'BP/scripts/recipe_catalog.js', new NS.ExtractContext({ splitNewlines: false }), opt);
+        const bullet = '\u2022';
+        const src = [
+            'export function message(p, text) { p.sendMessage("§b[Cinematic] §r" + text); }',
+            'export function take(ctx) {',
+            '  if (!ctx.slot) throw new Error("Esse slot está vazio.");',
+            '  try { if (!ctx.ok) throw new Error("Esse item não cabe nesta área da estação."); }',
+            '  catch (e) { message(ctx.p, "§c" + (e.message || e)); }',
+            '  if (!ctx.space) throw Error("Esse espaço está vazio.");',
+            '  if (!ctx.n) throw new TypeError("station index");',
+            '  if (!ctx.ref) throw new ReferenceError("Missing modified structure.");',
+            '  const errors = { MISSING: "Missing modified structure." };',
+            '  return errors;',
+            '}',
+            'export function hint(ctx, index, item, amount) {',
+            '  const visible = item ? label(item) + " §e×" + amount : "§7Vazia";',
+            '  const prefix = ctx.role === "input" ? "§bCélula " + (index + 1) + " §8' + bullet + ' §f" : "";',
+            '  ctx.p.onScreenDisplay.setActionBar(prefix + visible);',
+            '  const mark = ctx.filled ? "§fFrasco " + index + " §a' + bullet + ' Mão vazia: retirar" : "§fFrasco " + index + " §7' + bullet + ' Com frasco: colocar";',
+            '  const head = (index >= 1 && index <= 3) ? "§bFrasco " + index : "§bIngrediente";',
+            '  ctx.p.onScreenDisplay.setActionBar(head + " §8' + bullet + ' §f" + mark);',
+            '}',
+            ''
+        ].join('\n');
+        const stationCtx = new NS.ExtractContext({ splitNewlines: false });
+        const station = NS.processScript(src, 'BP/scripts/direct.js', stationCtx, opt);
+        const js = station.content;
+        const vals = [...stationCtx.entries.values()].map(e => e.value);
+        const load = (out) => new Function(out.content.slice(0, out.content.indexOf('// ---- end i18n runtime ----')).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        load(names);
+        const rt = load(station);
+        const rawWords = (r) => {
+            const hit = [];
+            const walk = (n) => {
+                if (!n || typeof n === 'string') return;
+                if (Array.isArray(n)) { n.forEach(walk); return; }
+                if (typeof n.text === 'string' && /\p{L}/u.test(n.text.replace(/\u00a7./g, ''))) hit.push(n.text);
+                if (n.with) walk(n.with);
+                if (n.rawtext) n.rawtext.forEach(walk);
+            };
+            walk(r);
+            return hit;
+        };
+        const vazia = rt.M('§bCélula 8 §8' + bullet + ' §f§7Vazia');
+        const named = rt.M('§bCélula 7 §8' + bullet + ' §fBancada de Trabalho §e×1');
+        const bottle = rt.M('§bFrasco 1 §8' + bullet + ' §f§fFrasco 1 §7' + bullet + ' Com frasco: colocar');
+        const chat = rt.M('§cEsse slot está vazio.');
+        check('沉浸式工作台：给玩家看的 Error 句子登记，throw 保持原文；开发者错误仍不登记',
+            js.includes('throw new Error("Esse slot está vazio.")') && js.includes('throw new Error("Esse item não cabe nesta área da estação.")') && js.includes('throw Error("Esse espaço está vazio.")')
+            && vals.includes('Esse slot está vazio.') && vals.includes('Esse item não cabe nesta área da estação.') && vals.includes('Esse espaço está vazio.')
+            && !vals.includes('station index') && !vals.includes('Missing modified structure.'),
+            JSON.stringify(vals));
+        check('  └ 聊天栏带颜色码的错误句能对上', chat && chat.rawtext && chat.rawtext.some(x => x.translate) && !rawWords(chat).length, JSON.stringify(chat));
+        check('  └ 动作栏两段拼在一行时分别对上，物品名来自另一个文件',
+            vazia && vazia.rawtext && vazia.rawtext.filter(x => x.translate).length === 2 && !rawWords(vazia).length
+            && named && named.rawtext && named.rawtext.filter(x => x.translate).length === 2 && !rawWords(named).some(t => /Bancada/.test(t)),
+            JSON.stringify({ vazia, named }));
+        check('  └ 短句式只吃序号，不把后面的句子留在原文里',
+            bottle && bottle.rawtext && bottle.rawtext.filter(x => x.translate).length === 2 && !rawWords(bottle).some(t => /Frasco|colocar/.test(t)),
+            JSON.stringify(bottle));
+        delete globalThis[key];
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
