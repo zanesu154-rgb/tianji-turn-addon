@@ -668,6 +668,54 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
             && !NS.looksLikeText('function f() { return 1 }') && !NS.looksLikeText('{"a":1}') && !NS.looksLikeText('x => x + 1'));
     }
     {
+        // B-FP-03：只断言直接传给装备 API 的栏位参数。不在这些调用里的六个槽位值不在本条范围内。
+        const src = 'export function f(e, stack) {\n'
+            + '  e.getEquipmentSlot("Mainhand");\n'
+            + '  e.getEquipment("Offhand");\n'
+            + '  e.setEquipment("Head", stack);\n'
+            + '  e.setEquipment("Chest", stack);\n'
+            + '  e.setEquipment("Legs", stack);\n'
+            + '  e.setEquipment("Feet", stack);\n'
+            + '  e.sendMessage("Equip a shield");\n'
+            + '}\n';
+        const ctx = new NS.ExtractContext({});
+        const out = NS.processScript(src, 'scripts/gear.js', ctx, {});
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        const slots = ['Mainhand', 'Offhand', 'Head', 'Chest', 'Legs', 'Feet'];
+        check('B-FP-03：装备 API 的直接栏位参数不提取，旁边的句子照常提取',
+            slots.every(s => !vals.includes(s)) && vals.includes('Equip a shield')
+            && out.content.includes('getEquipmentSlot("Mainhand")') && out.content.includes('setEquipment("Feet", stack)'),
+            JSON.stringify(vals));
+    }
+    {
+        // B-FP-05：COMMAND 唯一且名字够长，交给 runCommand 的 "function flamethrower" 不提取。
+        // r 在两个函数里各声明一次，n 只用于显示；正常短句不能被命令变量规则一起跳过。
+        const src = 'const COMMAND = "function flamethrower";\n'
+            + 'export function show(p) { const r = "Bring a bucket"; p.sendMessage(r); const n = "Gate is open"; p.onScreenDisplay.setActionBar(n); }\n'
+            + 'export function go(p) { const r = "tp @s ~~~"; p.runCommand(r); p.runCommand(COMMAND); }\n';
+        const ctx = new NS.ExtractContext({});
+        const out = NS.processScript(src, 'scripts/flamethrower.js', ctx, {});
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        check('B-FP-05：function flamethrower 不提取；复用的短变量上的正常句子仍提取',
+            !vals.includes('function flamethrower') && !vals.includes('tp @s ~~~')
+            && vals.includes('Bring a bucket') && vals.includes('Gate is open')
+            && out.content.includes('const COMMAND = "function flamethrower"'),
+            JSON.stringify(vals));
+    }
+    {
+        // B-FP-08：command 数组里的 function 路径是命令
+        const src = 'export const spec = { command: ["function ants_spawner1", "function quests/start"], label: "Spawn the ants" };\n'
+            + 'export function f(p) { p.sendMessage("The nest is ready"); }\n';
+        const ctx = new NS.ExtractContext({});
+        const out = NS.processScript(src, 'scripts/ants.js', ctx, {});
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        check('B-FP-08：命令列表里的 function ants_spawner1 不提取，旁边的句子照常提取',
+            !vals.includes('function ants_spawner1') && !vals.includes('function quests/start')
+            && vals.includes('Spawn the ants') && vals.includes('The nest is ready')
+            && out.content.includes('function ants_spawner1'),
+            JSON.stringify(vals));
+    }
+    {
         // 存档再次转换：之前生成的翻译资源包保留（含已填译文），新键追加，不重复登记
         const wm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
         await NS.runWorldPipeline(wm, { sayMode: 'keep' }, () => {});
