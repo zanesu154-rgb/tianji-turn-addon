@@ -4,6 +4,13 @@
 
 [English](CHANGELOG_en.md)
 
+## 2026.11.22-93（2026-11-22）
+
+### 修复
+
+- `prefix + "_seconds"`、`kind + "Push"` 这类贴在编号上的碎片被登记成句式（`%1$s_seconds`、`%1$sPush`）。没有空格的编号碎片不再登记 ([#157](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/157))
+- 招式说明表的键名（如 `pull`、`push`）在数值行上显示成 `Pull`、`Push`。这些标签现在会登记，`Pull: 0.3` 能对上 ([#157](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/157))
+
 ## 2026.11.22-92（2026-11-22）
 
 ### 修复

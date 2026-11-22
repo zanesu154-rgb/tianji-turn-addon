@@ -2425,6 +2425,58 @@ export function show(player, item) {
             JSON.stringify(odds));
         delete globalThis[key];
     }
+    {
+        // 内部编号不是句子：prefix + "_seconds"、kind + "Push"。说明表的键名要变成画面上的 Pull / Push。
+        const key = '__ADDON_I18N_TEST_ID_FRAGMENT__';
+        delete globalThis[key];
+        const opt = { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button']), colonPrefix: true };
+        const src = [
+            'const help = {',
+            '  pull: "How strongly the move pulls creatures closer.",',
+            '  push: "The horizontal shove delivered to a target; larger values cause stronger knockback.",',
+            '  swirl: "How strongly the move spins creatures around its middle.",',
+            '  jump: "Jump Boost lets you jump higher."',
+            '};',
+            'function words(k) { return k.replace(/^./, c => c.toUpperCase()); }',
+            'function record(event) { return event; }',
+            'function stat(player, id) { return player[id]; }',
+            'export function f(player, prefix, kind) {',
+            '  record(prefix + "_seconds");',
+            '  stat(player, kind + "Push");',
+            '  player.sendMessage(words("pull") + ": 0.3");',
+            '  player.sendMessage(words("push") + ": 0.7");',
+            '  player.sendMessage(help.pull);',
+            '}',
+            ''
+        ].join('\n');
+        const ctx = new NS.ExtractContext({ splitNewlines: false });
+        const out = NS.processScript(src, 'BP/scripts/soulRemedy.js', ctx, opt);
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        const end = out.content.indexOf('// ---- end i18n runtime ----');
+        const rt = new Function(out.content.slice(0, end).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const rawWords = (r) => {
+            const hit = [];
+            const walk = (n) => {
+                if (!n || typeof n === 'string') return;
+                if (Array.isArray(n)) { n.forEach(walk); return; }
+                if (typeof n.text === 'string' && /\p{L}/u.test(n.text.replace(/\u00a7./g, ''))) hit.push(n.text);
+                if (n.with) walk(n.with);
+                if (n.rawtext) n.rawtext.forEach(walk);
+            };
+            walk(r);
+            return hit;
+        };
+        const pull = rt.M('Pull: 0.3');
+        const push = rt.M('Push: 0.7');
+        check('内部编号 _seconds / Push 不登记成句式；说明表键名 Pull、Push 能对上',
+            !vals.some(v => /_seconds|%1\$sPush|%1\$s_seconds/.test(v))
+            && vals.includes('Pull') && vals.includes('Push')
+            && pull && !rawWords(pull).some(t => /Pull/.test(t))
+            && push && !rawWords(push).some(t => /Push/.test(t))
+            && out.content.includes('prefix + "_seconds"') && out.content.includes('kind + "Push"'),
+            JSON.stringify({ vals: vals.filter(v => /second|Push|Pull|push|pull/i.test(v)), pull, push }));
+        delete globalThis[key];
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
