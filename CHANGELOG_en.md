@@ -4,6 +4,15 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.23-95 (2026-11-23)
+
+### Fixed
+
+- A handbook page titled with a trailing ` (continued)` no longer matched the original title. The word in parentheses is registered, and the title is matched first
+- The power archive wraps text at 62 columns, cutting a sentence in the middle. Consecutive non-blank lines are joined with spaces and matched again
+- Adapter progress `0% learned` was dropped after the percent sign moved into the argument, because `learned` looked like it was not a sentence. It is registered now
+- A leading `+ ` on the grant button kept `GRANT … to …` from matching. The prefix stays, and the sentence after it is translated
+
 ## 2026.11.23-94 (2026-11-23)
 
 ### Fixed

@@ -2524,6 +2524,57 @@ export function show(player, item) {
             JSON.stringify({ vals: vals.filter(v => /second|Push|Pull|push|pull/i.test(v)), pull, push }));
         delete globalThis[key];
     }
+    {
+        const key = '__ADDON_I18N_TEST_DOSSIER__';
+        delete globalThis[key];
+        const src = [
+            'export const ABOUT = "About your power";',
+            'export const ABILITIES = { "Adaptation": 1 };',
+            'export const DETAILS = "Lightning Punch sends lightning at an enemy. Its reach grows from 4 to 24 blocks.";',
+            'export function title(name, more) { return name + (more ? " (continued)" : ""); }',
+            'export function learned(n) { return n + "% learned"; }',
+            'export function grant(name, who) { return "§a§lGRANT §r§a" + name + " §8to " + who; }',
+            'export function show(p, name, n, who) {',
+            '  p.sendMessage(title(ABOUT, true));',
+            '  p.sendMessage(learned(n));',
+            '  p.sendMessage("+ §r" + grant(name, who));',
+            '  p.sendMessage(DETAILS);',
+            '}',
+            ''
+        ].join('\n');
+        const ctx = new NS.ExtractContext({ splitNewlines: false });
+        const out = NS.processScript(src, 'BP/scripts/powerUi.js', ctx, { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button']) });
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        const end = out.content.indexOf('// ---- end i18n runtime ----');
+        const rt = new Function(out.content.slice(0, end).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const rawWords = (r) => {
+            const hit = [];
+            const walk = (n) => {
+                if (typeof n === 'string') { if (/\p{L}/u.test(n)) hit.push(n); return; }
+                if (!n) return;
+                if (Array.isArray(n)) { n.forEach(walk); return; }
+                if (typeof n.text === 'string' && /\p{L}/u.test(n.text.replace(/\u00a7./g, ''))) hit.push(n.text);
+                if (n.with) walk(n.with);
+                if (n.rawtext) n.rawtext.forEach(walk);
+            };
+            walk(r);
+            return hit;
+        };
+        const cont = rt.M('About your power (continued)');
+        const adapt = rt.M('Adaptation (continued)');
+        const learn = rt.M('§a|||| §70% learned');
+        const grant = rt.M('+ §r§a§lGRANT §r§aShock Fist §8to Steve');
+        const wrapped = rt.M('Lightning Punch sends lightning\nat an enemy. Its reach grows\nfrom 4 to 24 blocks.');
+        check('续页 (continued)、% learned、授权按钮和按列折行的档案正文能对上',
+            vals.includes('(continued)') && vals.some(v => /learned/.test(v) && !/blueprint/.test(v))
+            && cont && !rawWords(cont).some(t => /About your power/.test(t))
+            && adapt && !rawWords(adapt).some(t => /Adaptation/.test(t))
+            && learn && !rawWords(learn).some(t => /learned/.test(t))
+            && grant && !rawWords(grant).some(t => /GRANT|\bto\b/.test(t))
+            && wrapped && !rawWords(wrapped).some(t => /Lightning|reach|blocks/.test(t)),
+            JSON.stringify({ cont, adapt, learn, grant, wrapped, vals }));
+        delete globalThis[key];
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

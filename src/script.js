@@ -1012,6 +1012,20 @@
       const head = one(dur[1]);
       if (head && residue(head) === 0) return head.concat([{ text: dur[2] }]);
     }
+    // "About your power (continued)"：续页只在标题后面加了括号，原标题已经登记
+    const cont = /^(.*\\S) \\(continued\\)$/.exec(s);
+    if (cont) {
+      const head = one(cont[1]);
+      if (head && residue(head) === 0) {
+        const tail = m.get("(continued)");
+        return head.concat([tail ? { translate: tail } : { text: " (continued)" }]);
+      }
+    }
+    const plus = /^\\+ §r([\\s\\S]+)$/.exec(s);
+    if (plus) {
+      const head = one(plus[1]);
+      if (head && head.some((e) => e && e.translate)) return [{ text: "+ §r" }, ...head];
+    }
     if (long) return null;
     // 前面带序号（"01  Unstable Sneeze · Practice 1"）：序号原样，后面的整句再找
     const ix = /^((?:\\u00a7.)*\\d{1,3}[\\s.)]+)(\\S[^\\n]*)$/.exec(s);
@@ -1275,6 +1289,16 @@
             }
           }
           if (run) { hit = true; els.push(...run); i = end; continue; }
+          // 能力档案按 62 列把空格换成换行。连续非空行用空格拼回去，整段对上就用最长的一段。
+          let span = null, spanJ = i;
+          for (let j = i; j <= Math.min(ls.length - 1, i + 10); j++) {
+            if (j > i && !String(ls[j]).replace(/\\u00a7./g, "").trim()) break;
+            if (j === i) continue;
+            const joined = ls.slice(i, j + 1).join(" ").replace(/[ \\t]{2,}/g, " ");
+            const hitJ = exactRun(joined) || one(joined);
+            if (hitJ && residue(hitJ) === 0) { span = hitJ; spanJ = j; }
+          }
+          if (span) { hit = true; els.push(...span); i = spanJ; continue; }
           const l = ls[i];
           if (!l) continue;
           const x = one(l) || tailOne(l) || (endR && i === ls.length - 1 && one(l + "\\u00a7r")) || pieces(l);
@@ -2758,7 +2782,9 @@
             for (const line of lines) {
                 // "§a [READY]"：动作栏状态。去掉颜色码后是 [READY]，strict 当成没有空格的标识，这里仍是给玩家看的。
                 const hud = /^(?:\u00a7.)+\s*\[[A-Za-z][A-Za-z0-9 ]{1,24}\]$/.test(String(line).trim());
-                if (!looksLikeText(line, 'strict') && !hud) continue;
+                // "(continued)"：续页标题的后缀，去掉括号后只剩一个小写词
+                const parenWord = /^\([A-Za-z][A-Za-z ]{2,24}\)$/.test(String(line).trim());
+                if (!looksLikeText(line, 'strict') && !hud && !parenWord) continue;
                 if (ctx.isKey(line)) continue;
                 // WaterGun、MeleeAttack 这种没有空格的驼峰词：代码里的标识符
                 if (/^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+$/.test(line.trim())) continue;
@@ -2911,7 +2937,9 @@
                 const unitWords = words;
                 // "3" + " health"、number(v / 20) + " seconds"：单位是小写单词，strict 不收，但数值后面就是它
                 const unitPat = unitWords.length > 0 && unitWords.every(w => UNIT_WORD.test(w.toLowerCase()));
-                if ((relaxed ? !wordy(litText(line)) : !looksLikeText(litText(line), 'strict')) && !hudPat && !unitPat) continue;
+                // number + "% learned"：百分号被收进参数后，剩下的 " learned" 是小写单词，strict 不收
+                const percentWord = line.some(p => p.pct) && /[A-Za-z]{3,}/.test(litText(line));
+                if ((relaxed ? !wordy(litText(line)) : !looksLikeText(litText(line), 'strict')) && !hudPat && !unitPat && !percentWord) continue;
                 if (unitPat) for (const w of unitWords) {
                     const u = w.toLowerCase();
                     if (!ctx.isKey(u) && !exact.some(([x]) => x === u)) exact.push([u, ctx.alloc(keyBase('str'), u, meta('str'))]);
@@ -3001,6 +3029,13 @@
             if (ctx.isKey(v) || exact.some(([x]) => x === v)) return;
             exact.push([v, ctx.alloc(keyBase(hint), v, meta(hint))]);
         };
+        // { "Adaptation": 1 }：能力名是对象的键，页面标题和 "Adaptation (continued)" 用的是这个名字
+        walk(ast, (n) => {
+            if (n.type !== 'Property' || n.computed || !isStr(n.key) || !n.value || n.value.type !== 'Literal') return;
+            if (typeof n.value.value !== 'number' || n.value.value < 1 || n.value.value > 5) return;
+            if (!looksLikeText(n.key.value, 'strict')) return;
+            forceText(n.key.value);
+        });
         // 数据表里的名称列：{ mel: ["melee damage", "flat", 3, "added to every melee hit"], … }
         // 同一列全是互不相同的短词组、且表里另有一列是说明文字时，这列名称也是显示用的
         walk(ast, (n) => {
