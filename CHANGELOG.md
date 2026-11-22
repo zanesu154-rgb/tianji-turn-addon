@@ -8,11 +8,11 @@
 
 ### 修复
 
-- 自定义表单先把正文存起来、再交给真正的表单时，整段说明只登记成一条句式，短按钮名会把后面的句子吞掉。现在每一行说明单独登记，浅色背景把 `§8` 换成 `§7` 之后也能对上
-- 技能动作栏把名字、技能名和 `§a [READY]`（或 `§7 [3s]`）拼成一行时对不上。状态文字会登记，整行按段翻译
-- 挑战目标前面的 `- Goal:` 会把整句目标吞进参数；现在改用更具体的句式，目标说明不再留在原文里
-- 人格按钮（如 `§aManiac challenges`）去掉颜色码后只剩一个小写词，以前不登记
-- 升级说明用 `2 to 3` 或 `25 resource` 而不是箭头时，冒号前的名称也会登记，`Applies to:` 后面的名称能对上
+- 自定义表单先把正文存起来、再交给真正的表单时，整段说明只登记成一条句式，短按钮名会把后面的句子吞掉。现在每一行说明单独登记，浅色背景把 `§8` 换成 `§7` 之后也能对上 ([#155](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/155))
+- 技能动作栏把名字、技能名和 `§a [READY]`（或 `§7 [3s]`）拼成一行时对不上。状态文字会登记，整行按段翻译 ([#155](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/155))
+- 挑战目标前面的 `- Goal:` 会把整句目标吞进参数；现在改用更具体的句式，目标说明不再留在原文里 ([#155](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/155))
+- 人格按钮（如 `§aManiac challenges`）去掉颜色码后只剩一个小写词，以前不登记 ([#155](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/155))
+- 升级说明用 `2 to 3` 或 `25 resource` 而不是箭头时，冒号前的名称也会登记，`Applies to:` 后面的名称能对上 ([#155](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/155))
 
 ## 2026.11.21-90（2026-11-21）
 
