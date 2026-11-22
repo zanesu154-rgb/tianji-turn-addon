@@ -8,10 +8,10 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
-- Items hidden from the creative inventory whose names contain color codes (Hulk ability items such as `Hulk · Calm Down`) are still held by the player. Those names are extracted. Technical items with no color code are still skipped
-- A prize description followed by ` · 300s` did not match as a whole. The description before that suffix is translated first
-- `Lucky Shot - Luck 1` inside a reward line's argument did not match. Translating an argument is no longer blocked by the outer match
-- A literal `%` elsewhere in a sentence that has arguments (for example `train 20% → 80%`) is no longer written as `%%`, so a custom form does not draw two percent signs
+- Items hidden from the creative inventory whose names contain color codes (Hulk ability items such as `Hulk · Calm Down`) are still held by the player. Those names are extracted. Technical items with no color code are still skipped ([#158](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/158))
+- A prize description followed by ` · 300s` did not match as a whole. The description before that suffix is translated first ([#158](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/158))
+- `Lucky Shot - Luck 1` inside a reward line's argument did not match. Translating an argument is no longer blocked by the outer match ([#158](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/158))
+- A literal `%` elsewhere in a sentence that has arguments (for example `train 20% → 80%`) is no longer written as `%%`, so a custom form does not draw two percent signs ([#158](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/158))
 
 ## 2026.11.22-93 (2026-11-22)
 

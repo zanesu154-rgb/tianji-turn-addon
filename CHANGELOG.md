@@ -8,10 +8,10 @@
 
 ### 修复
 
-- 创造栏里隐藏、但名字带颜色码的物品（浩克技能物品 `Hulk · Calm Down` 等）会拿在手里给玩家看。这些名字现在照常提取，没有颜色码的技术物品仍然跳过
-- 奖品说明后面拼的 ` · 300s` 让整句对不上。先翻译前面的说明
-- 奖励行里的 `Lucky Shot - Luck 1` 在外层句式的参数里对不上。参数再翻译时不再被外层匹配挡住
-- 带参数的句子里其余的 `%`（如 `train 20% → 80%`）不再写成 `%%`，自定义表单里不会画出两个百分号
+- 创造栏里隐藏、但名字带颜色码的物品（浩克技能物品 `Hulk · Calm Down` 等）会拿在手里给玩家看。这些名字现在照常提取，没有颜色码的技术物品仍然跳过 ([#158](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/158))
+- 奖品说明后面拼的 ` · 300s` 让整句对不上。先翻译前面的说明 ([#158](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/158))
+- 奖励行里的 `Lucky Shot - Luck 1` 在外层句式的参数里对不上。参数再翻译时不再被外层匹配挡住 ([#158](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/158))
+- 带参数的句子里其余的 `%`（如 `train 20% → 80%`）不再写成 `%%`，自定义表单里不会画出两个百分号 ([#158](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/158))
 
 ## 2026.11.22-93（2026-11-22）
 
