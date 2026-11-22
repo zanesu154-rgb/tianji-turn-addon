@@ -36,7 +36,7 @@ function readSyntheticWorld() {
     if (!syntheticWorldCache) {
         const wdir = fs.mkdtempSync(path.join(os.tmpdir(), 'lfmc-world-'));
         try {
-            execFileSync('node', [path.join(__dirname, 'make-world.js'), wdir], { stdio: 'pipe' });
+            execFileSync(process.execPath, [path.join(__dirname, 'make-world.js'), wdir], { stdio: 'pipe' });
             syntheticWorldCache = readDir(wdir);
         } finally {
             fs.rmSync(wdir, { recursive: true, force: true });
@@ -1384,7 +1384,7 @@ console.log(JSON.stringify(calls));`;
     console.log('\n[6b] 玩家数据（脚本生成的测试存档，不含个人信息）');
     {
         const wdir = fs.mkdtempSync(path.join(os.tmpdir(), 'world-'));
-        execFileSync('node', [path.join(__dirname, 'make-world.js'), wdir]);
+        execFileSync(process.execPath, [path.join(__dirname, 'make-world.js'), wdir]);
         const pm = new MemFS(readDir(wdir));
         const ss = await NS.openWorld(pm, {}, () => {});
         const texts = ss.ctx.untranslatable.map(u => u.text);
