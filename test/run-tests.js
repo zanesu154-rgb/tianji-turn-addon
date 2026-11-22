@@ -1915,6 +1915,58 @@ console.log(JSON.stringify(calls));`;
         check('只放回译文、前面新增了句子：按占位符 / 格式代码对齐，不错配', ok, JSON.stringify(pairs));
     }
     {
+        // 相同英文按字典路径分成多条。只把译文 lang 放回原文件树时，译文前面的短记号不能让序号整体错位。
+        const titles = ['The Last Gleam Falls', 'Where The Earth Glitters', 'The Sky Is Falling', 'Thrones To Dust', 'Sap And Circumstance'];
+        const bodies = ['Summon one of every enchantable mob, all enchanted', 'Kill one of every hostile monster. Bosses not included', 'Discover the crystal canyons', 'Defeat the crystalline berserker', 'Must run as a player.'];
+        const rows = [];
+        for (let i = 0; i < 40; i++) {
+            rows.push([`ui.q.${i}.title`, titles[i % titles.length]]);
+            rows.push([`ui.q.${i}.body`, bodies[i % bodies.length]]);
+        }
+        rows.push(['ui.mode.off', 'Off'], ['ui.hud.title', 'WAILA HUD']);
+        const enObj = Object.fromEntries(rows);
+        const ruObj = Object.fromEntries(rows.map(([k, v]) => [k, v === 'Off' ? 'Выкл' : `текст ${v}`]));
+        const src = 'function register() {}\nconst en = ' + JSON.stringify(enObj) + ';\nconst ru = ' + JSON.stringify(ruObj)
+            + ';\nregister("en_US", en);\nregister("ru_RU", ru);\nexport function f(p){ p.getEquipment("Mainhand"); p.sendMessage("Keep this quest line."); }\n';
+        const opt = { baseName: 'fixture', targetLangs: ['en_US', 'zh_CN'] };
+        const m1 = new MemFS(readDir(path.join(__dirname, 'fixture')));
+        m1.files.set('BP/scripts/questlines.js', Buffer.from(src));
+        const r1 = await NS.runPipeline(m1, opt, () => {});
+        const MARK = '## ==== addon-i18n ====';
+        const orig = readDir(path.join(__dirname, 'fixture'));
+        orig.set('BP/scripts/questlines.js', Buffer.from(src));
+        const before = new Map();
+        for (const [p, buf] of m1.files) {
+            if (!/\/texts\/[a-z]{2}_[A-Z]{2}\.lang$/.test(p)) continue;
+            const raw = buf.toString();
+            const at = raw.indexOf(MARK);
+            if (at < 0) continue;
+            const prefixed = raw.slice(0, at) + raw.slice(at).replace(/^([^#\r\n=][^=\r\n]*)=(.*)$/gm, (line, key, value) => `${key}=译:${value}`);
+            orig.set(p, Buffer.from(prefixed));
+            for (const [k, v] of NS.parseLang(raw)) if (/^script\.questlines\./.test(k)) before.set(p + '\0' + k, v);
+        }
+        const m2 = new MemFS(orig);
+        const r2 = await NS.runPipeline(m2, opt, () => {});
+        const lost = [];
+        for (const [id, v] of before) {
+            const cut = id.indexOf('\0');
+            const got = NS.parseLang(m2.files.get(id.slice(0, cut)).toString()).get(id.slice(cut + 1));
+            if (got !== '译:' + v) lost.push(id.slice(cut + 1));
+        }
+        const firstKeys = new Map();
+        for (const [k, e] of r1.ctx.entries) {
+            if (!firstKeys.has(e.value)) firstKeys.set(e.value, new Set());
+            firstKeys.get(e.value).add(k);
+        }
+        let reassigned = 0;
+        for (const [k, e] of r2.ctx.entries) {
+            const old = firstKeys.get(e.value);
+            if (old && !old.has(k)) reassigned++;
+        }
+        const js = m2.files.get('BP/scripts/questlines.js').toString();
+        check('只回填带短记号的译文：重复句子不丢键、不错位，装备参数仍是原文', lost.length === 0 && reassigned === 0 && js.includes('getEquipment("Mainhand")'), JSON.stringify({ lost: lost.slice(0, 5), reassigned }));
+    }
+    {
         // ID 列表经“拼英文名”函数做成下拉选项（new RegExp 存变量再 split 的写法）：拼好的 Public / Private 登记翻译
         const mm = new MemFS(readDir(path.join(__dirname, 'fixture')));
         mm.files.set('BP/scripts/privacy.js', Buffer.from('import { ModalFormData } from "@minecraft/server-ui";\nconst C = {}; C.PRIVACY_MODES = ["public", "private", "whitelist"];\nclass U { static pretty(t){ let a = new RegExp("^[\\\\w]+:"), i = new RegExp("(?<=\\\\w)[\\\\s_.]+(?=\\\\w)"), n = t.replace(a, "").split(i); for (let r = 0; r < n.length; r++) n[r] = n[r].charAt(0).toUpperCase() + n[r].slice(1); return n.join(" "); } }\nexport function show(p){ new ModalFormData().dropdown("Mode", C.PRIVACY_MODES.map(r => U.pretty(r))).show(p); }\n'));
