@@ -179,6 +179,25 @@
         return null;
     }
 
+    /**
+     * `${n}%`：百分号紧挨着插值。写进带参数的 lang 后要变成 %%，自定义表单却会把两个百分号都画出来。
+     * 把这一个 % 留在参数里（运行时匹配时它落在占位符里，静态改写时拼到表达式后面），译文里不再出现 %%。
+     * 作者已经写成 %% 的（本来就转义过）不动。
+     */
+    function absorbLiteralPercent(parts) {
+        const out = [];
+        for (const p of parts) {
+            const prev = out[out.length - 1];
+            if (prev && !('lit' in prev) && 'lit' in p && /^%(?![%sd]|[0-9]+\$)/.test(p.lit)) {
+                prev.pct = true;
+                if (p.lit.length > 1) out.push({ lit: p.lit.slice(1) });
+                continue;
+            }
+            out.push(p);
+        }
+        return out;
+    }
+
     function litText(parts) {
         return parts.filter(p => 'lit' in p).map(p => p.lit).join('');
     }
@@ -906,13 +925,23 @@
           if (!x) continue;
           let caps = x.slice(1);
           if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
-          const result = [{ translate: pk, with: { rawtext: caps.map(T) } }];
+          // "- Goal: %s." 的句号是字面量，里面的目标句自己也以句号结尾，对不上。句号改算进参数再试一次。
+          const args = caps.map((cap, i) => {
+            const next = lits[i + 1];
+            if (next && /^[.!?]+$/.test(next)) {
+              const withDot = T(cap + next), plain = T(cap);
+              if (residue(withDot) < residue(plain)) return withDot;
+            }
+            return T(cap);
+          });
+          const result = [{ translate: pk, with: { rawtext: args } }];
           if (!score) return result;
           const r = residue(result);
           if (r === 0) return result;
           const openLead = !/\\p{L}/u.test(lits[0]);
-          // 单行、并且字面量开头：最长的那条就是最具体的。整页里参数还剩一大段原文时继续找，找不到就按行拆。
-          if (!openLead && (t.indexOf("\\n") < 0 || r <= 40)) return result;
+          // 单行以文字开头：留下的只是一个短名字时，最长句式就是最具体的。
+          // 留下整句（"- Goal: %s." 把句号算进字面量，里面的目标句对不上）就继续找能译完的。
+          if (!openLead && r <= (t.indexOf("\\n") < 0 ? 12 : 40)) return result;
           if (r < bestR) { best = result; bestR = r; }
         }
         if (best && t.indexOf("\\n") >= 0 && bestR > 40) return null;
@@ -937,9 +966,43 @@
       }
       return null;
     };
+    // 整句已经登记过，短句式却从词的中间切开（"%s power" 吃掉 "About your power"，"%s unlocked from this power" 吃掉 "Not unlocked from this power"）
+    const suffixKey = (t) => {
+      let best = null;
+      const take = (i) => {
+        if (i < 0 || i >= t.length) return;
+        if (i > 0) {
+          const c = t[i - 1];
+          if (c !== " " && c !== "\\n" && c !== ">" && !(i >= 2 && t[i - 2] === "\\u00a7")) return;
+        }
+        const suf = t.slice(i);
+        if (suf.length < 8 || !/\\p{L}/u.test(suf)) return;
+        const kk = m.get(suf);
+        if (kk && (!best || suf.length > best[0])) best = [suf.length, i, kk];
+      };
+      take(0);
+      for (let i = 0; i < t.length; i++) {
+        if (t[i] === " " || t[i] === "\\n" || t[i] === ">") take(i + 1);
+        if (t[i] === "\\u00a7") take(i + 2);
+      }
+      return best;
+    };
     const glued = cover(s);
-    if (glued) return glued;
+    if (glued && residue(glued) === 0) return glued;
     let r = pat(s);
+    if ((!r || residue(r) > 0) && !(glued && residue(glued) === 0)) {
+      const suf = suffixKey(s);
+      if (suf) {
+        const pre = s.slice(0, suf[1]);
+        const bare = pre.replace(/\\u00a7./g, "");
+        if (!/\\p{L}/u.test(bare)) r = (pre ? [{ text: pre }] : []).concat([{ translate: suf[2] }]);
+        else {
+          const head = one(pre);
+          if (head && residue(head) === 0) r = head.concat([{ translate: suf[2] }]);
+        }
+      }
+    }
+    if (glued && (!r || residue(glued) < residue(r))) return glued;
     if (r) return r;
     if (long) return null;
     // 前面带序号（"01  Unstable Sneeze · Practice 1"）：序号原样，后面的整句再找
@@ -969,7 +1032,17 @@
       const r4 = [{ translate: k }, { text: lv[3] }];
       if (lv[1]) r4.unshift({ text: lv[1] });
       const rest = m.get(lv[4]);
-      r4.push(rest ? { translate: rest } : { text: lv[4] });
+      if (rest) r4.push({ translate: rest });
+      else {
+        const uv = /^(\\s*\\d+(?:\\.\\d+)?)(\\s+)([A-Za-z][A-Za-z ]{2,24})\\s*$/.exec(lv[4]);
+        const uk = uv && m.get(uv[3]);
+        if (uk) r4.push({ text: uv[1] + uv[2] }, { translate: uk });
+        else {
+          const pr = pat(lv[4]);
+          if (pr && residue(pr) === 0) for (const el of pr) r4.push(el);
+          else r4.push({ text: lv[4] });
+        }
+      }
       return r4;
     }
     // 颜色码被代码替换过（如浅色背景下把 §7 换成 §8）：忽略颜色码再比一次，用原文的颜色
@@ -2058,11 +2131,15 @@
         };
         const render = (node) => overrides.has(node) ? overrides.get(node)() : renderOrig(node);
         const renderPart = (p) => {
-            if (p.expr) return render(p.expr);
-            if (p.prefixNode) return render(p.prefixNode);
-            // 拼接链左侧多个非字符串操作数（如 a + b + "文字"）：保持原样整体求值
-            const [a, b] = p.exprRange;
-            return `(${src.slice(a.start, b.end)})`;
+            let code;
+            if (p.expr) code = render(p.expr);
+            else if (p.prefixNode) code = render(p.prefixNode);
+            else {
+                // 拼接链左侧多个非字符串操作数（如 a + b + "文字"）：保持原样整体求值
+                const [a, b] = p.exprRange;
+                code = `(${src.slice(a.start, b.end)})`;
+            }
+            return p.pct ? `(${code}+"%")` : code;
         };
         // 标记已静态改写的节点。模板 ${…} 里的表达式、拼接里的非字面量部分会原样保留（运行时 T() 翻译），
         // 其中的字符串（如 ${kit ? " Starter kit added." : ""}）仍要登记到运行时映射，所以不往里标记。
@@ -2120,6 +2197,7 @@
 
         /** 片段 → rawtext 元素代码数组；返回 null 表示没有可翻译文本且无动态部分 */
         function buildElements(parts, hint) {
+            parts = absorbLiteralPercent(parts);
             const lines = ctx.splitNewlines ? splitLines(parts) : [parts];
             const els = [];
             let translated = false, hadRef = false, refRuntime = false;
@@ -2685,7 +2763,8 @@
                     // 数值 + 箭头，或用 "2 to 3" 代替箭头，或 "25 resource" 这种数值加单位。普通“标签: 一句话”不登记。
                     const cp = /^((?:\u00a7.)*)([A-Za-z][^:\n]{2,58}?)\s*:\s+([^\n]+)$/.exec(t);
                     const rest = cp && cp[3].trim();
-                    const upgrade = !!rest && /\d/.test(rest) && ((/\u2192|->/.test(rest)) || (/\d[^:\n]*\bto\b[^:\n]*\d/.test(rest)) || (/^\d+(?:\.\d+)?(?:\s+[A-Za-z][A-Za-z ]{0,24})?$/.test(rest)));
+                    // "I → II" 用罗马数字，没有阿拉伯数字，同样是升级说明的前半段
+                    const upgrade = !!rest && ((/\d/.test(rest) && ((/\u2192|->/.test(rest)) || (/\d[^:\n]*\bto\b[^:\n]*\d/.test(rest)) || (/^\d+(?:\.\d+)?(?:\s+[A-Za-z][A-Za-z ]{0,24})?$/.test(rest)))) || (/(?:\u2192|->)/.test(rest) && /\b[IVXLC]{1,8}\b/.test(rest)));
                     if (cp && upgrade && /\s/.test(cp[2]) && !/\d/.test(cp[2]) && !exact.some(([x]) => x === cp[2].trim())) exact.push([cp[2].trim(), ctx.alloc(keyBase('str'), cp[2].trim(), meta('str'))]);
                 }
                 if (multi) { exact.push([line, k]); if (t !== line) exact.push([t, k]); }
@@ -2698,6 +2777,19 @@
                         if (!p || p === t || p === line || !looksLikeText(p, 'strict') || ctx.isKey(p) || exact.some(([x]) => x === p)) continue;
                         exact.push([p, ctx.alloc(keyBase('str'), p, meta('str'))]);
                     }
+                }
+                // "How long {x} lasts before ending."：运行时才把 {x} 换成具体词，整句对不上带花括号的原文
+                if (!multi && /\{[A-Za-z_]\w*\}/.test(t)) {
+                    const bits = [];
+                    let last = 0;
+                    for (const m of t.matchAll(/\{[A-Za-z_]\w*\}/g)) {
+                        if (m.index > last) bits.push({ lit: t.slice(last, m.index) });
+                        bits.push({ expr: true });
+                        last = m.index + m[0].length;
+                    }
+                    if (last < t.length) bits.push({ lit: t.slice(last) });
+                    const bare = t.replace(/\{[A-Za-z_]\w*\}/g, 'x');
+                    if (bits.some(b => !('lit' in b)) && looksLikeText(bare, 'strict')) registerPattern(bits, true);
                 }
             }
         };
@@ -2744,7 +2836,9 @@
             }, []));
         };
 
+        const UNIT_WORD = /^(?:seconds|second|blocks|block|hearts|heart|health|resource|energy|degrees|targets|rays)$/;
         const registerPattern = (parts, relaxed = false) => {
+            parts = absorbLiteralPercent(parts);
             if (isKeyTemplate(parts)) return;
             if (NS.hasKeyRefs(parts.map(x => 'lit' in x ? x.lit : ' ').join(''))) return;   // 带 %键 引用：游戏按键翻译，不登记
             if (isCodeNoise(parts.map(x => 'lit' in x ? x.lit : '%s').join(''))) return;
@@ -2794,7 +2888,14 @@
                 }
                 // "§7 [" + 秒数 + "s]"：动作栏冷却。字面量本身不像句子，整段仍是状态。
                 const hudPat = /^(?:\u00a7.)+\s*\[[^\n]*\]$/.test(lits.join('').trim());
-                if ((relaxed ? !wordy(litText(line)) : !looksLikeText(litText(line), 'strict')) && !hudPat) continue;
+                const unitWords = (lits.join(' ').replace(/\u00a7./g, ' ').match(/\p{L}[\p{L}'’-]*/gu) || []);
+                // "3" + " health"、number(v / 20) + " seconds"：单位是小写单词，strict 不收，但数值后面就是它
+                const unitPat = unitWords.length > 0 && unitWords.every(w => UNIT_WORD.test(w.toLowerCase()));
+                if ((relaxed ? !wordy(litText(line)) : !looksLikeText(litText(line), 'strict')) && !hudPat && !unitPat) continue;
+                if (unitPat) for (const w of unitWords) {
+                    const u = w.toLowerCase();
+                    if (!ctx.isKey(u) && !exact.some(([x]) => x === u)) exact.push([u, ctx.alloc(keyBase('str'), u, meta('str'))]);
+                }
                 // `${DOT} ${A}Settings${R}`：两头都是变量、中间只有一个词的句式能匹配几乎任何含这个词的文字，
                 // 运行时会把整段正文吞进占位符；只登记这个词本身（显示时按分隔符逐段翻译）
                 const words = lits.join(' ').replace(/\u00a7./g, ' ').match(/\p{L}[\p{L}'’-]*/gu) || [];
@@ -2972,6 +3073,45 @@
                 }
             });
         }
+        // const units = { damage: "health", range: "blocks" }; text += " " + units[key]
+        // 数值后面的单位是小写单词，strict 不收，画面上会留着 "3 health"、"12 blocks"
+        walk(ast, (n) => {
+            if (n.type !== 'VariableDeclarator' || n.id.type !== 'Identifier' || !n.init || n.init.type !== 'ObjectExpression') return;
+            const name = n.id.name;
+            if (!new RegExp(`" "\\s*\\+\\s*${name.replace(/\$/g, '\\$')}\\s*\\[`).test(src)) return;
+            const vals = [];
+            for (const p of n.init.properties) {
+                if (p.type !== 'Property' || !isStr(p.value) || !/^[a-z][a-z ]{2,16}$/.test(p.value.value)) return;
+                vals.push(p.value.value);
+            }
+            if (vals.length < 2) return;
+            for (const v of vals) forceText(v);
+        });
+        // template.replaceAll("{x}", families[prefix])：花括号换成对象里的词。词本身也要能翻译
+        if (/\.replace(?:All)?\(\s*["']\{[A-Za-z_]\w*\}["']/.test(src)) walk(ast, (n) => {
+            if (n.type !== 'VariableDeclarator' || n.id.type !== 'Identifier' || !n.init || n.init.type !== 'ObjectExpression') return;
+            const name = n.id.name;
+            if (!new RegExp(`\\b${name.replace(/\$/g, '\\$')}\\s*\\[`).test(src)) return;
+            const vals = [];
+            for (const p of n.init.properties) {
+                if (p.type !== 'Property' || !isStr(p.value)) return;
+                if (!/^[A-Za-z][A-Za-z' -]{1,40}$/.test(p.value.value)) return;
+                vals.push(p.value.value);
+            }
+            if (vals.length < 3) return;
+            for (const v of vals) forceText(v);
+        });
+        // ["haste","speed"].map(effect => words(effect) + ": " + ...)：画面上是首字母大写的 Haste、Speed
+        walk(ast, (n) => {
+            if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || propName(n.callee) !== 'map') return;
+            const arr = n.callee.object;
+            if (!arr || arr.type !== 'ArrayExpression' || !arr.elements.length) return;
+            if (!arr.elements.every(e => isStr(e) && /^[a-z][a-z]{2,20}$/.test(e.value))) return;
+            const fn = n.arguments[0];
+            if (!fn || !/Function/.test(fn.type)) return;
+            if (!/\+\s*["']: /.test(src.slice(fn.start, fn.end))) return;
+            for (const e of arr.elements) forceText(e.value.charAt(0).toUpperCase() + e.value.slice(1));
+        });
         // { label: "Curve", choices: ["straight", "bezier"] }：选项值显示时常被首字母大写（cap(choice)），把大写形式登记翻译
         walk(ast, (n) => {
             if (n.type !== 'Property' || n.computed || !n.key || !/^(choices|options|values)$/.test(n.key.name || n.key.value || '') || n.value.type !== 'ArrayExpression') return;

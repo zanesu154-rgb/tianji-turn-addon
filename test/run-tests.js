@@ -1014,7 +1014,7 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
         const cp = new NS.ExtractContext({});
         NS.processScript('import { world } from "@minecraft/server";\nexport function f(p, a) { p.sendMessage("Full 100% safe now"); p.sendMessage("Chance: " + a + "% to win"); p.sendMessage("Rate 50%% done here"); p.sendMessage(`Bonus ${a}%% extra power`); p.sendMessage("Keep %%s as written"); }\n', 'scripts/pct.js', cp, { injectRuntime: true, runtimeKey: '__ADDON_I18N_pct' });
         const pv = [...cp.entries.values()].map(e => e.value);
-        check('百分号：带参数时 %→%%、已转义的 %% 不翻倍；不带参数时 %%→%', JSON.stringify(pv) === JSON.stringify(['Full 100% safe now', 'Chance: %1$s%% to win', 'Rate 50% done here', 'Bonus %1$s%% extra power', 'Keep %%s as written']), JSON.stringify(pv));
+        check('百分号：插值后面的 % 留在参数里，不写进带参数的译文；已转义的 %% 不翻倍；不带参数时 %%→%', JSON.stringify(pv) === JSON.stringify(['Full 100% safe now', 'Chance: %1$s to win', 'Rate 50% done here', 'Bonus %1$s%% extra power', 'Keep %%s as written']), JSON.stringify(pv));
     }
     {
         // 大型整合包：界面用 (#title_text = 'Magic') 判断显示哪个自定义界面；manifest 的包设置 / 子包名称
@@ -2339,6 +2339,90 @@ export function show(player, item) {
             && about && !rawWords(about).some(t => /Blood Rush Rush duration|Applies/.test(t))
             && cost && !rawWords(cost).some(t => /Blood cost|Applies/.test(t)),
             JSON.stringify({ goal, lane, about, cost }));
+        delete globalThis[key];
+    }
+    {
+        // 五号化合物第二轮：目标句被“- Goal: %s.”从句号处切开；短句式切开按钮和“未解锁”；单位和 {x} 说明留在原文；插值后的 % 在表单里变成 %%
+        const key = '__ADDON_I18N_TEST_COMPOUND_BODY__';
+        delete globalThis[key];
+        const opt = { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button', 'label']), colonPrefix: true };
+        const src = [
+            'import { ActionFormData } from "@minecraft/server-ui";',
+            'const units = { damage: "health", range: "blocks" };',
+            'const families = { poison: "poison", pool: "acid pool", spray: "spray" };',
+            'const suffixes = { Duration: "How long {x} lasts before ending." };',
+            'function words(k) { return k.replace(/^./, c => c.toUpperCase()); }',
+            'function settingLine(key, value) {',
+            '  let text = String(value);',
+            '  if (units[key]) text += " " + units[key];',
+            '  const label = key === "damage" ? "Damage per hit" : "Reach";',
+            '  return label + ": " + text;',
+            '}',
+            'function explain(key) {',
+            '  const subject = families[key];',
+            '  return suffixes.Duration.replaceAll("{x}", subject);',
+            '}',
+            'function goal(task) { return "- Goal: " + task + "."; }',
+            'const hit = (n, ability) => `Hit monsters ${n} times with ${ability}.`;',
+            'export function show(player, n, odds) {',
+            '  const personality = "haste";',
+            '  const line = ["haste", "speed"].map(effect => words(effect) + ": " + (effect === personality ? "Not unlocked from this power" : "Level I" + " unlocked from this power")).join("\\n");',
+            '  player.sendMessage(line);',
+            '  player.sendMessage(settingLine("damage", 3));',
+            '  player.sendMessage(settingLine("range", 12));',
+            '  player.sendMessage(explain("poison"));',
+            '  player.sendMessage("Applies to: " + "Glob and pool poison: I → II".slice(0, "Glob and pool poison: I → II".indexOf(":")) + ".");',
+            '  const title = "About your power";',
+            '  const on = true;',
+            '  const form = new ActionFormData();',
+            '  form.button((on ? "> §b" : "§f") + title);',
+            '  form.body(`§7${odds}% Human§r / §9${n}% Compound V§r`);',
+            '  form.body(goal(hit(24, "Acid Vomit")));',
+            '  const cap = `${n} power${n === 1 ? "" : "s"}`;',
+            '  form.button(cap);',
+            '}',
+            ''
+        ].join('\n');
+        const ctx = new NS.ExtractContext({ splitNewlines: false });
+        const out = NS.processScript(src, 'BP/scripts/compound-body.js', ctx, opt);
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        const end = out.content.indexOf('// ---- end i18n runtime ----');
+        const rt = new Function(out.content.slice(0, end).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const rawWords = (r) => {
+            const hit = [];
+            const walk = (n) => {
+                if (!n || typeof n === 'string') return;
+                if (Array.isArray(n)) { n.forEach(walk); return; }
+                if (typeof n.text === 'string' && /\p{L}/u.test(n.text.replace(/\u00a7./g, ''))) hit.push(n.text);
+                if (n.with) walk(n.with);
+                if (n.rawtext) n.rawtext.forEach(walk);
+            };
+            walk(r);
+            return hit;
+        };
+        const goalLine = rt.M('- Goal: Hit monsters 24 times with Acid Vomit.');
+        const about = rt.M('> §bAbout your power');
+        const locked = rt.M('Haste: Not unlocked from this power');
+        const health = rt.M('Damage per hit: 3 health');
+        const blocks = rt.M('Reach: 12 blocks');
+        const how = rt.M('How long poison lasts before ending.');
+        const topic = rt.M('Applies to: Glob and pool poison.');
+        const odds = vals.find(v => /Human/.test(v) && /Compound V/.test(v));
+        check('五号化合物：目标句不被句号句式吞掉，按钮和“未解锁”按整句对上',
+            goalLine && !rawWords(goalLine).some(t => /Hit monsters|Acid/.test(t))
+            && about && !rawWords(about).some(t => /About your|power/.test(t))
+            && locked && !rawWords(locked).some(t => /Haste|Not unlocked|unlocked from/.test(t))
+            && vals.includes('About your power') && vals.includes('Not unlocked from this power') && vals.includes('Haste'),
+            JSON.stringify({ goal: rawWords(goalLine), about: rawWords(about), locked: rawWords(locked), hasAbout: vals.includes('About your power'), hasLock: vals.includes('Not unlocked from this power'), hasHaste: vals.includes('Haste') }));
+        check('  └ 单位、{x} 说明、罗马数字升级名不再留在原文里',
+            health && !rawWords(health).some(t => /health|Damage/.test(t))
+            && blocks && !rawWords(blocks).some(t => /blocks|Reach/.test(t))
+            && how && !rawWords(how).some(t => /How long|poison|lasts/.test(t))
+            && topic && !rawWords(topic).some(t => /Glob|poison|Applies/.test(t)),
+            JSON.stringify({ health, blocks, how, topic }));
+        check('  └ 表单里插值后面的百分号不写进带参数的译文',
+            odds && !/%%/.test(odds) && /%1\$s/.test(odds),
+            JSON.stringify(odds));
         delete globalThis[key];
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
