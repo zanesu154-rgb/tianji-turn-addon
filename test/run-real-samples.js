@@ -7,12 +7,22 @@
 //
 // 二次转换的测试类型是「只回填译文 lang 到原始文件树」：第二次只把第一次写出的 lang
 // 放回原始文件树，不拿完整转换产物再跑一遍。
+// ZIP 由 vendor/jszip.min.js 在内存中读取。启动时如果这个文件不能加载，直接失败，不调用系统 unzip。
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
-const { NS, MemFS, readDir } = require('./load.js');
+const { NS, MemFS } = require('./load.js');
+
+// 读取 ZIP 只用仓库自带的 JSZip，不调用系统 unzip。Windows 上没有 unzip.exe 也能跑。
+function loadJSZip() {
+    let JSZip;
+    try { JSZip = require('../vendor/jszip.min.js'); }
+    catch (e) { throw new Error('无法加载 vendor/jszip.min.js，真实样本入口不能读取 mcaddon：' + e.message); }
+    if (!JSZip || typeof JSZip.loadAsync !== 'function') {
+        throw new Error('vendor/jszip.min.js 没有提供 JSZip.loadAsync，已停止，未开始转换。');
+    }
+    return JSZip;
+}
 
 const SAMPLE_ID = 'bedrock-reimagined';
 const MARK = '## ==== addon-i18n ====';
@@ -42,14 +52,36 @@ function versionText(version) {
     return String(version == null ? '' : version);
 }
 
-function readManifestVersion(zipFile, member) {
-    const raw = execFileSync('unzip', ['-p', zipFile, member], { maxBuffer: 2 * 1024 * 1024 });
-    const data = JSON.parse(String(raw));
+function manifestVersion(files, member) {
+    const raw = files.get(member);
+    if (raw == null) throw new Error('ZIP 中没有 ' + member + '，未开始转换');
+    let data;
+    try { data = JSON.parse(textOf(raw)); }
+    catch (e) { throw new Error(member + ' 不是合法 JSON，未开始转换'); }
     return versionText(data && data.header && data.header.version);
 }
 
-function langKeyLines(text) {
-    const counts = new Map();
+async function readZip(packPath) {
+    const JSZip = loadJSZip();
+    let zip;
+    try { zip = await JSZip.loadAsync(fs.readFileSync(packPath)); }
+    catch (e) { throw new Error('原包 ZIP 无法用内置 JSZip 打开，未开始转换：' + e.message); }
+    const names = Object.keys(zip.files).filter(name => !zip.files[name].dir);
+    const files = new Map();
+    for (let i = 0; i < names.length; i += 100) {
+        const slice = names.slice(i, i + 100);
+        const buffers = await Promise.all(slice.map(name => zip.files[name].async('nodebuffer')));
+        slice.forEach((name, index) => {
+            const rel = name.replace(/\\/g, '/');
+            if (!rel || rel.startsWith('/') || rel.split('/').includes('..')) throw new Error('ZIP 内路径越界：' + name);
+            files.set(rel, buffers[index]);
+        });
+    }
+    return files;
+}
+
+function langEntries(text) {
+    const map = new Map();
     for (let line of String(text).split('\n')) {
         line = line.replace(/\r$/, '');
         const t = line.trimStart();
@@ -58,9 +90,13 @@ function langKeyLines(text) {
         if (eq <= 0) continue;
         const key = line.slice(0, eq).trim();
         if (!key) continue;
-        counts.set(key, (counts.get(key) || 0) + 1);
+        let value = line.slice(eq + 1);
+        const cuts = [value.indexOf('##'), value.indexOf('\t#')].filter(index => index >= 0);
+        if (cuts.length) value = value.slice(0, Math.min(...cuts));
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(value);
     }
-    return counts;
+    return map;
 }
 
 function prefixTranslatedLang(text) {
@@ -183,21 +219,55 @@ function eachNode(ast, visit) {
     }
 }
 
-function commandLiterals(info, file) {
+function flattenCommand(node) {
+    if (!node) return null;
+    if (node.type === 'Literal' && typeof node.value === 'string') return { parts: [node.value], dynamic: false };
+    if (node.type === 'TemplateLiteral') {
+        const parts = [];
+        node.quasis.forEach((part, index) => {
+            parts.push(part.value.cooked || '');
+            if (index < node.expressions.length) parts.push(null);
+        });
+        return { parts, dynamic: node.expressions.length > 0 };
+    }
+    if (node.type === 'BinaryExpression' && node.operator === '+') {
+        const left = flattenCommand(node.left);
+        const right = flattenCommand(node.right);
+        if (!left || !right) return { parts: [null], dynamic: true };
+        return { parts: left.parts.concat(right.parts), dynamic: true };
+    }
+    return null;
+}
+
+function commandFromArg(node) {
+    let current = node;
+    while (current && current.type === 'CallExpression' && calleeName(current) === 'C' && current.arguments[0]) current = current.arguments[0];
+    const flat = flattenCommand(current);
+    if (!flat) return null;
+    const text = flat.parts.filter(part => part != null).join('').trim();
+    if (!text) return null;
+    return { text, dynamic: flat.dynamic || flat.parts.some(part => part == null) };
+}
+
+function isEventEntityCommand(text) {
+    return NS.looksLikeCommand(text) && /^\/?event\s+entity\b/.test(text);
+}
+
+function eventEntityCalls(info, source) {
     const found = [];
     if (!info.ok || !info.ast) return found;
     eachNode(info.ast, (node) => {
-        let text = null;
-        let where = '';
-        if (node.type === 'Literal' && typeof node.value === 'string') {
-            text = node.value;
-            where = '字符串字面量';
-        } else if (node.type === 'TemplateLiteral' && node.expressions.length === 0) {
-            text = node.quasis[0].value.cooked || '';
-            where = '模板字符串';
-        }
-        if (!text || !text.includes('event entity') || !NS.looksLikeCommand(text)) return;
-        found.push({ file, where, text });
+        if (node.type !== 'CallExpression') return;
+        const name = calleeName(node);
+        if (name !== 'runCommand' && name !== 'runCommandAsync') return;
+        const command = commandFromArg(node.arguments[0]);
+        if (!command || !isEventEntityCommand(command.text)) return;
+        found.push({
+            callee: name,
+            text: command.text,
+            dynamic: command.dynamic,
+            call: source ? clip(source.slice(node.start, node.end), 140) : '',
+        });
     });
     return found;
 }
@@ -275,27 +345,27 @@ function loadSample(root) {
     if (stat.size !== entry.size) throw new Error(`原包大小 ${stat.size} 与登记 ${entry.size} 不一致`);
     const digest = sha256File(packPath);
     if (digest !== entry.sha256) throw new Error(`原包 SHA-256 ${digest} 与登记不一致`);
-    let zipOk = true;
-    try { execFileSync('unzip', ['-t', '-q', packPath], { stdio: 'pipe' }); }
-    catch (e) { zipOk = false; }
-    if (!zipOk) throw new Error('原包 ZIP 完整性检查失败，未开始转换');
-    const bpVersion = readManifestVersion(packPath, 'bp0/manifest.json');
-    const rpVersion = readManifestVersion(packPath, 'rp0/manifest.json');
-    if (bpVersion !== entry.version || rpVersion !== entry.version) {
-        throw new Error(`manifest 版本 bp=${bpVersion} rp=${rpVersion}，登记版本是 ${entry.version}`);
-    }
-    return { entry, packPath, digest, bpVersion, rpVersion };
+    return { entry, packPath, digest };
 }
 
 function checkDictionary(info, ctx, mem) {
     const groups = info.ok ? NS.collectTranslationGroups(info.ast, { mode: 'auto', map: new Map() }).groups : [];
-    if (!groups.length) {
+    const distinctGroups = [];
+    let sameText = 0;
+    for (const group of groups) {
+        const expected = normalizedGroup(group);
+        const rawValues = [...group.values()].map(node => node.value);
+        const distinct = new Set((expected || rawValues).map(value => Array.isArray(value) ? value[1] : value));
+        if (distinct.size < 2) { sameText++; continue; }
+        distinctGroups.push({ group, expected });
+    }
+    if (!distinctGroups.length) {
         return {
             id: 'dictionary',
             status: 'UNCOVERED',
-            input: { script: 'bp0/scripts/imports.js', groups: 0 },
+            input: { script: 'bp0/scripts/imports.js', groups: groups.length, distinctGroups: 0, sameText },
             output: null,
-            basis: 'collectTranslationGroups 没有得到可断言的语言组，不能把转换成功当成这项通过。',
+            basis: '没有至少两种不同原文的语言组，这项没有可断言的输入。',
         };
     }
     const langPaths = new Map();
@@ -320,10 +390,20 @@ function checkDictionary(info, ctx, mem) {
     }
     const missing = [];
     const matched = [];
-    for (const group of groups) {
-        const expected = normalizedGroup(group);
+    for (const item of distinctGroups) {
+        const expected = item.expected;
+        const distinctTexts = [];
+        const seen = new Set();
+        const raw = item.expected || [...item.group.values()].map(node => ['', node.value]);
+        for (const pair of (expected || raw)) {
+            const lang = expected ? pair[0] : '';
+            const value = expected ? pair[1] : pair[1];
+            if (seen.has(value)) continue;
+            seen.add(value);
+            distinctTexts.push([lang, clip(value)]);
+        }
         if (!expected) {
-            missing.push({ reason: '占位符无法按源语言对齐，转换不会写入这一组', sample: clip(group.values().next().value.value) });
+            missing.push({ reason: '占位符无法按源语言对齐，这一组没有写入同一个键', distinctTexts: distinctTexts.slice(0, 2) });
             continue;
         }
         let keys = null;
@@ -335,7 +415,7 @@ function checkDictionary(info, ctx, mem) {
         }
         const key = keys && [...keys][0];
         if (!key) {
-            const detail = { langs: expected.map(([lang, value]) => [lang, clip(value)]) };
+            const detail = { distinctTexts: distinctTexts.slice(0, 2), sharedKey: null };
             if (missing.length < 3) {
                 const candidates = new Set();
                 for (const [lang, value] of expected) for (const candidate of index.get(lang + '\0' + value) || []) candidates.add(candidate);
@@ -348,6 +428,7 @@ function checkDictionary(info, ctx, mem) {
                 }
                 detail.bestKey = best;
                 detail.matchedLangs = score < 0 ? 0 : score;
+                detail.langCount = expected.length;
                 detail.stored = best ? [...ctx.translations.get(best).entries()].map(([lang, value]) => [lang, clip(value)]) : null;
             }
             missing.push(detail);
@@ -358,10 +439,10 @@ function checkDictionary(info, ctx, mem) {
             const want = NS.toLangValue(value);
             const hits = langPaths.get(lang) || [];
             const hit = hits.find(p => parsed(p).get(key) === want);
-            if (!hit) missing.push({ key, lang, sample: clip(value) });
+            if (!hit) missing.push({ sharedKey: key, lang, distinctTexts: distinctTexts.slice(0, 2), sample: clip(value) });
             else files.push({ lang, path: hit, key });
         }
-        if (files.length === expected.length) matched.push({ key, files });
+        if (files.length === expected.length) matched.push({ sharedKey: key, distinctTexts: distinctTexts.slice(0, 2), langCount: expected.length });
     }
     const status = missing.length ? 'FAIL' : 'PASS';
     return {
@@ -370,39 +451,51 @@ function checkDictionary(info, ctx, mem) {
         input: {
             script: 'bp0/scripts/imports.js',
             groups: groups.length,
+            distinctGroups: distinctGroups.length,
+            sameText,
             sample: (status === 'PASS' ? matched[0] : missing[0]) || null,
         },
         output: { matched: matched.length, missingCount: missing.length, missing: missing.slice(0, 5), translationKeys: ctx.translations.size },
         basis: status === 'PASS'
-            ? '每个语言组都能在 ctx.translations 找到键，并且对应 texts/<语言>.lang 里的值与字典原文经 toLangValue 后一致。'
-            : '有语言组没有进入 ctx.translations，或 lang 文件中的值与字典原文不一致。',
+            ? '每一组都至少有两种不同原文，并且这些语言在 ctx.translations 和各自的 texts/<语言>.lang 里共用同一个键。'
+            : '有语言组的不同原文没有落到同一个键，或某个语言的 lang 值与该组原文不一致。',
     };
 }
 
-function checkEventEntity(info, ctx, scriptPath, converted) {
-    const inputs = commandLiterals(info, scriptPath);
+function checkEventEntity(info, ctx, scriptPath, source, converted) {
+    const inputs = eventEntityCalls(info, source);
     if (!inputs.length) {
         return {
             id: 'event-entity',
             status: 'UNCOVERED',
-            input: { script: scriptPath, commands: 0 },
+            input: { script: scriptPath, calls: 0 },
             output: null,
-            basis: '脚本里没有被 looksLikeCommand 接受的 event entity 字面量，这项没有可断言的输入。',
+            basis: '没有找到 runCommand 或 runCommandAsync 调用，且其参数被 looksLikeCommand 接受为 event entity 命令。',
         };
     }
+    const convertedInfo = NS.collectScriptInfo(converted);
+    const outputs = eventEntityCalls(convertedInfo, converted);
+    const outputCounts = new Map();
+    for (const call of outputs) outputCounts.set(call.text, (outputCounts.get(call.text) || 0) + 1);
+    const inputCounts = new Map();
+    for (const call of inputs) inputCounts.set(call.text, (inputCounts.get(call.text) || 0) + 1);
     const values = entryValues(ctx);
     const blocked = untranslatableTexts(ctx);
-    const leaked = inputs.filter(item => values.has(item.text) || blocked.has(item.text));
-    const sourceKept = converted.includes('event entity');
-    const status = leaked.length || !sourceKept ? 'FAIL' : 'PASS';
+    const leaked = [];
+    const dropped = [];
+    for (const [text, count] of inputCounts) {
+        if (values.has(text) || blocked.has(text)) leaked.push(clip(text));
+        if ((outputCounts.get(text) || 0) < count) dropped.push({ text: clip(text), before: count, after: outputCounts.get(text) || 0 });
+    }
+    const status = leaked.length || dropped.length ? 'FAIL' : 'PASS';
     return {
         id: 'event-entity',
         status,
-        input: { script: scriptPath, commands: inputs.length, sample: clip(inputs[0].text) },
-        output: { leaked: leaked.slice(0, 3).map(item => clip(item.text)), sourceContainsEventEntity: sourceKept },
+        input: { script: scriptPath, calls: inputs.length, sample: inputs[0] },
+        output: { convertedCalls: outputs.length, leaked: leaked.slice(0, 3), dropped: dropped.slice(0, 3) },
         basis: status === 'PASS'
-            ? '这些字面量由 looksLikeCommand 判定为命令；它们没有进入 ctx.entries 或 ctx.untranslatable，转换后的脚本仍保留 event entity。'
-            : '命令字面量进入了玩家可见条目，或转换后的脚本不再包含 event entity。',
+            ? '这些是 runCommand / runCommandAsync 的参数，并且 looksLikeCommand 判定为 event entity。它们没有进入 ctx.entries 或 ctx.untranslatable，转换后的同名调用仍带有同样的命令文本。'
+            : 'event entity 命令进入了玩家可见条目，或转换后的 runCommand 调用不再带有原来的命令文本。',
     };
 }
 
@@ -458,7 +551,7 @@ function checkAscii(info, ctx, scriptPath) {
     };
 }
 
-function checkPutBack(originalDir, firstMem) {
+function checkPutBack(originalFiles, firstMem, firstCtx) {
     const produced = firstMem.list().filter(p => /(?:^|\/)texts\/[a-z]{2}_[A-Z]{2}\.lang$/.test(p) && textOf(firstMem.files.get(p)).includes(MARK));
     if (!produced.length) {
         return {
@@ -470,79 +563,92 @@ function checkPutBack(originalDir, firstMem) {
             basis: '第一次转换没有写出带 addon-i18n 标记的 lang，没有可回填的译文。',
         };
     }
-    const secondFiles = readDir(originalDir);
-    const prefixed = new Map();
-    const deprefixed = new Map();
-    const beforeKeys = new Map();
+    const secondFiles = new Map(originalFiles);
+    const before = new Map();
+    const valueKeys = new Map();
     for (const rel of produced) {
         const changed = prefixTranslatedLang(textOf(firstMem.files.get(rel)));
         if (!changed.keys.length) continue;
         secondFiles.set(rel, changed.text);
-        prefixed.set(rel, new Set(changed.keys));
-        beforeKeys.set(rel, langKeyLines(changed.text));
-        const parsed = NS.parseLang(changed.text);
-        const values = new Map();
-        for (const key of changed.keys) {
-            const value = parsed.get(key);
-            if (typeof value === 'string' && value.startsWith('译:')) values.set(key, value.slice(2));
+        const entries = langEntries(changed.text);
+        const kept = new Map();
+        const unstable = [];
+        for (const key of new Set(changed.keys)) {
+            const values = entries.get(key) || [];
+            if (values.length !== 1) { unstable.push({ path: rel, key, before: values.map(clip) }); continue; }
+            kept.set(key, values[0]);
+            if (!valueKeys.has(values[0])) valueKeys.set(values[0], new Set());
+            valueKeys.get(values[0]).add(key);
         }
-        deprefixed.set(rel, values);
+        before.set(rel, { kept, unstable });
     }
-    if (!prefixed.size) {
+    if (!before.size) {
         return {
             id: 'put-back-lang',
             testType: '只回填译文 lang 到原始文件树',
             status: 'UNCOVERED',
             input: { markedLangFiles: produced.length, prefixedKeys: 0 },
             output: null,
-            basis: '带标记的 lang 里没有可改写的键值行。',
+            basis: '带标记的 lang 里没有可回填的单一键值。',
         };
+    }
+    const watchedKeys = new Set();
+    let unstableCount = 0;
+    for (const item of before.values()) {
+        unstableCount += item.unstable.length;
+        for (const key of item.kept.keys()) watchedKeys.add(key);
+    }
+    const firstSources = new Map();
+    for (const [key, entry] of firstCtx.entries) {
+        if (!watchedKeys.has(key)) continue;
+        if (!firstSources.has(entry.value)) firstSources.set(entry.value, new Set());
+        firstSources.get(entry.value).add(key);
     }
     const mem = new MemFS(secondFiles);
     const logs = [];
     return memRun(mem, logs).then((second) => {
+        const tally = { preserved: 0, lost: 0, changed: unstableCount, reassigned: 0 };
         const failures = [];
-        const samples = [];
-        const tally = { lost: 0, duplicate: 0, prefixDropped: 0, rebuilt: 0 };
-        for (const [rel, keys] of prefixed) {
-            const output = textOf(mem.files.get(rel));
-            const counts = langKeyLines(output);
-            const parsed = NS.parseLang(output);
-            for (const key of keys) {
-                const value = parsed.get(key);
-                if ((counts.get(key) || 0) !== 1) {
-                    const count = counts.get(key) || 0;
-                    if (count === 0) tally.lost++;
-                    else tally.duplicate++;
-                    if (failures.length < 5) failures.push({ path: rel, key, problem: count === 0 ? '回填的键在第二次输出中消失' : '同一文件出现重复键', count });
-                } else if (typeof value !== 'string' || !value.startsWith('译:')) {
-                    tally.prefixDropped++;
-                    if (failures.length < 5) failures.push({ path: rel, key, problem: '回填值不再以 译: 开头', value: clip(value) });
+        for (const item of before.values()) {
+            for (const row of item.unstable) if (failures.length < 5) failures.push({ ...row, problem: '回填前这个键就没有唯一值' });
+        }
+        for (const [rel, item] of before) {
+            const kept = item.kept;
+            const after = langEntries(textOf(mem.files.get(rel)));
+            for (const [key, value] of kept) {
+                const got = after.get(key) || [];
+                if (got.length === 1 && got[0] === value) { tally.preserved++; continue; }
+                if (!got.length) tally.lost++;
+                else tally.changed++;
+                if (failures.length < 5) failures.push({ path: rel, key, before: clip(value), after: got.map(clip) });
+            }
+            for (const [key, values] of after) {
+                if (kept.has(key)) continue;
+                for (const value of values) {
+                    const oldKeys = valueKeys.get(value);
+                    if (!oldKeys) continue;
+                    tally.reassigned++;
+                    if (failures.length < 5) failures.push({ path: rel, newKey: key, value: clip(value), oldKeys: [...oldKeys].slice(0, 3) });
                 }
             }
-            const prior = beforeKeys.get(rel);
-            const originals = new Set(deprefixed.get(rel).values());
-            const rebuilt = [];
-            for (const [key, value] of parsed) {
-                if (prior.has(key) || typeof value !== 'string') continue;
-                if (originals.has(value) || originals.has(value.startsWith('译:') ? value.slice(2) : value)) rebuilt.push(key);
-            }
-            if (rebuilt.length) {
-                tally.rebuilt += rebuilt.length;
-                if (failures.length < 5) failures.push({ path: rel, problem: '第二次为同一批句子新增了键', keys: rebuilt.slice(0, 5) });
-            }
-            samples.push({ path: rel, prefixedKeys: keys.size, outputKeys: counts.size });
         }
-        const status = failures.length ? 'FAIL' : 'PASS';
+        const entryMoves = [];
+        for (const [key, entry] of second.ctx.entries) {
+            const oldKeys = firstSources.get(entry.value);
+            if (!oldKeys || oldKeys.has(key)) continue;
+            tally.reassigned++;
+            if (entryMoves.length < 5) entryMoves.push({ text: clip(entry.value), oldKeys: [...oldKeys].slice(0, 3), newKey: key });
+        }
+        const status = tally.lost || tally.changed || tally.reassigned ? 'FAIL' : 'PASS';
         return {
             id: 'put-back-lang',
             testType: '只回填译文 lang 到原始文件树',
             status,
-            input: { files: samples, secondNewKeys: second.summary.newKeys },
-            output: { tally, failures },
+            input: { files: before.size, prefixedKeys: watchedKeys.size, secondNewKeys: second.summary.newKeys },
+            output: { tally, failures, entryMoves },
             basis: status === 'PASS'
-                ? '第二次只把带 译: 前缀的 lang 放回未转换的原始文件树。这些键仍各出现一次，值仍以 译: 开头，文件中没有新增另一套键。'
-                : '回填后的 lang 丢了前缀、出现重复键，或第二次转换又建了新键。',
+                ? '第二次只把译文 lang 放回未转换的原始文件树。每个回填键的值与回填时逐字相同，相同原文也没有分到新键。'
+                : '回填后的键或值发生了变化，或同一条原文被分到了新键。判断依据是回填前后的键值对，以及两次 ctx.entries 里同一原文对应的键。',
         };
     });
 }
@@ -585,10 +691,25 @@ async function main() {
         console.error(e.message);
         process.exit(1);
     }
-    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'lfmc-real-'));
+    let files;
+    try {
+        loadJSZip();
+        files = await readZip(sample.packPath);
+        const bpVersion = manifestVersion(files, 'bp0/manifest.json');
+        const rpVersion = manifestVersion(files, 'rp0/manifest.json');
+        if (bpVersion !== sample.entry.version || rpVersion !== sample.entry.version) {
+            throw new Error(`manifest 版本 bp=${bpVersion} rp=${rpVersion}，登记版本是 ${sample.entry.version}`);
+        }
+        sample.bpVersion = bpVersion;
+        sample.rpVersion = rpVersion;
+    } catch (e) {
+        console.error(e.message);
+        process.exit(1);
+    }
     const report = {
         sample: SAMPLE_ID,
         testType: '只回填译文 lang 到原始文件树',
+        zipReader: 'vendor/jszip.min.js',
         pack: {
             path: sample.entry.path,
             size: sample.entry.size,
@@ -601,14 +722,11 @@ async function main() {
         checks: [],
     };
     try {
-        const extractDir = path.join(work, 'pack');
-        fs.mkdirSync(extractDir);
-        execFileSync('unzip', ['-q', sample.packPath, '-d', extractDir], { stdio: 'pipe' });
-        const files = readDir(extractDir);
         const mem = new MemFS(files);
         const scriptPath = [...files.keys()].find(p => p.endsWith('bp0/scripts/imports.js'));
         if (!scriptPath) throw new Error('解压结果中没有 bp0/scripts/imports.js');
-        const info = NS.collectScriptInfo(await mem.readText(scriptPath));
+        const source = textOf(files.get(scriptPath));
+        const info = NS.collectScriptInfo(source);
         const logs = [];
         const started = Date.now();
         let result = null;
@@ -630,14 +748,16 @@ async function main() {
             const converted = textOf(mem.files.get(scriptPath));
             console.error('[real-sample] 正式转换完成，开始五项检查');
             report.checks.push(checkDictionary(info, result.ctx, mem));
-            console.error('[real-sample] dictionary', report.checks.at(-1).status, report.checks.at(-1).output.matched + '/' + (report.checks.at(-1).output.matched + report.checks.at(-1).output.missingCount));
-            report.checks.push(checkEventEntity(info, result.ctx, scriptPath, converted));
+            const dictionary = report.checks.at(-1);
+            const dictionaryScore = dictionary.output ? dictionary.output.matched + '/' + (dictionary.output.matched + dictionary.output.missingCount) : 'uncovered';
+            console.error('[real-sample] dictionary', dictionary.status, dictionaryScore);
+            report.checks.push(checkEventEntity(info, result.ctx, scriptPath, source, converted));
             console.error('[real-sample] event-entity', report.checks.at(-1).status);
             report.checks.push(checkShortVariables(info, result.ctx, scriptPath));
             console.error('[real-sample] short-variable', report.checks.at(-1).status);
             report.checks.push(checkAscii(info, result.ctx, scriptPath));
             console.error('[real-sample] ascii-hud', report.checks.at(-1).status);
-            report.checks.push(await checkPutBack(extractDir, mem));
+            report.checks.push(await checkPutBack(files, mem, result.ctx));
             console.error('[real-sample] put-back-lang', report.checks.at(-1).status);
         }
     } catch (e) {
@@ -656,7 +776,6 @@ async function main() {
                 basis: '转换后原包字节发生了变化。',
             });
         }
-        fs.rmSync(work, { recursive: true, force: true });
     }
     const expected = ['dictionary', 'event-entity', 'short-variable', 'ascii-hud', 'put-back-lang'];
     const present = new Set(report.checks.map(item => item.id));
