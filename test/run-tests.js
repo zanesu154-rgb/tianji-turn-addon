@@ -5,7 +5,7 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 const { NS, MemFS, readDir } = require('./load');
 
-let failed = 0, passed = 0;
+let failed = 0, passed = 0, skippedPrivate = 0;
 function check(name, cond, extra) {
     if (cond) { passed++; console.log('  ✓ ' + name); }
     else { failed++; console.log('  ✗ ' + name + (extra ? '\n      ' + extra : '')); }
@@ -28,6 +28,21 @@ function render(msg, lang) {
     }
     if (msg.score || msg.selector) return `<${Object.keys(msg)[0]}>`;
     return JSON.stringify(msg);
+}
+
+// 公开测试用的合成存档。生成后立即删除临时目录，并复制字节，避免各测试互相改到同一份缓冲。
+let syntheticWorldCache = null;
+function readSyntheticWorld() {
+    if (!syntheticWorldCache) {
+        const wdir = fs.mkdtempSync(path.join(os.tmpdir(), 'lfmc-world-'));
+        try {
+            execFileSync('node', [path.join(__dirname, 'make-world.js'), wdir], { stdio: 'pipe' });
+            syntheticWorldCache = readDir(wdir);
+        } finally {
+            fs.rmSync(wdir, { recursive: true, force: true });
+        }
+    }
+    return new Map([...syntheticWorldCache].map(([k, v]) => [k, Buffer.from(v)]));
 }
 
 function renderCommand(cmd, lang) {
@@ -717,7 +732,8 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
     }
     {
         // 存档再次转换：之前生成的翻译资源包保留（含已填译文），新键追加，不重复登记
-        const wm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
+        // 依赖合成存档里的 /say：keep 不生成键，tellraw 才追加新键。不读取私人 world-fixture。
+        const wm = new MemFS(readSyntheticWorld());
         await NS.runWorldPipeline(wm, { sayMode: 'keep' }, () => {});
         const packZh = [...wm.files.keys()].find(p => /resource_packs\/[^/]+_texts\/texts\/zh_CN\.lang$/.test(p));
         const zh0 = NS.parseLang(wm.files.get(packZh).toString());
@@ -731,7 +747,8 @@ export function f(b, n){ b.body(\`§a\${fmt("hp", 2)}§r\`); b.body("§a" + fmt(
     }
     {
         // 存档自带的行为包 / 资源包：对话、脚本等按附加包流程提取；无资源包的行为包在 resource_packs/ 新建并登记
-        const files = new Map(readDir(path.join(__dirname, 'world-fixture')));
+        // 只需要能打开的存档外壳，包内容由本测试写入。使用合成存档。
+        const files = readSyntheticWorld();
         for (const [n, b] of readDir(path.join(__dirname, 'fixture'))) {
             if (n.startsWith('BP/')) files.set('behavior_packs/Fx_BP/' + n.slice(3), b);
             else if (n.startsWith('RP/')) files.set('resource_packs/Fx_RP/' + n.slice(3), b);
@@ -1358,6 +1375,9 @@ console.log(JSON.stringify(calls));`;
         check('编辑器：改世界名（level.dat + levelname.txt）', NS.NBT.getStr(NS.NBT.readAll(ld.subarray(8))[0].v, 'LevelName') === 'My World (EN)' && em.files.get('levelname.txt') === 'My World (EN)' && new DataView(ld.buffer, ld.byteOffset).getInt32(4, true) === ld.length - 8);
         check('编辑器：数字字段类型校验', typeErr === '需要整数');
         check('编辑器：多次生成不会重复登记资源包', JSON.parse(em.files.get('world_resource_packs.json')).length === 1);
+    } else {
+        skippedPrivate = 19;
+        console.log('  跳过 19 项私人存档断言：test/world-fixture/db/CURRENT 不存在');
     }
 
     // -----------------------------------------------------------
@@ -1507,7 +1527,8 @@ console.log(JSON.stringify(calls));`;
     }
     {
         // 存档里的包：没启用 / 同一个包多份 / 没有 manifest / 地图编辑工具
-        const base = readDir(path.join(__dirname, 'world-fixture'));
+        // 只读取 level.dat 确定根目录，包由本测试写入。使用合成存档。
+        const base = readSyntheticWorld();
         const root = [...base.keys()].find(k => /(^|\/)level\.dat$/.test(k)).replace(/level\.dat$/, '');
         const man = (uuid, ver, name) => JSON.stringify({ format_version: 2, header: { name, uuid, version: ver, min_engine_version: [1, 20, 0] }, modules: [{ type: 'data', uuid: uuid.replace(/.$/, 'f'), version: ver }] });
         const add = (m) => {
@@ -1552,7 +1573,8 @@ console.log(JSON.stringify(calls));`;
     }
     {
         // 资源包文件夹写成 Resource_packs：改成标准写法后正常配对，不另建资源包
-        const files = new Map(readDir(path.join(__dirname, 'world-fixture')));
+        // 包由本测试写入，存档只作为可打开的外壳。使用合成存档。
+        const files = readSyntheticWorld();
         for (const [n, b] of readDir(path.join(__dirname, 'fixture'))) {
             if (n.startsWith('BP/')) files.set('Behavior_Packs/Fx_BP/' + n.slice(3), b);
             else if (n.startsWith('RP/')) files.set('Resource_packs/Fx_RP/' + n.slice(3), b);
@@ -1570,7 +1592,8 @@ console.log(JSON.stringify(calls));`;
     }
     {
         // uuid 不同、但实体大多相同的两个包：疑似同一附加包的不同版本，勾选后只留登记排最前的
-        const base = readDir(path.join(__dirname, 'world-fixture'));
+        // 只读取 level.dat 确定根目录，包由本测试写入。使用合成存档。
+        const base = readSyntheticWorld();
         const root = [...base.keys()].find(k => /(^|\/)level\.dat$/.test(k)).replace(/level\.dat$/, '');
         const m = new Map(base);
         const mk = (dir, uuid, name, ids) => {
@@ -1593,12 +1616,12 @@ console.log(JSON.stringify(calls));`;
     }
     {
         // 存档二次转换：原始存档 + 放回翻译好的 lang（只放 texts/zh_CN.lang）→ 译文不被原文覆盖
-        const src = path.join(__dirname, 'world-fixture');
-        const m1 = new MemFS(readDir(src));
+        // 依赖合成存档能稳定生成 zh_CN.lang。每次从原始字节重新读取，不使用私人 world-fixture。
+        const m1 = new MemFS(readSyntheticWorld());
         await NS.runWorldPipeline(m1, { baseName: 'w' }, () => {});
         const zhPath = [...m1.files.keys()].find(p => /resource_packs\/[^/]+\/texts\/zh_CN\.lang$/.test(p));
         const tr = m1.files.get(zhPath).toString().replace(/^([^#\s=][^=\n]*)=.*$/mg, (l, k) => `${k}=译:${k}`);
-        const b = readDir(src); b.set(zhPath, Buffer.from(tr));
+        const b = readSyntheticWorld(); b.set(zhPath, Buffer.from(tr));
         const m2 = new MemFS(b);
         await NS.runWorldPipeline(m2, { baseName: 'w' }, () => {});
         const L = NS.parseLang(m2.files.get(zhPath).toString());
@@ -1606,7 +1629,7 @@ console.log(JSON.stringify(calls));`;
         const man = m2.files.get(zhPath.replace(/texts\/zh_CN\.lang$/, 'manifest.json'));
         const wrp = JSON.parse(m2.files.get([...m2.files.keys()].find(p => p.endsWith('world_resource_packs.json'))).toString());
         // 改了世界名再转换：仍找到上次的翻译包
-        const c = readDir(src); c.set(zhPath, Buffer.from(tr));
+        const c = readSyntheticWorld(); c.set(zhPath, Buffer.from(tr));
         const lnPath = [...c.keys()].find(p => p.endsWith('levelname.txt'));
         c.set(lnPath || 'levelname.txt', Buffer.from('Renamed World'));
         const m3 = new MemFS(c);
@@ -1698,7 +1721,8 @@ console.log(JSON.stringify(calls));`;
     }
     {
         // 存档：编辑器里改实体名 → 生成时命令方块里的 name= 跟着改
-        const wm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
+        // 依赖合成存档里的盔甲架自定义名，以及含 @ 的命令方块。不读取私人 world-fixture。
+        const wm = new MemFS(readSyntheticWorld());
         const ws = await NS.openWorld(wm, { baseName: 'w' }, () => {});
         const ent = ws.ctx.untranslatable.find(u => /实体名字标签/.test(u.where));
         const cmd = ws.search('@', 50).find(x => /Command/.test(x.pathText));
@@ -1713,7 +1737,8 @@ console.log(JSON.stringify(calls));`;
     }
     {
         // 物品自定义名称改了：掉落物实体就叫这个名字，@e[type=item,name=旧名] 要跟着改；同一旧名改成不同新名时提醒
-        const wm = new MemFS(readDir(path.join(__dirname, 'world-fixture')));
+        // 依赖合成存档里已有的两件自定义物品，以及含 @ 的命令方块。不读取私人 world-fixture。
+        const wm = new MemFS(readSyntheticWorld());
         const ws = await NS.openWorld(wm, { baseName: 'w' }, () => {});
         const items = ws.ctx.untranslatable.filter(u => /物品名/.test(u.where) && /display/.test(u.ref));
         const cmd = ws.search('@', 50).find(x => /Command/.test(x.pathText));
@@ -2065,6 +2090,6 @@ export function show(player, item) {
         const todo = ms.workbook()['untranslatable.csv'];
         check('勾了只看未修改时导出只含未改过的', all.includes('Old Guard') && all.includes('Young Guard') && !todo.includes('Old Guard') && todo.includes('Young Guard'), todo);
     }
-    console.log(`\n结果：${passed} 通过，${failed} 失败`);
+    console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

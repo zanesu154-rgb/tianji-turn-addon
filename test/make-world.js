@@ -1,4 +1,5 @@
-// 生成一个最小的测试存档（不含任何个人信息）：本地玩家背包里有成书、书与笔和命名物品，末影箱的潜影盒里也有一本书
+// 生成一个最小的测试存档（不含任何个人信息）：本地玩家背包里有成书、书与笔和命名物品，末影箱的潜影盒里也有一本书；
+// 区块里有告示牌、讲台、一条 /say 命令方块，另外有一个带自定义名的盔甲架。
 // 用法：node test/make-world.js 输出目录
 const fs = require('fs'), path = require('path');
 const { NS } = require('./load');
@@ -24,6 +25,12 @@ const lectern = [C('book', [B('Count', 1), I('Damage', 0), S('Name', 'minecraft:
   C('tag', [S('author', 'Tester'), I('generation', 0), S('title', '讲台之书'), L('pages', T.COMPOUND, [[S('photoname', ''), S('text', '讲台上的第一页。')], [S('photoname', ''), S('text', '讲台上的第二页。')]])])]),
   B('hasBook', 1), S('id', 'Lectern'), B('isMovable', 1), I('page', 0), I('totalPages', 2), I('x', 3), I('y', 64), I('z', 2)];
 const sign = [C('FrontText', [S('Text', '欢迎'), S('TextOwner', '')]), C('BackText', [S('Text', ''), S('TextOwner', '')]), S('id', 'Sign'), I('x', 1), I('y', 64), I('z', 2)];
+// say 在 keep 模式下只记录、不生成键；tellraw 模式才转换成新的 world.* 键。正文里的 @a 让按 “@” 搜索能找到这条命令。
+const commandBlock = [S('id', 'CommandBlock'), S('Command', '/say @a The bell rings at dawn.'), I('x', 5), I('y', 64), I('z', 2)];
+const stand = [S('identifier', 'minecraft:armor_stand'), S('CustomName', 'Gate Warden'), L('Pos', T.FLOAT, [2.5, 64, 2.5])];
+const actorKey = Buffer.alloc(19);
+actorKey.write('actorprefix');
+actorKey.writeBigInt64LE(7n, 11);
 
 // ---- LevelDB：CURRENT + MANIFEST（一条 VersionEdit）+ 日志（一条 WriteBatch）----
 const varint = (arr, v) => { while (v >= 0x80) { arr.push((v & 0x7f) | 0x80); v = Math.floor(v / 128); } arr.push(v); };
@@ -40,7 +47,8 @@ const logRecord = (payload) => {
 const chunkKey = (x, z, tag) => { const b = Buffer.alloc(9); b.writeInt32LE(x, 0); b.writeInt32LE(z, 4); b[8] = tag; return b; };
 const puts = [
   { key: Buffer.from('~local_player'), value: writeAll([{ t: T.COMPOUND, n: '', v: player }]) },
-  { key: chunkKey(0, 0, 49), value: writeAll([{ t: T.COMPOUND, n: '', v: sign }, { t: T.COMPOUND, n: '', v: lectern }]) },
+  { key: chunkKey(0, 0, 49), value: writeAll([{ t: T.COMPOUND, n: '', v: sign }, { t: T.COMPOUND, n: '', v: lectern }, { t: T.COMPOUND, n: '', v: commandBlock }]) },
+  { key: actorKey, value: writeAll([{ t: T.COMPOUND, n: '', v: stand }]) },
 ];
 const batch = [1, 0, 0, 0, 0, 0, 0, 0, puts.length, 0, 0, 0];   // 序列号 1
 for (const p of puts) { batch.push(1); varint(batch, p.key.length); batch.push(...p.key); varint(batch, p.value.length); batch.push(...p.value); }
