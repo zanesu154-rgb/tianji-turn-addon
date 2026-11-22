@@ -2240,6 +2240,107 @@ export function show(player, item) {
             JSON.stringify(bottle));
         delete globalThis[key];
     }
+    {
+        // 五号化合物：自定义表单把正文存起来再交给真正的表单；技能动作栏把名字、技能、[READY] 拼成一行
+        const key = '__ADDON_I18N_TEST_COMPOUND__';
+        delete globalThis[key];
+        const opt = { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button', 'label']), colonPrefix: true };
+        const src = [
+            'import { ActionFormData } from "@minecraft/server-ui";',
+            'const A_BLOOD_RUSH = "Blood Rush";',
+            'function bigNameOf(p) { return p === "coward" ? "THE COWARD" : "THE MANIAC"; }',
+            'function abilityHudSegment(sel, cd) {',
+            '  if (sel === A_BLOOD_RUSH) {',
+            '    const cdTxt = cd > 0 ? `§7 [${Math.ceil(cd / 20)}s]` : "§a [READY]";',
+            '    return `§b✦ ${sel}${cdTxt}`;',
+            '  }',
+            '  return "";',
+            '}',
+            'function drawHud(player, personality) {',
+            '  const line = "§c§l" + bigNameOf(personality) + "  §r" + abilityHudSegment(A_BLOOD_RUSH, 0);',
+            '  player.onScreenDisplay.setActionBar(line);',
+            '}',
+            'const OBJECTIVE = "punches or weapon hits that hurt monsters you can see during Blood Rush";',
+            'function describe(target, ability) { return target + " " + OBJECTIVE + " with " + ability + " selected."; }',
+            'function questLine(target, ability) { return "- Goal: " + describe(target, ability); }',
+            'function readable(text) { return String(text).replaceAll("§8", "§7"); }',
+            'export function devForm() {',
+            '  let body = "";',
+            '  return {',
+            '    body(text) { body = text; return this; },',
+            '    button(text) { return this; },',
+            '    show(player) {',
+            '      const ui = new ActionFormData();',
+            '      ui.body(readable(body) + "\\n\\n§6COMMAND PAGE 1 / 1");',
+            '    }',
+            '  };',
+            '}',
+            'const activeOr = () => "\\n§7(currently active)";',
+            'export function menu(player, odds) {',
+            '  const personality = "Maniac";',
+            '  const button = (text) => { const ui = new ActionFormData(); ui.button(text); };',
+            '  for (const lane of ["Maniac", "Warrior", "Coward"]) button(`${lane === personality ? "§a" : "§7"}${lane} challenges`);',
+            '  const form = devForm();',
+            '  form.button(`§bRandom Origin${activeOr()}`);',
+            '  form.button(`§dPotential Origin${activeOr()}`);',
+            '  form.body(',
+            '    "Choose the origin flow for first-time players.\\n\\n" +',
+            '    "§bRandom Origin§r — every new player receives §9Compound V§r.\\n" +',
+            '    `§dPotential Origin§r — everyone rolls potential: ${odds}.\\n` +',
+            '    "§8Applies to players who have not been offered an origin yet.\\n"',
+            '  );',
+            '}',
+            'const DURATION = "Blood Rush Rush duration: 2 to 3 seconds";',
+            'const COST = "Blood Rush Blood cost: 25 resource";',
+            'function topic(label) { return label.slice(0, label.indexOf(":")).trim(); }',
+            'function applies(label) { return "Applies to: " + topic(label) + "."; }',
+            ''
+        ].join('\n');
+        const ctx = new NS.ExtractContext({ splitNewlines: false });
+        const out = NS.processScript(src, 'BP/scripts/compound.js', ctx, opt);
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        const end = out.content.indexOf('// ---- end i18n runtime ----');
+        const rt = new Function(out.content.slice(0, end).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const rawWords = (r) => {
+            const hit = [];
+            const walk = (n) => {
+                if (!n || typeof n === 'string') return;
+                if (Array.isArray(n)) { n.forEach(walk); return; }
+                if (typeof n.text === 'string' && /\p{L}/u.test(n.text.replace(/\u00a7./g, ''))) hit.push(n.text);
+                if (n.with) walk(n.with);
+                if (n.rawtext) n.rawtext.forEach(walk);
+            };
+            walk(r);
+            return hit;
+        };
+        const origin = rt.M('§bRandom Origin§r — every new player receives §9Compound V§r.');
+        const potential = rt.M('§dPotential Origin§r — everyone rolls potential: §720% Human§r.');
+        const appliesLine = rt.M('§7Applies to players who have not been offered an origin yet.');
+        const bar = rt.M('§c§lTHE MANIAC  §r§b✦ Blood Rush§a [READY]');
+        const goal = rt.M('- Goal: 12 punches or weapon hits that hurt monsters you can see during Blood Rush with Blood Rush selected.');
+        const lane = rt.M('§aManiac challenges');
+        const about = rt.M('Applies to: Blood Rush Rush duration.');
+        const cost = rt.M('Applies to: Blood Rush Blood cost.');
+        check('五号化合物：表单说明整句登记，短按钮名不吞后面的句子；§8 换成 §7 仍能对上',
+            vals.includes('Choose the origin flow for first-time players.')
+            && vals.includes('§bRandom Origin§r — every new player receives §9Compound V§r.')
+            && origin && origin.rawtext && origin.rawtext.some(x => x.translate) && !rawWords(origin).some(t => /receives|Compound/.test(t))
+            && potential && potential.rawtext && potential.rawtext.some(x => x.translate) && !rawWords(potential).some(t => /rolls potential/.test(t))
+            && appliesLine && appliesLine.rawtext && appliesLine.rawtext.some(x => x.translate) && !rawWords(appliesLine).length,
+            JSON.stringify({ origin, potential, appliesLine }));
+        check('  └ 动作栏名字、技能、[READY] 按段翻译；比较用的技能名不被改写',
+            out.content.includes('if (sel === A_BLOOD_RUSH)')
+            && vals.includes('§a [READY]') && vals.includes('THE MANIAC]') === false && vals.includes('THE MANIAC')
+            && bar && bar.rawtext && bar.rawtext.filter(x => x.translate).length >= 3 && !rawWords(bar).some(t => /MANIAC|Blood|READY/.test(t)),
+            JSON.stringify(bar));
+        check('  └ 目标句、人格按钮、升级说明的 Applies to 不再把说明留在原文里',
+            goal && !rawWords(goal).some(t => /punches|selected/.test(t))
+            && lane && lane.rawtext && !rawWords(lane).some(t => /Maniac|challenges/.test(t))
+            && about && !rawWords(about).some(t => /Blood Rush Rush duration|Applies/.test(t))
+            && cost && !rawWords(cost).some(t => /Blood cost|Applies/.test(t)),
+            JSON.stringify({ goal, lane, about, cost }));
+        delete globalThis[key];
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -4,6 +4,16 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.22-91 (2026-11-22)
+
+### Fixed
+
+- When a custom form stores its body and later hands it to a real form, the whole text was registered as one pattern, and a short button label swallowed the following sentence. Each line is now registered on its own, and it still matches after a light background replaces `§8` with `§7`
+- A skill action bar that joins a name, an ability, and `§a [READY]` (or `§7 [3s]`) on one line did not match. Those status tokens are registered, and the line is translated piece by piece
+- A leading `- Goal:` swallowed the whole objective into a placeholder. A more specific pattern is used, so the objective text is no longer left in the original language
+- Personality buttons such as `§aManiac challenges` were skipped because, once the color code was removed, only one lowercase word remained
+- When an upgrade line uses `2 to 3` or `25 resource` instead of an arrow, the name before the colon is registered too, so the name after `Applies to:` can match
+
 ## 2026.11.21-90 (2026-11-21)
 
 ### Improved
