@@ -499,6 +499,8 @@
             };
             let orphan = 0;
             for (const [path, m] of byPath) {
+                // 身份是属性路径。同一路径的各语言共用它；路径不同就是另一条，即使英文原文相同。
+                m.entryId = path.replace(/^\./, '');
                 if (!m.has('en_US') && /^\.[^.[\]]+(\.[^.[\]]+)+$/.test(path) && !isUsed(path)) { orphan++; continue; }
                 const vals = [...m.values()].map(nd => nd.value);
                 if (m.size >= 2 && new Set(vals).size > 1 && vals.some(v => looksLikeText(v, 'loose'))) { m.fromDict = true; groups.push(m); n++; }
@@ -534,7 +536,9 @@
             }
             used.add(objNode);
             let n = 0;
-            for (const m of byPath.values()) {
+            for (const [path, m] of byPath) {
+                // 同一个语言对象里用属性路径；不同对象即使路径相同也要分开。
+                m.entryId = objNode.start + ':' + path.replace(/^\./, '');
                 const vals = [...m.values()].map(nd => nd.value);
                 // 各语言的值完全相同 → 不是译文（如每种语言下都有同一句英文原文）
                 if (m.size >= 2 && new Set(vals).size > 1 && vals.some(v => looksLikeText(v, 'loose'))) { groups.push(m); n++; }
@@ -2416,7 +2420,10 @@
             }
             // 以英文为原文（没有英文时用第一列）
             const [firstLang, firstNode] = pickSource(g);
-            const key = ctx.alloc(keyBase('str'), firstNode.value, meta('str'));
+            // 字典条目按路径分配。普通句子仍用整个脚本做去重，这里不改那条路径。
+            const key = ctx.alloc(keyBase('str'), firstNode.value, g.entryId
+                ? { file, kind: 'script', scope: 'dict:' + file + '\0' + g.entryId, hint: 'str' }
+                : meta('str'));
             for (const [lang, nd] of g) {
                 ctx.addTranslation(key, lang, nd.value);
                 exact.push([nd.value, key]);
