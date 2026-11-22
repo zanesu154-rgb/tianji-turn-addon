@@ -37,9 +37,25 @@
             nums: (s.replace(/%\d+\$[sd]/g, '').match(/\d+/g) || []).sort().join(','),
             len: plain.length,
             cjk: NS.hasCJK(s),
+            plain,
         };
     }
+    // 译文只是原文加上很短的记号（例如放回时加在前面的「译:」）。这种不算另一种文字的缩写，必须认回原来的键。
+    // 多出来的部分不能带数字，避免「HP」认领「6 HP」。
+    function wrappedSame(a, b) {
+        if (!a || !b || a === b) return false;
+        const [s, l] = a.length <= b.length ? [a, b] : [b, a];
+        const extraLen = l.length - s.length;
+        if (extraLen <= 0 || extraLen > 4) return false;
+        let extra = '';
+        if (l.startsWith(s)) extra = l.slice(s.length);
+        else if (l.endsWith(s)) extra = l.slice(0, extraLen);
+        else return false;
+        // 只接受记号（译:、标点），不接受 II、6 这种会变成另一个句子的尾巴。
+        return !/[A-Za-z0-9]/.test(extra);
+    }
     function seriesCompat(a, b, loose) {
+        if (wrappedSame(a.plain, b.plain)) return true;
         if (a.ph !== b.ph || a.nl !== b.nl || a.codes !== b.codes || (!loose && a.nums !== b.nums)) return false;
         if (!a.len || !b.len) return a.len === b.len;
         const r = b.len / a.len;
@@ -70,6 +86,8 @@
             const score = (a, bs) => {
                 let best = -1;
                 for (const b of bs) {
+                    // 原文还完整留在译文里时，长度比例不能拿来和邻近句子比，否则短记号会把整串序号带偏。
+                    if (wrappedSame(a.plain, b.plain)) { if (best < 40) best = 40; continue; }
                     if (a.ph !== b.ph || a.nl !== b.nl || a.codes !== b.codes) continue;
                     let sc = 3 + (a.ph + a.nl + a.codes.length / 2) * 0.5 + (a.nums && a.nums === b.nums ? 1.5 : a.nums !== b.nums ? -0.6 : 0);
                     if (a.len && b.len) {
