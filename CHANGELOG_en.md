@@ -4,6 +4,12 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.23-98 (2026-11-23)
+
+### Fixed
+
+- Aligning several thousand plain sentences after putting only the translated lang files back scored word associations in every cell of the band. The browser's main thread ran for minutes and the tab reported that the page was not responding. A long series now aligns by placeholders and length only, and the scan yields back to the page while it works ([#162](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/162))
+
 ## 2026.11.23-97 (2026-11-23)
 
 ### Fixed

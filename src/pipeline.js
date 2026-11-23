@@ -111,6 +111,7 @@
             }
             if (hasPrev) {
                 try {
+                    log('[lang] 只放回了译文，先按这次的提取顺序和上次的键对齐');
                     const dry = await runPipeline(new OverlayFS(fs), { ...userOptions, _alignDry: true }, () => {});
                     if (dry && dry._alignPlan && dry._alignPlan.size) {
                         let n = 0;
@@ -123,6 +124,14 @@
         }
         const opt = { ...DEFAULT_OPTIONS, ...userOptions };
         const allFiles = fs.list().filter(p => !isJunk(p));
+        // 整段转换原来都挤在同一次事件循环里。只放回译文时要扫两遍，浏览器会显示“此页面没有响应”。
+        let lastBreathe = Date.now();
+        const breathe = async () => {
+            const now = Date.now();
+            if (now - lastBreathe < 32) return;
+            lastBreathe = now;
+            await new Promise(resolve => setTimeout(resolve, 0));
+        };
         const pending = new Map();                 // 路径 → 新内容
         const jsonCache = new Map();
         const readJson = async (p) => {
@@ -275,6 +284,7 @@
         const convertedScripts = new Set();
         let upgradedRuntimes = 0;
         for (const p of allFiles) {
+            await breathe();
             const pk = packOf(p);
             if (!pk) continue;
             const rel = relOf(p, pk);
@@ -426,6 +436,7 @@
         let processed = 0;
         const total = allFiles.length;
         for (let i = 0; i < allFiles.length; i++) {
+            await breathe();
             const p = allFiles[i];
             if (opt.onProgress && i % 20 === 0) opt.onProgress(i / total, p);
             const pk = packOf(p);

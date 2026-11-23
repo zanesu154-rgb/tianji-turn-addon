@@ -146,8 +146,9 @@
             const baseScore = (n, m) => { const o = olds[m], a = news[n].f; return (a.cjk ? o.cjk : o.en) ? score(a, o.f) : -1; };
             let pairs = runDP(baseScore);
             // 第二遍：从第一遍的配对里学“哪个词常对应哪个译词”（Banner ↔ 旗帜、Statue ↔ 雕像），
-            // 把它加进得分再对齐一次，纯文字的长串里也能对准
-            if (pairs.length >= 40) {
+            // 把它加进得分再对齐一次，纯文字的长串里也能对准。
+            // 系列有几百条以上时，每个带状格子都做词关联会把页面卡死数分钟；长系列靠第一遍的占位符和长度。
+            if (pairs.length >= 40 && news.length <= 400 && olds.length <= 400) {
                 const toks = (s, cjk) => {
                     const t = (NS.stripFormatting ? NS.stripFormatting(String(s)) : String(s)).replace(/\\n|%\d+\$s/g, ' ');
                     if (cjk) { const out = new Set(); const run = t.match(/[぀-ヿ㐀-鿿가-힯]+/g) || []; for (const r of run) { if (r.length === 1) out.add(r); for (let i = 0; i + 1 < r.length; i++) out.add(r.slice(i, i + 2)); } return out; }
