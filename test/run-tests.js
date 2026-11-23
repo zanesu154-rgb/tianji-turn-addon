@@ -1917,6 +1917,32 @@ console.log(JSON.stringify(calls));`;
         check('只放回译文、前面新增了句子：按占位符 / 格式代码对齐，不错配', ok, JSON.stringify(pairs));
     }
     {
+        // 只放回译文时，同一系列有几千条。认领必须按序号就近找，不能每条都扫完整串，否则大文件会停住。
+        const n = 2500;
+        const knownKeys = new Set(), existingValues = new Map(), keyLangs = new Map(), prevKeys = new Set();
+        for (let i = 0; i < n; i++) {
+            const k = i ? `script.big.str_${i}` : 'script.big.str';
+            knownKeys.add(k); prevKeys.add(k);
+            keyLangs.set(k, new Set(['zh_CN']));
+            existingValues.set(k, new Set([i % 17 === 0 ? `时间：%1$s（${i}）` : `第${i}条任务说明`]));
+        }
+        const ctx = new NS.ExtractContext({ knownKeys, existingValues, keyLangs, prevKeys, splitNewlines: false });
+        const t0 = Date.now();
+        let bad = 0;
+        for (let i = 0; i < n; i++) {
+            const text = i % 17 === 0 ? `Time: %1$s (${i})` : `Quest note number ${i} stays here`;
+            const k = ctx.alloc('script.big.str', text, { file: 'x', kind: 'script' });
+            const want = i ? `script.big.str_${i}` : 'script.big.str';
+            if (k !== want) bad++;
+        }
+        const shifted = new NS.ExtractContext({ knownKeys, existingValues, keyLangs, prevKeys, splitNewlines: false });
+        shifted.alloc('script.big.str', 'Brand new line', { file: 'x', kind: 'script' });
+        shifted.alloc('script.big.str', 'Another new line', { file: 'x', kind: 'script' });
+        const moved = shifted.alloc('script.big.str', 'Time: %1$s (0)', { file: 'x', kind: 'script' });
+        const dt = Date.now() - t0;
+        check('只放回译文的大系列按序号认领，不会逐条扫完整串', bad === 0 && moved === 'script.big.str' && dt < 2000, JSON.stringify({ bad, moved, dt, reused: ctx.reusedPrev }));
+    }
+    {
         // 相同英文按字典路径分成多条。只把译文 lang 放回原文件树时，译文前面的短记号不能让序号整体错位。
         const titles = ['The Last Gleam Falls', 'Where The Earth Glitters', 'The Sky Is Falling', 'Thrones To Dust', 'Sap And Circumstance'];
         const bodies = ['Summon one of every enchantable mob, all enchanted', 'Kill one of every hostile monster. Bosses not included', 'Discover the crystal canyons', 'Defeat the crystalline berserker', 'Must run as a player.'];

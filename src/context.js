@@ -302,19 +302,41 @@
             //    对不上的不认；有特征的条目（占位符、格式代码、数字……）对上后据此校正错开的位数
             if (!this._seriesIdx) {
                 this._seriesIdx = new Map();
+                this._seriesPos = new Map();
+                this._valIdx = new Map();
+                this._featCache = new Map();
                 const put = (b, i, k) => { if (!this._seriesIdx.has(b)) this._seriesIdx.set(b, []); this._seriesIdx.get(b).push([i, k]); };
                 for (const k of this.knownKeys) {
                     put(k, 0, k);
                     const m = /^(.+)_([1-9]\d*)$/.exec(k);
                     if (m) put(m[1], +m[2], k);
                 }
-                for (const v of this._seriesIdx.values()) v.sort((a, b) => a[0] - b[0]);
+                for (const [b, v] of this._seriesIdx) {
+                    v.sort((a, c) => a[0] - c[0]);
+                    const pos = new Map();
+                    for (const [i, k] of v) if (!pos.has(k) || i < pos.get(k)) pos.set(k, i);
+                    this._seriesPos.set(b, pos);
+                }
+                for (const [k, ev] of this.existingValues) {
+                    const vs = ev instanceof Set ? ev : ev != null ? [ev] : [];
+                    for (const v of vs) {
+                        if (typeof v !== 'string') continue;
+                        let a = this._valIdx.get(v);
+                        if (!a) this._valIdx.set(v, a = []);
+                        a.push(k);
+                    }
+                }
             }
             const seriesI = this._seriesIdx.get(base) || [];
-            const series = seriesI.map(x => x[1]);
-            if (series.length > 1 || (series.length === 1 && this.keyLangs.size)) {
+            if (seriesI.length > 1 || (seriesI.length === 1 && this.keyLangs.size)) {
                 const free = (k) => !this.claimed.has(k) && !this.entries.has(k) && !this.referenced.has(k);
-                let hit = series.find(k => free(k) && (() => { const e = this.existingValues.get(k); return e instanceof Set ? e.has(text) : e === text; })());
+                const pos = this._seriesPos.get(base);
+                let hit = null, hitI = Infinity;
+                for (const k of this._valIdx.get(text) || []) {
+                    if (!free(k)) continue;
+                    const i = pos.get(k);
+                    if (i != null && i < hitI) { hitI = i; hit = k; }
+                }
                 if (!this._seriesState) this._seriesState = new Map();
                 if (!this._seriesState.has(base)) this._seriesState.set(base, { ord: 0, off: 0 });
                 const st = this._seriesState.get(base), j = st.ord++;
@@ -335,13 +357,34 @@
                     const sideOf = (l) => cjk ? /^(zh|ja|ko)_/.test(l) : /^en_/.test(l);
                     const a = seriesFeat(text);
                     const strong = a.ph + a.nl + a.codes.length / 2 + (a.nums ? 1 : 0) > 0;
-                    const vals = (k) => { const e = this.existingValues.get(k); return e instanceof Set ? [...e] : e != null ? [e] : []; };
                     const e = j + st.off;
-                    // 数字只在“换了位置去找”时严格核对；正好在原位置上的，译文写法不同（2k / 2000）也认
-                    const cands = seriesI.filter(([i, k]) => free(k) && (this.prevKeys.has(k) || ![...(this.keyLangs.get(k) || [])].some(sideOf))
-                        && vals(k).some(v => seriesCompat(a, seriesFeat(v), i === e)));
+                    // 没有占位符、换行、格式代码、数字的句子只能认原来的序号。有这些特征时才在前后 80 条里找最近的。
+                    // 以前每条新句子都把整串旧键的译文再算一遍，四千条的系列会在每个文件上停住。
+                    const feats = (k) => {
+                        let f = this._featCache.get(k);
+                        if (f) return f;
+                        const ev = this.existingValues.get(k);
+                        const vs = ev instanceof Set ? [...ev] : ev != null ? [ev] : [];
+                        f = vs.map(seriesFeat);
+                        this._featCache.set(k, f);
+                        return f;
+                    };
+                    const eligible = (k) => free(k) && (this.prevKeys.has(k) || ![...(this.keyLangs.get(k) || [])].some(sideOf));
+                    const lower = (target) => {
+                        let lo = 0, hi = seriesI.length;
+                        while (lo < hi) {
+                            const mid = (lo + hi) >> 1;
+                            if (seriesI[mid][0] < target) lo = mid + 1; else hi = mid;
+                        }
+                        return lo;
+                    };
                     let best = null;
-                    for (const c of cands) if (!best || Math.abs(c[0] - e) < Math.abs(best[0] - e)) best = c;
+                    const from = lower(strong ? e - 80 : e), to = strong ? e + 80 : e;
+                    for (let p = from; p < seriesI.length && seriesI[p][0] <= to; p++) {
+                        const [i, k] = seriesI[p];
+                        if (!eligible(k) || !feats(k).some(f => seriesCompat(a, f, i === e))) continue;
+                        if (!best || Math.abs(i - e) < Math.abs(best[0] - e)) best = [i, k];
+                    }
                     if (best && (strong ? Math.abs(best[0] - e) <= 80 : best[0] === e)) {
                         hit = best[1];
                         if (strong) st.off = best[0] - j;
