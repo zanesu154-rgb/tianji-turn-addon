@@ -3424,6 +3424,81 @@
             if (ctx.isKey(t) || exact.some(([x]) => x === t)) continue;
             exact.push([t, ctx.alloc(keyBase('word'), t, meta('word'))]);
         }
+        // 只接受 Object.entries(说明表) 循环中对解构出来的模板值做的占位符替换。
+        // 在既有提取之后登记，流水线中延后到全部脚本处理完成，避免移动既有键。
+        const bindings = new Map();
+        const templateTables = new Map();
+        const bind = (n, declaration) => {
+            if (!n) return;
+            if (n.type === 'Identifier') {
+                bindings.set(n.name, bindings.has(n.name) ? null : declaration);
+            } else if (n.type === 'AssignmentPattern') bind(n.left, declaration);
+            else if (n.type === 'RestElement') bind(n.argument, declaration);
+            else if (n.type === 'ArrayPattern') n.elements.forEach(x => bind(x, declaration));
+            else if (n.type === 'ObjectPattern') n.properties.forEach(x => bind(x.value || x, declaration));
+        };
+        if (/\breplace(?:All)?\b/.test(src)) {
+            walk(ast, n => {
+                if (n.type === 'VariableDeclarator') bind(n.id, n);
+                else if (/Function/.test(n.type) && n.params) {
+                    bind(n.id, n);
+                    n.params.forEach(p => bind(p, n));
+                } else if (n.type === 'ClassDeclaration') bind(n.id, n);
+                else if (n.type === 'CatchClause') bind(n.param, n);
+                else if (/^Import.*Specifier$/.test(n.type)) bind(n.local, n);
+            });
+            walk(ast, n => {
+                if (n.type !== 'ForOfStatement' || inDebug(n)) return;
+                const { left, right } = n;
+                if (left.type !== 'VariableDeclaration' || left.kind !== 'const' || right.type !== 'CallExpression') return;
+                const pair = left.declarations[0].id;
+                if (pair.type !== 'ArrayPattern' || pair.elements[0]?.type !== 'Identifier' || pair.elements[1]?.type !== 'Identifier') return;
+                const table = right.arguments[0], callee = right.callee;
+                if (table?.type !== 'Identifier' || callee.type !== 'MemberExpression' ||
+                    callee.object.type !== 'Identifier' || callee.object.name !== 'Object' || bindings.has('Object') || propName(callee) !== 'entries') return;
+                const declaration = bindings.get(table.name);
+                if (declaration?.type !== 'VariableDeclarator' || declaration.parent.kind !== 'const' || declaration.init?.type !== 'ObjectExpression' || inDebug(declaration)) return;
+                const container = declaration.parent.parent;
+                const scope = container.type === 'ExportNamedDeclaration' ? container.parent : container;
+                let ancestor = n.parent;
+                while (ancestor && ancestor !== scope) ancestor = ancestor.parent;
+                if (!ancestor) return;
+                const value = pair.elements[1].name;
+                if (bindings.get(value) !== left.declarations[0]) return;
+                walk(n.body, ret => {
+                    const call = ret.argument;
+                    if (ret.type !== 'ReturnStatement' || call?.type !== 'CallExpression' || inDebug(ret)) return;
+                    let parent = ret.parent;
+                    while (parent !== n && !/Function/.test(parent.type)) parent = parent.parent;
+                    if (parent !== n) return;
+                    const member = call.callee, ph = call.arguments[0];
+                    if (member.type !== 'MemberExpression' || !/^(?:replace|replaceAll)$/.test(propName(member)) ||
+                        member.object.type !== 'Identifier' || member.object.name !== value ||
+                        !isStr(ph) || !/^\{[A-Za-z_]\w*\}$/.test(ph.value)) return;
+                    let placeholders = templateTables.get(declaration);
+                    if (!placeholders) templateTables.set(declaration, placeholders = new Set());
+                    placeholders.add(ph.value);
+                });
+            });
+        }
+        for (const [declaration, tplPhs] of templateTables) {
+            const props = declaration.init.properties.filter(p => p.type === 'Property' && !p.computed && isStr(p.value));
+            if (props.length < 4) continue;
+            const sentences = props.filter(p => looksLikeText(p.value.value, 'strict'));
+            if (sentences.length < props.length * 0.6) continue;
+            for (const p of props) {
+                const k = p.key.type === 'Identifier' ? p.key.name : (isStr(p.key) ? p.key.value : null);
+                if (!k || !/^[A-Z][a-z]{2,20}$/.test(k)) continue;
+                const val = p.value.value;
+                if (!looksLikeText(val, 'strict') || ![...tplPhs].some(ph => val.includes(ph))) continue;
+                if (opts.deferTopics) {
+                    if (!injectRuntime) continue;
+                    if (!ctx.isKey(k) && !exact.some(([x]) => x === k) && !deferredTopics.some(x => (Array.isArray(x) ? x[0] : x) === k)) deferredTopics.push([k, keyBase('suffix')]);
+                } else {
+                    forceText(k, 'suffix');
+                }
+            }
+        }
 
         if (debugSkipped) ctx.warn(`${file}: ${debugFile ? '调试脚本' : '调试分支'}里的 ${debugSkipped} 处文本未提取`);
         if (uiDataKept) ctx.warn(`${file}: ${uiDataKept} 处发给自定义界面的数据（界面按前缀 / 字符位置读取），保持原样`);

@@ -4,6 +4,12 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.23-101 (2026-11-23)
+
+### Fixed
+
+- Compound V stat labels can translate suffixes such as `Depth`, `Distance`, `Ticks`, `Rings`, and `Rise` on their own. Suffix extraction follows the description table used for placeholder replacement and preserves existing language keys.
+
 ## 2026.11.23-100 (2026-11-23)
 
 ### Fixed
