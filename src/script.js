@@ -1146,54 +1146,63 @@
   // 有的界面字体只有 ASCII，作者会先把 → — · 弯引号换掉、删掉其余非 ASCII 字符再显示：比较时两边都这样折一遍
   const F = (t) => t.replace(/\u00a7./g, "").replace(/\\s*(?:\u2192|->)\\s*/g, " -> ").replace(/[\u2014\u2013\u00b7]/g, "-").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^\\x20-\\x7e\\n\\p{L}\\p{N}]/gu, "").replace(/~/g, "-").replace(/[ \\t]+/g, " ").trim();
   const F2 = (t) => t.replace(/\u00a7./g, "");
-  let cf = null, pf = null, coverRes = null;
+  let cf = null, pf = null;
+  const coverWords = new Map(), COVER_MAX = 240;
+  const addExact = (text, key) => {
+    if (!m.has(text) && text.length >= 4 && text.length <= COVER_MAX && !text.includes("\\n") && /\\p{L}/u.test(text)) {
+      const prefix = text.slice(0, 4);
+      let words = coverWords.get(prefix);
+      if (!words) coverWords.set(prefix, words = []);
+      words.push(text);
+    }
+    m.set(text, key);
+  };
+  const coverTail = /(?:\\u00a7.(?!\\p{L})|[^\\u00a7\\p{L}\\n])*/uy;
 
   let coverDepth = 0;
   const noWords = (s) => !/\\p{L}/u.test(String(s).replace(/\\u00a7./g, ""));
   // 动作栏把几段已经登记的文字直接拼成一行（"§bCélula " + 序号 + " §8• §f" + "§7Vazia"）。
   // 整句对不上句式，短句式又会把后面的句子吞进占位符。每段都对上、空隙里没有单词时，按段翻译。
   const cover = (t) => {
-    if (coverDepth > 0 || t.length > 240 || t.indexOf("\\n") >= 0 || !/\\p{L}/u.test(t)) return null;
+    if (coverDepth > 0 || t.length > COVER_MAX || t.indexOf("\\n") >= 0 || !/\\p{L}/u.test(t)) return null;
     coverDepth++;
     try {
       const spans = [];
       const isLetterAt = (i) => i >= 0 && i < t.length && t[i - 1] !== "\\u00a7" && /\\p{L}/u.test(t[i]);
       // 颜色码可以贴着下一个词（"§f" + "Bancada"）。只有字母连着字母才算词的中间。
       const bound = (i, n) => !(isLetterAt(i) && isLetterAt(i - 1)) && !(isLetterAt(i + n - 1) && isLetterAt(i + n));
-      for (const [s, k] of m) {
-        if (s.length < 4 || s.length > t.length || !/\\p{L}/u.test(s)) continue;
-        let i = 0;
-        while ((i = t.indexOf(s, i)) >= 0) {
-          if (bound(i, s.length)) spans.push([i, i + s.length, [{ translate: k }]]);
-          i += s.length;
+      const exactEnds = new Map();
+      for (let i = 0; i + 4 <= t.length; i++) {
+        for (const s of coverWords.get(t.slice(i, i + 4)) || []) {
+          if ((exactEnds.get(s) || 0) > i || !t.startsWith(s, i)) continue;
+          exactEnds.set(s, i + s.length);
+          if (bound(i, s.length)) spans.push([i, i + s.length, { translate: m.get(s) }]);
         }
       }
-      if (!coverRes || coverRes.src !== p) {
-        coverRes = { src: p, list: [] };
-        for (const [pk, , , ord, lits] of p) {
-          if (!lits[0]) continue;
-          const last = lits.length - 1;
-          const trail = lits[last] === "";
-          const cap = lits.some((x) => x.indexOf("\\n") >= 0) ? "([\\\\s\\\\S]*?)" : "([^\\\\n]*?)";
-          let src = esc(lits[0]);
-          for (let i = 1; i < last; i++) src += cap + esc(lits[i]);
-          // 句式以占位符结尾时，只吃数字和颜色码，停在下一个词前面，避免把后面整句吞进去。
-          if (trail) src += "((?:\\\\u00a7.(?!\\\\p{L})|[^\\\\u00a7\\\\p{L}\\\\n])*)";
-          else if (last > 0) src += cap + esc(lits[last]);
-          coverRes.list.push([pk, new RegExp(src, "gu"), ord]);
-        }
-      }
-      for (const [pk, re, ord] of coverRes.list) {
-        re.lastIndex = 0;
-        let x;
-        while ((x = re.exec(t))) {
-          if (!x[0]) { re.lastIndex++; continue; }
-          if (!bound(x.index, x[0].length)) continue;
-          let caps = x.slice(1);
-          if (ord && ord.length) { const a = []; ord.forEach((g, i) => { if (a[g - 1] === undefined) a[g - 1] = caps[i]; }); for (let i = 0; i < a.length; i++) if (a[i] === undefined) a[i] = ""; caps = a; }
-          // 参数再翻译时不能被外层 cover 挡住，否则 "Lucky Shot - Luck 1" 对不上自己的句式，还会把失败结果缓存下来
-          const Tfree = (v) => { const d = coverDepth; coverDepth = 0; try { return T(v == null ? "" : v); } finally { coverDepth = d; } };
-          spans.push([x.index, x.index + x[0].length, [{ translate: pk, with: { rawtext: caps.map(Tfree) } }]]);
+      // 占位符能吃任意字符。按顺序找最早的字面片段即可，缺少后缀时不做正则回溯。
+      for (const [pk, , , ord, lits] of p) {
+        const first = lits[0], last = lits.length - 1;
+        if (!first) continue;
+        let end = 0, start;
+        while ((start = t.indexOf(first, end)) >= 0) {
+          end = start + first.length;
+          const caps = [];
+          for (let i = 1; i <= last; i++) {
+            const lit = lits[i];
+            if (i === last && !lit) {
+              coverTail.lastIndex = end;
+              const tail = coverTail.exec(t)[0];
+              caps.push(tail);
+              end += tail.length;
+              continue;
+            }
+            const next = t.indexOf(lit, end);
+            if (next < 0) break;
+            caps.push(t.slice(end, next));
+            end = next + lit.length;
+          }
+          if (caps.length !== last) break;
+          if (bound(start, end - start)) spans.push([start, end, { translate: pk }, caps, ord]);
         }
       }
       if (spans.length < 2) return null;
@@ -1205,21 +1214,31 @@
       }
       if (chosen.length < 2) return null;
       chosen.sort((a, b) => a[0] - b[0]);
-      const els = [];
-      let at = 0, hit = false;
-      for (const [st, en, el] of chosen) {
-        if (st < at) continue;
-        const gap = t.slice(at, st);
-        if (!noWords(gap)) return null;
-        if (gap) els.push({ text: gap });
-        els.push(...el);
+      let at = 0;
+      for (const [st, en] of chosen) {
+        if (!noWords(t.slice(at, st))) return null;
         at = en;
-        hit = true;
       }
-      const tail = t.slice(at);
-      if (!noWords(tail)) return null;
-      if (tail) els.push({ text: tail });
-      return hit ? els : null;
+      if (!noWords(t.slice(at))) return null;
+      // 只翻译最终采用的占位符。重叠候选和无法盖住整行的输入都不递归查词。
+      const els = [];
+      const Tfree = (v) => { const d = coverDepth; coverDepth = 0; try { return T(v == null ? "" : v); } finally { coverDepth = d; } };
+      at = 0;
+      for (const [st, en, el, caps, ord] of chosen) {
+        if (st > at) els.push({ text: t.slice(at, st) });
+        if (caps) {
+          let args = caps;
+          if (ord && ord.length) {
+            args = [];
+            ord.forEach((g, i) => { if (args[g - 1] === undefined) args[g - 1] = caps[i]; });
+          }
+          el.with = { rawtext: args.map(Tfree) };
+        }
+        els.push(el);
+        at = en;
+      }
+      if (at < t.length) els.push({ text: t.slice(at) });
+      return els;
     } finally { coverDepth--; }
   };
   // 句式比较用：和 F 一样折成 ASCII，但不去首尾空白（保持片段边界）
@@ -1458,13 +1477,13 @@
     return it.getLore();
   };
   const reg = (exact, pats, sp, srcs) => {
-    cf = null; upper = null; pf = null; coverRes = null;
+    cf = null; upper = null; pf = null;
     for (const [k, lits] of srcs || []) if (!srcPat.has(k)) srcPat.set(k, [lits, null]);
     if (sp) for (const x of sp) if (seps.indexOf(x) < 0) seps.push(x);
     for (const [s, k] of exact) {
-      if (!m.has(s)) m.set(s, k);
+      if (!m.has(s)) addExact(s, k);
       if (!srcText.has(k)) srcText.set(k, s);
-      if (s.indexOf("\\n") >= 0 && !m.has(N(s))) m.set(N(s), k);
+      if (s.indexOf("\\n") >= 0 && !m.has(N(s))) addExact(N(s), k);
     }
     for (const [k, lits, ord] of pats) {
       if (!srcPat.has(k)) srcPat.set(k, [lits, ord]);
@@ -1486,7 +1505,7 @@
     if (typeof id === "string" && typeof text === "string" && text) {
       const full = id.indexOf(":") >= 0 ? id : "minecraft:" + id;
       const k = ids.get(full) || ents.get(full);
-      if (k && m.get(text) !== k) { m.set(text, k); cache.delete(text); }
+      if (k && m.get(text) !== k) { addExact(text, k); cache.delete(text); }
       if (k && !srcText.has(k)) srcText.set(k, text);
     }
     return text;

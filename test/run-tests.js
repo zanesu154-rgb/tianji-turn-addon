@@ -389,6 +389,29 @@ function renderCommand(cmd, lang) {
         check('运行时：字形画 / 超长字符串不做模糊匹配，不会卡死；句式照常匹配', dt < 300 && /"k\.p7"/.test(hit) && /k\.hello/.test(JSON.stringify(rt.M('§aHello there friend§r'))), dt + 'ms');
     }
     {
+        // 短按钮缺少句式末尾时，重复分隔词不能让分段匹配回溯。
+        const cx = new NS.ExtractContext({});
+        const out = NS.processScript('export function f(p, a) { p.sendMessage(a); }', 'scripts/cover.js', cx, { injectRuntime: true }).content;
+        const prelude = out.slice(0, out.indexOf('// ---- end i18n runtime ----'));
+        const inputs = {
+            exact: [['Challenge title', 'k.title']],
+            pats: [
+                ['k.missing', ['Rank ', ...Array(6).fill('x '), 'FINISH'], null],
+                ['k.points', ['Points ', ''], null],
+            ],
+            missing: 'Rank ' + 'x '.repeat(100) + 'Unknown',
+            combined: '§bPoints 7 §8• §fChallenge title',
+        };
+        let result, error;
+        try {
+            result = require('vm').runInNewContext(prelude + '\n__i18n.reg(exact, pats); [__i18n.M(missing), __i18n.M(combined)];',
+                inputs, { timeout: 1000 });
+        } catch (e) { error = e.message; }
+        check('运行时：短句缺少后缀时不回溯，带颜色和数字的拼接文字仍按段翻译',
+            result && result[0] === inputs.missing && /k\.points.*k\.title/.test(JSON.stringify(result[1])),
+            error || JSON.stringify(result));
+    }
+    {
         // 已转换的附加包再转换：脚本不重复处理，但运行时换成当前版本
         const conv = NS.processScript('import { world } from "@minecraft/server";\nconst NAMES = { a: "Punch Flurry" };\nexport function f(p, k) { p.sendMessage(NAMES[k]); }\n', 'scripts/old.js', new NS.ExtractContext({}), { injectRuntime: true, runtimeKey: '__ADDON_I18N_old' }).content;
         const old = conv.replace(', FUZZY_MAX = 600', '');   // 模拟旧版运行时

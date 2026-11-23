@@ -4,6 +4,12 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.23-100 (2026-11-23)
+
+### Fixed
+
+- Opening the Compound V mastery book could trigger the Watchdog while the runtime repeatedly scanned the script dictionary for each button. The runtime now filters dictionary entries by prefix, matches pattern literals in order, and translates only the arguments it uses.
+
 ## 2026.11.23-99 (2026-11-23)
 
 ### Fixed
