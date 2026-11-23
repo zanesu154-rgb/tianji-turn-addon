@@ -3038,6 +3038,188 @@ export function show(player, item) {
             JSON.stringify({ dynamic, folded, hud }));
         delete globalThis[key];
     }
+    {
+        // CV-3A-1：经 (table[event] ?? ...).split(";")[0] 截取的文本表（如 OBJECTIVES）提取分号前半段到独立 split 键系列；
+        // 固定索引或取后半段不会触发整表提取。
+        const key = '__ADDON_I18N_TEST_CV3A1_SEMI_SPLIT__';
+        delete globalThis[key];
+        const opt = { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button']) };
+        const src = [
+            'const OBJECTIVES = {',
+            '  small_distance: "blocks walked while small or tiny; teleporting and falling do not count",',
+            '  power_use: "times the move works; failed attempts do not count",',
+            '  giant_distance: "blocks walked while giant or colossal; teleporting and falling do not count",',
+            '  plain_goal: "monsters hit with your power",',
+            '};',
+            'const NOTES = {',
+            '  a: "first sentence before semicolon; second clause here",',
+            '  b: "another note before semicolon; extra details",',
+            '  c: "third note before semicolon; more info",',
+            '  d: "fourth note before semicolon; trailing info",',
+            '};',
+            'export const ABILITIES = ["Shrink", "Heat Shield"];',
+            'export const describe = (ability, event, target) => `${target} ${(OBJECTIVES[event] ?? event.replace(/_/g, " ")).split(";")[0]} with ${ability} selected.`;',
+            'export const alternative = (event) => (((OBJECTIVES[event]) || "fallback")).split /* comment */ (";")[0];',
+            'export const shadowed = (OBJECTIVES, event) => (OBJECTIVES[event] ?? "fallback").split(";")[0];',
+            'export const singleNote = NOTES["a"].split(";")[0];',
+            'export const tail = (event) => NOTES[event].split(";")[1];',
+            'export const unreachable = (event) => ("constant" || NOTES[event]).split(";")[0];',
+            'export const keep = [NOTES];',
+            ''
+        ].join('\n');
+        const ctx = new NS.ExtractContext({ splitNewlines: false });
+        const out = NS.processScript(src, 'BP/scripts/masteryData.js', ctx, opt);
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        const end = out.content.indexOf('// ---- end i18n runtime ----');
+        const rt = new Function(out.content.slice(0, end).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const rawWords = (r) => {
+            const hit = [];
+            const walk = (n) => {
+                if (!n) return;
+                if (Array.isArray(n)) { n.forEach(walk); return; }
+                if (typeof n.text === 'string' && /\p{L}/u.test(n.text.replace(/\u00a7./g, ''))) hit.push(n.text);
+                if (n.with) walk(n.with);
+                if (n.rawtext) n.rawtext.forEach(walk);
+            };
+            walk(r);
+            return hit;
+        };
+        const expected = [
+            'blocks walked while small or tiny',
+            'times the move works',
+            'blocks walked while giant or colossal',
+        ];
+        const missing = expected.filter(t => !vals.includes(t));
+        const r1 = rt.M('272 blocks walked while small or tiny with Shrink selected.');
+        const r2 = rt.M('42 times the move works with Heat Shield selected.');
+        const rtMiss = [r1, r2].filter(r => !r || !r.rawtext || rawWords(r).length > 0);
+        check('CV-3A-1：经 .split(";")[0] 截取的目标短语被提取并在运行时完整翻译',
+            missing.length === 0 && rtMiss.length === 0,
+            JSON.stringify({ missing, r1, r2 }));
+        const falsePos = ['first sentence before semicolon', 'another note before semicolon'].filter(t => vals.includes(t));
+        check('  └ 反例：固定表键、不可达回退和取分号后半段不触发整表拆分',
+            falsePos.length === 0,
+            JSON.stringify({ falsePos }));
+        const runPack = async (zhLang) => {
+            const memFiles = new Map([
+                ['BP/manifest.json', JSON.stringify({ format_version: 2, header: { name: 'T', description: 'T', uuid: '11111111-1111-1111-1111-111111111111', version: [1, 0, 0] }, modules: [{ type: 'script', language: 'javascript', uuid: '22222222-2222-2222-2222-222222222222', version: [1, 0, 0], entry: 'scripts/masteryData.js' }] })],
+                ['RP/manifest.json', JSON.stringify({ format_version: 2, header: { name: 'T', description: 'T', uuid: '33333333-3333-3333-3333-333333333333', version: [1, 0, 0] }, modules: [{ type: 'resources', uuid: '44444444-4444-4444-4444-444444444444', version: [1, 0, 0] }] })],
+                ['BP/scripts/masteryData.js', src],
+            ]);
+            if (zhLang) memFiles.set('RP/texts/zh_CN.lang', zhLang);
+            await NS.runPipeline({ list: () => [...memFiles.keys()], readText: async p => memFiles.get(p), readBinary: async () => null, writeText: async (p, c) => { memFiles.set(p, c); } }, { sourceLang: 'en_US', targetLangs: ['zh_CN'], processScripts: true, injectRuntime: true, splitNewlines: false });
+            return { en: NS.parseLang(memFiles.get('RP/texts/en_US.lang') || ''), zh: NS.parseLang(memFiles.get('RP/texts/zh_CN.lang') || '') };
+        };
+        // 同一夹具由 v102 (a533d5d) 实际生成的 en_US.lang。
+        const oldEn = [
+            ["script.masteryData.str","blocks walked while small or tiny; teleporting and falling do not count"],
+            ["script.masteryData.str_1","times the move works; failed attempts do not count"],
+            ["script.masteryData.str_2","blocks walked while giant or colossal; teleporting and falling do not count"],
+            ["script.masteryData.str_3","monsters hit with your power"],
+            ["script.masteryData.str_4","first sentence before semicolon; second clause here"],
+            ["script.masteryData.str_5","another note before semicolon; extra details"],
+            ["script.masteryData.str_6","third note before semicolon; more info"],
+            ["script.masteryData.str_7","fourth note before semicolon; trailing info"],
+            ["script.masteryData.str_8","Shrink"],
+            ["script.masteryData.str_9","Heat Shield"],
+            ["script.masteryData.fmt","%1$s %2$s with %3$s selected."],
+            ["pack.name","T"],
+            ["pack.description","T"],
+        ];
+        const fresh = await runPack(null);
+        const pb = await runPack(['## ==== addon-i18n ====', ...oldEn.map(([k, v]) => `${k}=译:${v}`)].join('\n'));
+        const mismatches = oldEn.filter(([k, v]) => fresh.en.get(k) !== v || pb.en.get(k) !== v || pb.zh.get(k) !== `译:${v}`);
+        const oldKeys = new Set(oldEn.map(([k]) => k));
+        const oldValues = new Set(oldEn.map(([, v]) => v));
+        const reallocations = [...pb.en].filter(([k, v]) => !oldKeys.has(k) && oldValues.has(v));
+        const splitKeys = expected.map(t => [...pb.en].find(([, v]) => v === t)?.[0]);
+        check('  └ v102 跨版本回填：旧键不变，新增短语使用独立 split 系列',
+            mismatches.length === 0 && reallocations.length === 0 &&
+                splitKeys.every(k => /^script\.masteryData\.split(?:_\d+)?$/.test(k || '')),
+            JSON.stringify({ mismatches, reallocations, splitKeys }));
+        const alternativeOnly = src.split('\n').filter(line => !/export const (?:describe|shadowed|singleNote|tail|unreachable)\b/.test(line)).join('\n');
+        const alt = new NS.ExtractContext({ splitNewlines: false });
+        NS.processScript(alternativeOnly, 'BP/scripts/masteryData.js', alt, opt);
+        check('  └ 带注释和括号的 || 回退仍识别正确的外层绑定',
+            expected.every(t => [...alt.entries].some(([k, e]) => k.startsWith('script.masteryData.split') && e.value === t)));
+        // 专项反例 1：%键引用保护（含 %stats.total 的分号前半段不得新增 split 键）
+        const refSrc = [
+            'const STATS_TABLE = {',
+            '  bare_ref: "%stats.total; hidden details after semicolon",',
+            '  embedded_ref: "Total count %stats.total; hidden details after semicolon",',
+            '  normal_a: "blocks walked while small or tiny; teleporting does not count",',
+            '  normal_b: "times the move works; failed attempts do not count",',
+            '  normal_c: "monsters hit with your power; bosses count twice",',
+            '};',
+            'export const fmt = (k) => (STATS_TABLE[k] ?? "").split(";")[0];',
+        ].join('\n');
+        const refCtx = new NS.ExtractContext({ splitNewlines: false });
+        NS.processScript(refSrc, 'BP/scripts/statsView.js', refCtx, opt);
+        const refSplits = [...refCtx.entries].filter(([k]) => k.startsWith('script.statsView.split')).map(([, e]) => e.value);
+        check('  └ 反例：%键引用（含 %stats.total）不新增 split 键',
+            !refSplits.some(v => v.includes('%stats.total')) && refSplits.includes('blocks walked while small or tiny'),
+            JSON.stringify({ refSplits }));
+        // 专项反例 2：技术命令排除（runCommand 参数与内部布尔比较不登记为玩家文本）
+        const techSrc = [
+            'const CMD_TABLE = {',
+            '  a: "effect @s speed 30 1; grants temporary speed boost",',
+            '  b: "event entity @s start_flight; begins flight state",',
+            '  c: "time set day; sets world time to morning",',
+            '  d: "say Hello welcome back; greets the player in chat",',
+            '  e: "help weather; shows help for the weather command",',
+            '};',
+            'const STATE_TABLE = {',
+            '  a: "Status is already active; cannot trigger again",',
+            '  b: "Target is currently immune; wait for cooldown",',
+            '  c: "Shield is fully charged; ready to deploy",',
+            '  d: "Power is temporarily locked; finish trial first",',
+            '};',
+            'const NOTICE_TABLE = {',
+            '  a: "Your shield is now active; details follow",',
+            '  b: "Your equipment is ready; details follow",',
+            '  c: "The next challenge begins soon; details follow",',
+            '  d: "This reward can be collected; details follow",',
+            '};',
+            'function runCommand(player, message) { player.sendMessage(message); }',
+            'export function exec(player, k, current) {',
+            '  player.runCommandAsync((CMD_TABLE[k] ?? "").split(";")[0]["trim"]());',
+            '  runCommand(player, (NOTICE_TABLE[k] ?? "").split(";")[0].trim());',
+            '  return (STATE_TABLE[k] ?? "").split(";")[0] === current;',
+            '}',
+        ].join('\n');
+        const techCtx = new NS.ExtractContext({ splitNewlines: false });
+        NS.processScript(techSrc, 'BP/scripts/cmdCheck.js', techCtx, opt);
+        const techSplits = [...techCtx.entries].filter(([k]) => k.startsWith('script.cmdCheck.split')).map(([, e]) => e.value);
+        check('  └ 反例：真实命令调用和内部比较排除，同名本地聊天函数保留',
+            JSON.stringify(techSplits) === JSON.stringify([
+                'Your shield is now active', 'Your equipment is ready',
+                'The next challenge begins soon', 'This reward can be collected',
+            ]),
+            JSON.stringify({ techSplits }));
+        // 专项反例 3：uiCompared 保护（deferredTopics 不得绕过 uiCompared）
+        const uiSrc = [
+            'const UI_TABLE = {',
+            '  a: "Status is already active; cannot trigger again",',
+            '  b: "Target is currently immune; wait for cooldown",',
+            '  c: "Shield is fully charged; ready to deploy",',
+            '  d: "Power is temporarily locked; finish trial first",',
+            '};',
+            'export const label = (k) => `${(UI_TABLE[k] ?? "").split(";")[0]}`;',
+        ].join('\n');
+        const uiFiles = new Map([
+            ['BP/manifest.json', JSON.stringify({ format_version: 2, header: { name: 'T', description: 'T', uuid: '11111111-1111-1111-1111-111111111111', version: [1, 0, 0] }, modules: [{ type: 'script', language: 'javascript', uuid: '22222222-2222-2222-2222-222222222222', version: [1, 0, 0], entry: 'scripts/uiStatus.js' }] })],
+            ['RP/manifest.json', JSON.stringify({ format_version: 2, header: { name: 'T', description: 'T', uuid: '33333333-3333-3333-3333-333333333333', version: [1, 0, 0] }, modules: [{ type: 'resources', uuid: '44444444-4444-4444-4444-444444444444', version: [1, 0, 0] }] })],
+            ['RP/ui/custom.json', JSON.stringify({ namespace: 'custom_hud', panel: { type: 'panel', visible: "(#title_text = 'Status is already active')" } })],
+            ['BP/scripts/uiStatus.js', uiSrc],
+        ]);
+        await NS.runPipeline({ list: () => [...uiFiles.keys()], readText: async p => uiFiles.get(p), readBinary: async () => null, writeText: async (p, c) => { uiFiles.set(p, c); } }, { sourceLang: 'en_US', targetLangs: ['zh_CN'], processScripts: true, injectRuntime: true, splitNewlines: false });
+        const uiEn = NS.parseLang(uiFiles.get('RP/texts/en_US.lang') || '');
+        const uiSplits = [...uiEn].filter(([k]) => k.startsWith('script.uiStatus.split')).map(([, v]) => v);
+        check('  └ 反例：uiCompared 保护不被 deferredTopics 绕过（Status is already active 保持原文）',
+            !uiSplits.includes('Status is already active') && uiSplits.includes('Target is currently immune'),
+            JSON.stringify({ uiSplits }));
+        delete globalThis[key];
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
