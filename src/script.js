@@ -1070,6 +1070,20 @@
       if (nm[3]) r3.push({ text: nm[3] });
       return r3;
     }
+    // 颜色码被代码替换过（如浅色背景下把 §7 换成 §8）：忽略颜色码再比一次，用原文的颜色
+    const core = mm ? mm[2] : s;
+    const sf = F(core);
+    if (sf && /[^\\s\\d\\p{P}]/u.test(sf)) {
+      if (!cf) { cf = new Map(); for (const [t, kk] of m) { const f = F(t); if (f && !cf.has(f)) cf.set(f, kk); } }
+      if ((k = cf.get(sf))) {
+        const r2 = [{ translate: k }];
+        // 原文自带颜色码，两端只补回空白
+        const w1 = mm ? F2(mm[1]) : "", w3 = mm ? F2(mm[3]) : "";
+        if (w1) r2.unshift({ text: w1 });
+        if (w3) r2.push({ text: w3 });
+        return r2;
+      }
+    }
     // "标签: 数值"（"Hit radius: 1.25 blocks"）：标签认识时翻译标签，后面的数值部分能找到就一起换
     const lv = /^((?:\\u00a7.)*)([^:\\n]{2,40}?)(\\s*[:：]\\s*)([^\\n]+)$/.exec(s);
     if (lv && (k = m.get(lv[2].trim()))) {
@@ -1088,20 +1102,6 @@
         }
       }
       return r4;
-    }
-    // 颜色码被代码替换过（如浅色背景下把 §7 换成 §8）：忽略颜色码再比一次，用原文的颜色
-    const core = mm ? mm[2] : s;
-    const sf = F(core);
-    if (sf && /[^\\s\\d\\p{P}]/u.test(sf)) {
-      if (!cf) { cf = new Map(); for (const [t, kk] of m) { const f = F(t); if (f && !cf.has(f)) cf.set(f, kk); } }
-      if ((k = cf.get(sf))) {
-        const r2 = [{ translate: k }];
-        // 原文自带颜色码，两端只补回空白
-        const w1 = mm ? F2(mm[1]) : "", w3 = mm ? F2(mm[3]) : "";
-        if (w1) r2.unshift({ text: w1 });
-        if (w3) r2.push({ text: w3 });
-        return r2;
-      }
     }
     // 同一行里有两句（折页把 "It cannot fire in water. Its reach…" 留在一行）。整行对不上时，先翻译以句号收尾的那句。
     // 多行正文交给逐行匹配，避免把标题和第一句切成一段。
@@ -1505,7 +1505,11 @@
     if (typeof id === "string" && typeof text === "string" && text) {
       const full = id.indexOf(":") >= 0 ? id : "minecraft:" + id;
       const k = ids.get(full) || ents.get(full);
-      if (k && m.get(text) !== k) { addExact(text, k); cache.delete(text); }
+      if (k && m.get(text) !== k) {
+        addExact(text, k);
+        cf = null; // 冒号标签也可能已经建过折叠索引，动态名称要在下次查找时加入。
+        cache.delete(text);
+      }
       if (k && !srcText.has(k)) srcText.set(k, text);
     }
     return text;

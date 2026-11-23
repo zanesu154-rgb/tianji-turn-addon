@@ -4,6 +4,12 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.23-102 (2026-11-23)
+
+### Fixed
+
+- When an arrow or color changes in a Compound V reward line, the runtime checks for a whole-line translation before splitting at the colon. Dynamic stat labels still fall back to label translation.
+
 ## 2026.11.23-101 (2026-11-23)
 
 ### Fixed
