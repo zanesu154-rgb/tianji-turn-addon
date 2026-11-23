@@ -551,6 +551,7 @@
                 const suffix = Array.isArray(entry);
                 const base = suffix ? entry[1] : item.keyBaseWord;
                 if (ctx.isKey(topic)) continue;
+                if (suffix && base.endsWith('.split') && ctx.uiCompared && ctx.uiCompared.has(topic.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) continue;
                 const existing = ctx.dedupe.get('script\0' + topic);
                 const k = existing || ctx.alloc(base, topic, { file: item.file, kind: 'script', scope: 'script', hint: suffix ? 'suffix' : 'word' });
                 extra.push([topic, k]);

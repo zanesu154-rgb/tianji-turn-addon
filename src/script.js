@@ -3503,8 +3503,28 @@
                 });
             });
             // 只接受 (const表[key] ?? ...).split(";")[0] 形式截取的文本表（如 OBJECTIVES），提取分号前半段到独立 split 键系列
+            const isSemiSplitTech = (node) => {
+                let cur = node;
+                while (cur && cur.parent) {
+                    const p = cur.parent;
+                    if (p.type === 'ParenthesizedExpression') { cur = p; continue; }
+                    if (p.type === 'MemberExpression' && p.object === cur &&
+                        /^(?:trim|trimStart|trimEnd|toLowerCase|toUpperCase)$/.test(propName(p) || '') &&
+                        p.parent?.type === 'CallExpression' && p.parent.callee === p) {
+                        cur = p.parent;
+                        continue;
+                    }
+                    if (isTechPosition(cur)) return true;
+                    if (p.type === 'CallExpression' && p.arguments[0] === cur &&
+                        /^runCommand(?:Async)?$/.test(propName(p.callee) || '')) return true;
+                    if ((p.type === 'UnaryExpression' && p.operator === '!') ||
+                        ((p.type === 'IfStatement' || p.type === 'WhileStatement' || p.type === 'DoWhileStatement' || p.type === 'ConditionalExpression') && p.test === cur)) return true;
+                    break;
+                }
+                return false;
+            };
             if (hasSemiSplit) walk(ast, n => {
-                if (n.type !== 'MemberExpression' || !n.computed || n.property.type !== 'Literal' || n.property.value !== 0 || inDebug(n)) return;
+                if (n.type !== 'MemberExpression' || !n.computed || n.property.type !== 'Literal' || n.property.value !== 0 || inDebug(n) || isSemiSplitTech(n)) return;
                 const call = n.object;
                 if (!call || call.type !== 'CallExpression' || call.callee.type !== 'MemberExpression' ||
                     propName(call.callee) !== 'split' || call.arguments.length !== 1 ||
@@ -3561,7 +3581,8 @@
                 const val = p.value.value, semi = val.indexOf(';');
                 if (semi < 0) continue;
                 const prefix = val.slice(0, semi).trim();
-                if (!prefix || prefix.length < 4 || !looksLikeText(prefix, 'strict') || isCodeNoise(prefix)) continue;
+                if (!prefix || prefix.length < 4 || !looksLikeText(prefix, 'strict') || isCodeNoise(prefix) || looksLikeCommand(prefix) || NS.hasKeyRefs(prefix)) continue;
+                if (opts.uiCompared && opts.uiCompared.has(prefix.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) continue;
                 if (opts.deferTopics) {
                     if (!injectRuntime) continue;
                     if (!ctx.isKey(prefix) && !exact.some(([x]) => x === prefix) && !deferredTopics.some(x => (Array.isArray(x) ? x[0] : x) === prefix)) deferredTopics.push([prefix, keyBase('split')]);

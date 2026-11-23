@@ -3142,6 +3142,82 @@ export function show(player, item) {
         NS.processScript(alternativeOnly, 'BP/scripts/masteryData.js', alt, opt);
         check('  └ 带注释和括号的 || 回退仍识别正确的外层绑定',
             expected.every(t => [...alt.entries].some(([k, e]) => k.startsWith('script.masteryData.split') && e.value === t)));
+        // 专项反例 1：%键引用保护（含 %stats.total 的分号前半段不得新增 split 键）
+        const refSrc = [
+            'const STATS_TABLE = {',
+            '  bare_ref: "%stats.total; hidden details after semicolon",',
+            '  embedded_ref: "Total count %stats.total; hidden details after semicolon",',
+            '  normal_a: "blocks walked while small or tiny; teleporting does not count",',
+            '  normal_b: "times the move works; failed attempts do not count",',
+            '  normal_c: "monsters hit with your power; bosses count twice",',
+            '};',
+            'export const fmt = (k) => (STATS_TABLE[k] ?? "").split(";")[0];',
+        ].join('\n');
+        const refCtx = new NS.ExtractContext({ splitNewlines: false });
+        NS.processScript(refSrc, 'BP/scripts/statsView.js', refCtx, opt);
+        const refSplits = [...refCtx.entries].filter(([k]) => k.startsWith('script.statsView.split')).map(([, e]) => e.value);
+        check('  └ 反例：%键引用（含 %stats.total）不新增 split 键',
+            !refSplits.some(v => v.includes('%stats.total')) && refSplits.includes('blocks walked while small or tiny'),
+            JSON.stringify({ refSplits }));
+        // 专项反例 2：技术命令排除（runCommand 参数与内部布尔比较不登记为玩家文本）
+        const techSrc = [
+            'const CMD_TABLE = {',
+            '  a: "effect @s speed 30 1; grants temporary speed boost",',
+            '  b: "event entity @s start_flight; begins flight state",',
+            '  c: "time set day; sets world time to morning",',
+            '  d: "say Hello welcome back; greets the player in chat",',
+            '  e: "help weather; shows help for the weather command",',
+            '};',
+            'const STATE_TABLE = {',
+            '  a: "Status is already active; cannot trigger again",',
+            '  b: "Target is currently immune; wait for cooldown",',
+            '  c: "Shield is fully charged; ready to deploy",',
+            '  d: "Power is temporarily locked; finish trial first",',
+            '};',
+            'const NOTICE_TABLE = {',
+            '  a: "Your shield is now active; details follow",',
+            '  b: "Your equipment is ready; details follow",',
+            '  c: "The next challenge begins soon; details follow",',
+            '  d: "This reward can be collected; details follow",',
+            '};',
+            'function runCommand(player, message) { player.sendMessage(message); }',
+            'export function exec(player, k, current) {',
+            '  player.runCommandAsync((CMD_TABLE[k] ?? "").split(";")[0]["trim"]());',
+            '  runCommand(player, (NOTICE_TABLE[k] ?? "").split(";")[0].trim());',
+            '  return (STATE_TABLE[k] ?? "").split(";")[0] === current;',
+            '}',
+        ].join('\n');
+        const techCtx = new NS.ExtractContext({ splitNewlines: false });
+        NS.processScript(techSrc, 'BP/scripts/cmdCheck.js', techCtx, opt);
+        const techSplits = [...techCtx.entries].filter(([k]) => k.startsWith('script.cmdCheck.split')).map(([, e]) => e.value);
+        check('  └ 反例：真实命令调用和内部比较排除，同名本地聊天函数保留',
+            JSON.stringify(techSplits) === JSON.stringify([
+                'Your shield is now active', 'Your equipment is ready',
+                'The next challenge begins soon', 'This reward can be collected',
+            ]),
+            JSON.stringify({ techSplits }));
+        // 专项反例 3：uiCompared 保护（deferredTopics 不得绕过 uiCompared）
+        const uiSrc = [
+            'const UI_TABLE = {',
+            '  a: "Status is already active; cannot trigger again",',
+            '  b: "Target is currently immune; wait for cooldown",',
+            '  c: "Shield is fully charged; ready to deploy",',
+            '  d: "Power is temporarily locked; finish trial first",',
+            '};',
+            'export const label = (k) => `${(UI_TABLE[k] ?? "").split(";")[0]}`;',
+        ].join('\n');
+        const uiFiles = new Map([
+            ['BP/manifest.json', JSON.stringify({ format_version: 2, header: { name: 'T', description: 'T', uuid: '11111111-1111-1111-1111-111111111111', version: [1, 0, 0] }, modules: [{ type: 'script', language: 'javascript', uuid: '22222222-2222-2222-2222-222222222222', version: [1, 0, 0], entry: 'scripts/uiStatus.js' }] })],
+            ['RP/manifest.json', JSON.stringify({ format_version: 2, header: { name: 'T', description: 'T', uuid: '33333333-3333-3333-3333-333333333333', version: [1, 0, 0] }, modules: [{ type: 'resources', uuid: '44444444-4444-4444-4444-444444444444', version: [1, 0, 0] }] })],
+            ['RP/ui/custom.json', JSON.stringify({ namespace: 'custom_hud', panel: { type: 'panel', visible: "(#title_text = 'Status is already active')" } })],
+            ['BP/scripts/uiStatus.js', uiSrc],
+        ]);
+        await NS.runPipeline({ list: () => [...uiFiles.keys()], readText: async p => uiFiles.get(p), readBinary: async () => null, writeText: async (p, c) => { uiFiles.set(p, c); } }, { sourceLang: 'en_US', targetLangs: ['zh_CN'], processScripts: true, injectRuntime: true, splitNewlines: false });
+        const uiEn = NS.parseLang(uiFiles.get('RP/texts/en_US.lang') || '');
+        const uiSplits = [...uiEn].filter(([k]) => k.startsWith('script.uiStatus.split')).map(([, v]) => v);
+        check('  └ 反例：uiCompared 保护不被 deferredTopics 绕过（Status is already active 保持原文）',
+            !uiSplits.includes('Status is already active') && uiSplits.includes('Target is currently immune'),
+            JSON.stringify({ uiSplits }));
         delete globalThis[key];
     }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
