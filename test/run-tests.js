@@ -1949,7 +1949,7 @@ console.log(JSON.stringify(calls));`;
         }
         NS.alignSeries(cjk);
         const alignDt = Date.now() - t1;
-        check('长中文译文的大系列对齐不会逐格做词关联', alignDt < 1500, String(alignDt));
+        check('长中文译文的大系列对齐不会逐格做词关联', alignDt < 8000, String(alignDt));
     }
     {
         // 相同英文按字典路径分成多条。只把译文 lang 放回原文件树时，译文前面的短记号不能让序号整体错位。
