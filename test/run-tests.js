@@ -2957,6 +2957,87 @@ export function show(player, item) {
             JSON.stringify(suffixKeys));
         delete globalThis[key];
     }
+    {
+        // CV-3B：ASCII 折叠整句精确查表 cf.get(sf) 应优先于冒号拆分回退 lv；
+        // 完整句（如 Small form: 70% -> 45% of normal size）命中整句译文，动态数值标签（Damage: 20 / Radius: 5）仍回退到 lv
+        const key = '__ADDON_I18N_TEST_CV3B_CF_BEFORE_LV__';
+        delete globalThis[key];
+        const opt = { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button']), colonPrefix: true };
+        const src = [
+            'import { ActionFormData } from "@minecraft/server-ui";',
+            'const upgrades = [',
+            '  "Small form: 70% → 45% of normal size",',
+            '  "Shrink recovery: 12 → 10 seconds",',
+            '  "Giant vitality: 28 → 32 maximum health (14 → 16 hearts)",',
+            '];',
+            'const help = {',
+            '  damage: "How much health a hit takes before armour and bonuses.",',
+            '  radius: "How far the effect reaches from its middle.",',
+            '  duration: "How long the move lasts.",',
+            '  cooldown: "The starting wait before using the move again.",',
+            '};',
+            'export const rewardLine = (r) => `§6- Reward: §e${r}§r`;',
+            'export function show(p, msg) { new ActionFormData().body(msg).show(p); }',
+            'export const keep = [upgrades, help];',
+            ''
+        ].join('\n');
+        const ctx = new NS.ExtractContext({ splitNewlines: false });
+        const out = NS.processScript(src, 'BP/scripts/masteryProfiles.js', ctx, opt);
+        const end = out.content.indexOf('// ---- end i18n runtime ----');
+        const rt = new Function(out.content.slice(0, end).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const keyOf = (text) => [...ctx.entries.entries()].find(([, e]) => e.value === text)?.[0];
+        const kSmallFull = keyOf('Small form: 70% → 45% of normal size');
+        const kSmallPre = keyOf('Small form');
+        const kShrinkFull = keyOf('Shrink recovery: 12 → 10 seconds');
+        const kGiantFull = keyOf('Giant vitality: 28 → 32 maximum health (14 → 16 hearts)');
+        const kDamage = keyOf('Damage');
+        const kRadius = keyOf('Radius');
+
+        const rSmall = rt.M('Small form: 70% -> 45% of normal size');
+        const rReward = rt.M('§6- Reward: §eSmall form: 70% -> 45% of normal size§r');
+        const rShrink = rt.M('Shrink recovery: 12 -> 10 seconds');
+        const rGiant = rt.M('Giant vitality: 28 -> 32 maximum health (14 -> 16 hearts)');
+        const fullHitOk = kSmallFull && kSmallPre
+            && JSON.stringify(rSmall) === JSON.stringify({ rawtext: [{ translate: kSmallFull }] })
+            && JSON.stringify(rReward).includes(kSmallFull) && !JSON.stringify(rReward).includes('of normal size')
+            && JSON.stringify(rShrink) === JSON.stringify({ rawtext: [{ translate: kShrinkFull }] })
+            && JSON.stringify(rGiant) === JSON.stringify({ rawtext: [{ translate: kGiantFull }] });
+        check('CV-3B：ASCII 折叠的 → 奖励行优先命中整句译文，不被冒号拆分 lv 提前截胡',
+            fullHitOk,
+            JSON.stringify({ kSmallFull, kSmallPre, rSmall, rReward, rShrink, rGiant }));
+
+        const rDmg = rt.M('Damage: 20');
+        const rRad = rt.M('Radius: 5');
+        const rLv = rt.M('Radius: 5 blocks');
+        const lvFallbackOk = kDamage && kRadius
+            && JSON.stringify(rDmg).includes(kDamage) && JSON.stringify(rDmg).includes('20')
+            && JSON.stringify(rRad).includes(kRadius) && JSON.stringify(rRad).includes('5')
+            && JSON.stringify(rLv) === JSON.stringify({ rawtext: [{ translate: kRadius }, { text: ': ' }, { text: '5 blocks' }] });
+        check('  └ 反例：整句未登记的动态数值标签 Damage: 20、Radius: 5、Radius: 5 blocks 仍正确回退翻译',
+            lvFallbackOk,
+            JSON.stringify({ kDamage, kRadius, rDmg, rRad, rLv }));
+        delete globalThis[key];
+    }
+    {
+        // 动态冒号标签可能先建折叠索引，之后登记的 ID 名称也要能折叠匹配。
+        const key = '__ADDON_I18N_TEST_CV3B_FOLDED_NAMES__';
+        const ctx = new NS.ExtractContext({});
+        const out = NS.processScript('export function f(p, a) { p.sendMessage(a); }', 'BP/scripts/hud.js', ctx, { injectRuntime: true, runtimeKey: key });
+        const rt = new Function(out.content.slice(0, out.content.indexOf('// ---- end i18n runtime ----')) + '\nreturn __i18n;')();
+        rt.reg([['Damage', 'k.damage']], []);
+        const dynamic = rt.M('Damage: 20 health');
+        rt.regIds({ 'minecraft:stone': 'k.wall' }, {});
+        rt.H('minecraft:stone', 'Stone · Wall');
+        const folded = rt.M('Stone - Wall');
+        rt.reg([['Status', 'k.status'], ['Status: §8Sensor ready · online', 'k.full']], []);
+        const hud = rt.M('Status: §7Sensor ready - online');
+        check('  └ HUD：动态冒号标签之后登记的名称可折叠，颜色变化的完整状态行也优先整句',
+            JSON.stringify(dynamic) === JSON.stringify({ rawtext: [{ translate: 'k.damage' }, { text: ': ' }, { text: '20 health' }] }) &&
+            JSON.stringify(folded) === JSON.stringify({ rawtext: [{ translate: 'k.wall' }] }) &&
+            JSON.stringify(hud) === JSON.stringify({ rawtext: [{ translate: 'k.full' }] }),
+            JSON.stringify({ dynamic, folded, hud }));
+        delete globalThis[key];
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
