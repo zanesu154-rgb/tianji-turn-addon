@@ -2575,6 +2575,71 @@ export function show(player, item) {
             JSON.stringify({ cont, adapt, learn, grant, wrapped, vals }));
         delete globalThis[key];
     }
+    {
+        const key = '__ADDON_I18N_TEST_LAYOUT__';
+        delete globalThis[key];
+        const src = [
+            'export const TYPES = { fire: { name: "Fire", color: "§c" } };',
+            'export const PHRASE = "blocks swum underwater";',
+            'export const DIVE = "Deep Dive";',
+            'export const BLINK = "Blink";',
+            'const idle = " §7ready";',
+            'export function row(color, name, n, bar) { return color + name + ": " + n + " seconds of learning\\n" + bar + " §7" + n + "% learned"; }',
+            'export function locked(color, name, bar) { return color + name + ": locked — earn its challenge upgrade\\n" + bar + " §7LOCKED"; }',
+            'export function goal(n, ability) { return "- Goal: " + n + " " + PHRASE + " with " + ability + " selected."; }',
+            'export function progress(text) { return "§b- Progress: " + text + "§r"; }',
+            'export const TITLE = "§b§lYOUR CHALLENGE§r";',
+            'export function show(p, n, ability, text) {',
+            '  p.sendMessage(TITLE + "\\n§f" + goal(n, ability) + "§r\\n" + progress(text));',
+            '}',
+            'export function header(n) { return "§8DOSSIER " + n + "  /  ALL POWERS"; }',
+            'export function browse(n) { return "§7" + n + " powers   §8|   Scroll to browse powers"; }',
+            'export const DETAILS = "Arc Lightning fires while you hold crouch with an empty hand. It cannot fire in water. Its reach grows from 3 to 9 blocks, and upgrades let it hit through a line of enemies.";',
+            ''
+        ].join('\n');
+        // 上面的正则只是占位。真正的词边界补丁作用在附加包的 hud.js 原文上。
+        const hudSrc = 'function withoutRepeatedAbility(text,name){const escaped=name.replace(/[.*+?^${}()|[\\]\\\\]/g,"\\\\$&");const patterns=[new RegExp("^\\\\s*(?:\\\\[\\\\s*)?[✦✖⚡]\\\\s*"+escaped+"\\\\s*(?:\\\\]\\\\s*)?(?:[|:·•]\\\\s*)?","i")];return patterns;}\n';
+        const ctx = new NS.ExtractContext({ splitNewlines: false });
+        const out = NS.processScript(src, 'BP/scripts/adaptive.js', ctx, { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button']) });
+        const hud = NS.processScript(hudSrc, 'BP/scripts/core/hud.js', new NS.ExtractContext({ splitNewlines: false }), { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button']) });
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        const end = out.content.indexOf('// ---- end i18n runtime ----');
+        const rt = new Function(out.content.slice(0, end).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const rawWords = (r) => {
+            const hit = [];
+            const walk = (n) => {
+                if (!n) return;
+                if (Array.isArray(n)) { n.forEach(walk); return; }
+                if (typeof n.text === 'string' && /\p{L}/u.test(n.text.replace(/\u00a7./g, ''))) hit.push(n.text);
+                if (n.with) walk(n.with);
+                if (n.rawtext) n.rawtext.forEach(walk);
+            };
+            walk(r);
+            return hit;
+        };
+        const monitor = rt.M('§cFire§r: 30 seconds of learning\n§a|||| §70% learned');
+        const locked = rt.M('§cFire§r: locked — earn its challenge upgrade\n§8|||||||||| §7LOCKED');
+        const body = rt.M('§b§lYOUR CHALLENGE§r\n§f- Goal: 120 blocks swum underwater with Deep Dive selected.§r\n§b- Progress: 0 / 120§r');
+        const dossier = rt.M('§8DOSSIER 01 / ALL POWERS');
+        const browse = rt.M('§760 powers §8| Scroll to browse powers');
+        const tail = rt.M('It cannot fire in water. Its reach grows from 3 to 9 blocks,');
+        const ready = rt.M('§b✦ Blink §8· §7ready');
+        const kept = (r) => JSON.stringify(r).includes('\\n') || vals.some(v => /seconds of learning\n|challenge upgrade\n/.test(v) && JSON.stringify(r).includes('script.adaptive.fmt'));
+        const ok = kept(monitor) && !rawWords(monitor).some(t => /seconds of learning|learned|Fire/.test(t))
+            && kept(locked) && !rawWords(locked).some(t => /locked|LOCKED|Fire/.test(t))
+            && JSON.stringify(body).includes('\\n') && !rawWords(body).some(t => /Goal|blocks swum|selected|Deep Dive|CHALLENGE|Progress/.test(t))
+            && dossier && !rawWords(dossier).some(t => /DOSSIER|POWERS/.test(t))
+            && browse && !rawWords(browse).some(t => /powers|Scroll|browse/.test(t))
+            && vals.includes('Arc Lightning fires while you hold crouch with an empty hand.')
+            && vals.includes('It cannot fire in water.')
+            && vals.includes('ready')
+            && tail && !rawWords(tail).some(t => /cannot fire in water/.test(t))
+            && ready && !rawWords(ready).some(t => /ready|Blink/.test(t))
+            && hud.content.includes('(?![A-Za-z])');
+        check('学习监控保留换行，目标、档案折页、档案尾句和动作栏状态能对上', ok,
+            JSON.stringify({ monitor, locked, body, dossier, browse, tail, ready, hud: hud.content.includes('(?![A-Za-z])'), vals: vals.filter(v => /ready|LOCKED|DOSSIER|water|learned|Goal|Fire/.test(v)) }));
+        delete globalThis[key];
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
