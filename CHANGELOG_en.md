@@ -8,7 +8,7 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 ### Fixed
 
-- Topics before a colon in upgrade descriptions can now be translated on their own. Scripts register shared topics with their existing language keys, so the upgrade screen can translate them regardless of script load order.
+- Topics before a colon in upgrade descriptions can now be translated on their own. Scripts register shared topics with their existing language keys, so the upgrade screen can translate them regardless of script load order. ([#163](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/163))
 
 ## 2026.11.23-98 (2026-11-23)
 
