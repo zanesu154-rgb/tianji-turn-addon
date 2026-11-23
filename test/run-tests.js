@@ -2698,6 +2698,139 @@ export function show(player, item) {
             JSON.stringify({ monitor, locked, body, dossier, browse, tail, ready, hud: hud.content.includes('(?![A-Za-z])'), vals: vals.filter(v => /ready|LOCKED|DOSSIER|water|learned|Goal|Fire/.test(v)) }));
         delete globalThis[key];
     }
+    {
+        // CV-2：升级结构里的冒号主题（无箭头/无数值变化、Unlock 前缀、单词主题）单独登记，普通 Title: Description 不拆分，且旧键与只放回译文不错配
+        const key = '__ADDON_I18N_TEST_CV2_TOPICS__';
+        delete globalThis[key];
+        const opt = { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button']), colonPrefix: true };
+        const src = [
+            'import { ActionFormData } from "@minecraft/server-ui";',
+            'const step = (stat, value, label, event, target) => ({ stat, value, label, event, target });',
+            'function upgrade(text) { return text; }',
+            'const PROFILES = {',
+            '  shrink: {',
+            '    base: { size: 0, slowFall: 0, micro: 0 },',
+            '    upgrades: [',
+            '      step("size", 1, "Small form: 70% → 45% of normal size", "small_distance", 180),',
+            '      step("slowFall", 1, "Soft Landing: gain Slow Falling in small and micro forms", "small_distance", 320),',
+            '      step("micro", 1, "Micro Form: shrink again to 10% size with 4 maximum health", "small_distance", 600),',
+            '    ],',
+            '  },',
+            '  enlarge: {',
+            '    base: { jump: 0, stomp: 0, colossal: 0, pin: 0, execute: 0, ring: 0, tier: 0 },',
+            '    upgrades: [',
+            '      step("jump", 1, "Heavy Bound: gain Jump Boost I while enlarged", "giant_distance", 250),',
+            '      step("stomp", 1, "Impact Landing: 1-block falls hit 1 visible target within 3 blocks for 3 damage (3s recovery)", "giant_distance", 520),',
+            '      step("colossal", 1, "Colossal Form: enlarge again to 6x size with 48 upright maximum health (24 hearts)", "power_hits", 24),',
+            '      step("pin", 20, "Unlock Pressure Pin: three consecutive damaging pulses apply Slowness 1", "pm_streaks", 8),',
+            '      step("pin", 30, "Ignored Second Pin: later upgrade for same stat should not be extracted", "pm_streaks", 16),',
+            '      { stat: "execute", value: 0.1, label: "Finisher: targets at 10% health or lower take remaining health", event: "hits", target: 18 },',
+            '      step("ring", 20, "Unlock Repulsion Ring: repel nearby attackers after a blocked hit", "ff_pressure", 10),',
+            '      step("tier", 2, "Tier 2 Boost: should be skipped because topic has digit", "hits", 10),',
+            '    ],',
+            '  },',
+            '};',
+            'const note = "Story Hint: speak to the guard at dawn";',
+            'const fake = upgrade("Normal Title: plain description without arrow");',
+            'export function statContext(k, profile) {',
+            '  const label = profile.upgrades.find(u => u.stat === k)?.label;',
+            '  if (!label || !label.includes(":")) return "";',
+            '  const topic = label.slice(0, label.indexOf(":")).trim();',
+            '  return /\\d|→/.test(topic) ? "" : "Applies to: " + topic.replace(/^Unlock /, "") + ".";',
+            '}',
+            'export function show(p, msg) { new ActionFormData().body(msg).show(p); }',
+            'export const keep = [PROFILES, note, fake];',
+            ''
+        ].join('\n');
+        const helpSrc = [
+            'const families = { ring: "Repulsion Ring", cross: "Crossed Sear", drag: "pulling or slowing" };',
+            'const suffixes = { Range: "Maximum distance in blocks used by {x}." };',
+            'export function explain(p, k) { return suffixes.Range.replaceAll("{x}", families[k]); }',
+            ''
+        ].join('\n');
+        const ctx = new NS.ExtractContext({ splitNewlines: false });
+        const out = NS.processScript(src, 'BP/scripts/masteryProfiles.js', ctx, opt);
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        const end = out.content.indexOf('// ---- end i18n runtime ----');
+        const rt = new Function(out.content.slice(0, end).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const rawWords = (r) => {
+            const hit = [];
+            const walk = (n) => {
+                if (!n) return;
+                if (Array.isArray(n)) { n.forEach(walk); return; }
+                if (typeof n.text === 'string' && /\p{L}/u.test(n.text.replace(/\u00a7./g, ''))) hit.push(n.text);
+                if (n.with) walk(n.with);
+                if (n.rawtext) n.rawtext.forEach(walk);
+            };
+            walk(r);
+            return hit;
+        };
+        const expected = ['Colossal Form', 'Heavy Bound', 'Impact Landing', 'Micro Form', 'Soft Landing', 'Pressure Pin', 'Finisher'];
+        const missingVals = expected.filter(t => !vals.includes(t));
+        const runtimeMiss = expected.filter(t => {
+            const res = rt.M(`Applies to: ${t}.`);
+            return !res || !res.rawtext || rawWords(res).some(w => w.includes(t) || /Applies/.test(w));
+        });
+        check('CV-2：升级结构里的招式主题、Unlock 剥离与单词主题均被提取并在 Applies to 运行时翻译',
+            missingVals.length === 0 && runtimeMiss.length === 0 && vals.includes('Small form'),
+            JSON.stringify({ missingVals, runtimeMiss }));
+        const falsePos = ['Story Hint', 'Normal Title', 'Ignored Second Pin', 'Tier 2 Boost'].filter(t => vals.includes(t));
+        check('  └ 反例：普通 Title: Description、同名普通函数、同 stat 后续项及含数字前缀不被额外拆分',
+            falsePos.length === 0,
+            JSON.stringify({ falsePos }));
+        // 流水线端到端：只放回旧 zh_CN.lang（无 en_US.lang，不含新增 word 键）时，已有 str 键不变且不抢占后续文件键
+        const runPack = async (zhLang) => {
+            const memFiles = new Map([
+                ['BP/manifest.json', JSON.stringify({ format_version: 2, header: { name: 'T', description: 'T', uuid: '11111111-1111-1111-1111-111111111111', version: [1, 0, 0] }, modules: [{ type: 'script', language: 'javascript', uuid: '22222222-2222-2222-2222-222222222222', version: [1, 0, 0], entry: 'scripts/masteryProfiles.js' }] })],
+                ['RP/manifest.json', JSON.stringify({ format_version: 2, header: { name: 'T', description: 'T', uuid: '33333333-3333-3333-3333-333333333333', version: [1, 0, 0] }, modules: [{ type: 'resources', uuid: '44444444-4444-4444-4444-444444444444', version: [1, 0, 0] }] })],
+                ['BP/scripts/masteryProfiles.js', src],
+                ['BP/scripts/masteryStatHelp.js', helpSrc],
+            ]);
+            if (zhLang) memFiles.set('RP/texts/zh_CN.lang', zhLang);
+            const memFs = {
+                list: () => [...memFiles.keys()],
+                readText: async (p) => memFiles.get(p),
+                readBinary: async () => null,
+                writeText: async (p, c) => { memFiles.set(p, c); },
+            };
+            await NS.runPipeline(memFs, { sourceLang: 'en_US', targetLangs: ['zh_CN'], processScripts: true, injectRuntime: true, splitNewlines: false });
+            return { en: NS.parseLang(memFiles.get('RP/texts/en_US.lang') || ''), zh: NS.parseLang(memFiles.get('RP/texts/zh_CN.lang') || ''), mp: memFiles.get('BP/scripts/masteryProfiles.js') };
+        };
+        const fresh = await runPack(null);
+        // 构造只含旧 str 键（不含新增 script.masteryProfiles.word*）的 zh_CN.lang
+        const oldZhLines = ['## ==== addon-i18n ===='];
+        for (const [k, v] of fresh.en) {
+            if (/^script\.masteryProfiles\.word/.test(k)) continue;
+            oldZhLines.push(`${k}=ZH_${v}`);
+        }
+        const pb = await runPack(oldZhLines.join('\n'));
+        const keyOfEn = (map, text) => [...map.entries()].find(([, v]) => v === text)?.[0];
+        let mismatch = 0;
+        for (const [k, v] of fresh.en) {
+            if (/^script\.masteryProfiles\.word/.test(k)) continue;
+            if (pb.en.get(k) !== v || pb.zh.get(k) !== `ZH_${v}`) mismatch++;
+        }
+        const repKey = keyOfEn(pb.en, 'Repulsion Ring');
+        const colKey = keyOfEn(pb.en, 'Colossal Form');
+        check('  └ 键稳定性：已有 str 键与后续文件键不变，只放回译文时零错配',
+            mismatch === 0 && /^script\.masteryStatHelp\./.test(repKey || '') && /^script\.masteryProfiles\.word/.test(colKey || '') && pb.mp.includes('Colossal Form'),
+            JSON.stringify({ mismatch, repKey, colKey }));
+        // 只加载 masteryProfiles.js（不加载 masteryStatHelp.js），跨文件复用的 Repulsion Ring 在运行时仍能命中原键
+        const mpEnd = pb.mp.indexOf('// ---- end i18n runtime ----');
+        const rtOnlyMp = new Function(pb.mp.slice(0, mpEnd).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const repRes = rtOnlyMp.M('Applies to: Repulsion Ring.');
+        const repJson = JSON.stringify(repRes);
+        check('  └ 加载顺序无关：仅加载 masteryProfiles 时，跨文件复用的主题仍命中原键且无英文残留',
+            repRes && repJson.includes(repKey) && !rawWords(repRes).some(w => /Repulsion|Applies/.test(w)),
+            JSON.stringify({ repKey, repRes }));
+        const topicOnly = NS.processScript(
+            'const upgrades = [{ stat: "guard", value: 1, label: "Guard Stance: improve defense" }];',
+            'BP/scripts/upgrades.js', new NS.ExtractContext({ splitNewlines: false }), { ...opt, deferTopics: true });
+        check('  └ 仅有延后主题的脚本仍生成可登记的运行时',
+            topicOnly.changed && topicOnly.deferredTopics.includes('Guard Stance') &&
+                topicOnly.content.includes('// ---- end i18n runtime ----'));
+        delete globalThis[key];
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

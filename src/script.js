@@ -3131,6 +3131,92 @@
             if (ctx.isKey(v) || exact.some(([x]) => x === v)) return;
             exact.push([v, ctx.alloc(keyBase(hint), v, meta(hint))]);
         };
+        // 升级配置数组里的冒号主题（statContext 按 label.slice(0, label.indexOf(":")) + replace(/^Unlock /, "") 单独显示）：
+        // 仅认可靠 AST 结构（返回含 stat + label + value/event/target 对象的工厂函数调用，或直接对象字面量），不按通用函数名全局提取；
+        // 按数组内同一 stat 的首次出现提取（对应 upgrades.find(u => u.stat === key)），保留现有 colonPrefix 规则。
+        // 流水线模式下通过 opts.deferTopics 延后到所有脚本提取完再分配键，避免跨文件 ctx.dedupe 抢占后续文件的已有键。
+        const deferredTopics = [];
+        if (opts.colonPrefix) {
+            const factoryCount = new Map();
+            const factorySpec = new Map();
+            const fnInfo = (n) => {
+                if (n.type === 'FunctionDeclaration' && n.id) return [n.id.name, n];
+                if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && /Function/.test(n.init.type)) return [n.id.name, n.init];
+                return null;
+            };
+            walk(ast, (n) => {
+                const info = fnInfo(n);
+                if (!info) return;
+                const [name, fn] = info;
+                factoryCount.set(name, (factoryCount.get(name) || 0) + 1);
+                let body = fn.body;
+                if (body && body.type === 'BlockStatement') {
+                    body = (body.body.length === 1 && body.body[0].type === 'ReturnStatement') ? body.body[0].argument : null;
+                }
+                if (!body || body.type !== 'ObjectExpression') return;
+                const props = new Map();
+                for (const p of body.properties) { const k = propKey(p); if (k) props.set(k, p.value); }
+                if (!props.has('stat') || !props.has('label')) return;
+                if (!props.has('value') && !props.has('event') && !props.has('target')) return;
+                const lv = props.get('label'), sv = props.get('stat');
+                if (!lv || lv.type !== 'Identifier') return;
+                const lIdx = fn.params.findIndex(pa => pa.type === 'Identifier' && pa.name === lv.name);
+                const sIdx = sv && sv.type === 'Identifier' ? fn.params.findIndex(pa => pa.type === 'Identifier' && pa.name === sv.name) : -1;
+                if (lIdx >= 0) factorySpec.set(name, { lIdx, sIdx });
+            });
+            for (const [name, cnt] of factoryCount) if (cnt > 1) factorySpec.delete(name);
+            const readUpgradeEntry = (el) => {
+                if (!el) return null;
+                if (el.type === 'ObjectExpression') {
+                    let stat = null, label = null, hasMeta = false;
+                    for (const p of el.properties) {
+                        if (p.type === 'SpreadElement') {
+                            const inner = readUpgradeEntry(p.argument);
+                            if (inner) { if (!stat) stat = inner.stat; if (!label) label = inner.label; hasMeta = true; }
+                        } else {
+                            const k = propKey(p);
+                            if (k === 'stat' && isStr(p.value)) stat = p.value.value;
+                            if (k === 'label' && isStr(p.value)) label = p.value.value;
+                            if (k === 'value' || k === 'event' || k === 'target') hasMeta = true;
+                        }
+                    }
+                    return (stat && label && hasMeta) ? { stat, label } : null;
+                }
+                if (el.type === 'CallExpression' && el.callee.type === 'Identifier' && factorySpec.has(el.callee.name)) {
+                    const { lIdx, sIdx } = factorySpec.get(el.callee.name);
+                    const lArg = el.arguments[lIdx], sArg = sIdx >= 0 ? el.arguments[sIdx] : null;
+                    const label = isStr(lArg) ? lArg.value : null;
+                    const stat = isStr(sArg) ? sArg.value : null;
+                    return label ? { stat, label } : null;
+                }
+                return null;
+            };
+            walk(ast, (n) => {
+                if (n.type !== 'ArrayExpression' || inDebug(n)) return;
+                const seenStats = new Set();
+                for (const el of n.elements) {
+                    const entry = readUpgradeEntry(el);
+                    if (!entry) continue;
+                    if (entry.stat) {
+                        if (seenStats.has(entry.stat)) continue;
+                        seenStats.add(entry.stat);
+                    }
+                    const lbl = entry.label;
+                    const ci = lbl.indexOf(':');
+                    if (ci < 0) continue;
+                    const rawTopic = lbl.slice(0, ci).replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, '');
+                    if (!rawTopic || /[\d\u2192\n]/.test(rawTopic)) continue;
+                    const topic = rawTopic.replace(/^Unlock /, '').trim();
+                    if (!topic || topic.length < 2 || topic.length > 64 || !looksLikeText(topic, 'loose') || isCodeNoise(topic)) continue;
+                    if (opts.deferTopics) {
+                        if (!injectRuntime) continue;
+                        if (!ctx.isKey(topic) && !exact.some(([x]) => x === topic) && !deferredTopics.includes(topic)) deferredTopics.push(topic);
+                    } else {
+                        forceText(topic);
+                    }
+                }
+            });
+        }
         // { "Adaptation": 1 }：能力名是对象的键，页面标题和 "Adaptation (continued)" 用的是这个名字
         walk(ast, (n) => {
             if (n.type !== 'Property' || n.computed || !isStr(n.key) || !n.value || n.value.type !== 'Literal') return;
@@ -3344,7 +3430,7 @@
 
         // ---- 生成输出 ----
         if (!usesGL) srcPats.length = 0;
-        const hasRegistrations = exact.length > 0 || patterns.length > 0 || srcPats.length > 0;
+        const hasRegistrations = exact.length > 0 || patterns.length > 0 || srcPats.length > 0 || deferredTopics.length > 0;
         if (overrides.size === 0 && !hasRegistrations) return { content: source, changed: false };
 
         let body = renderOrig(ast);
@@ -3400,7 +3486,7 @@
             body = body.slice(nl + 1);
         }
         const content = head + (prelude ? `// ---- i18n runtime (auto-generated) ----\n${prelude}// ---- end i18n runtime ----\n` : '') + body;
-        return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length, tables: tableEntries } };
+        return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length, tables: tableEntries }, deferredTopics, rtName: RT, keyBaseWord: keyBase('word') };
     }
 
     /**

@@ -10,6 +10,12 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 - Opening the Compound V mastery book could trigger the Watchdog while the runtime repeatedly scanned the script dictionary for each button. The runtime now filters dictionary entries by prefix, matches pattern literals in order, and translates only the arguments it uses.
 
+## 2026.11.23-99 (2026-11-23)
+
+### Fixed
+
+- Topics before a colon in upgrade descriptions can now be translated on their own. Scripts register shared topics with their existing language keys, so the upgrade screen can translate them regardless of script load order. ([#163](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/163))
+
 ## 2026.11.23-98 (2026-11-23)
 
 ### Fixed
