@@ -3432,26 +3432,44 @@
         // 在既有提取之后登记，流水线中延后到全部脚本处理完成，避免移动既有键。
         const bindings = new Map();
         const templateTables = new Map();
-        const bind = (n, declaration) => {
-            if (!n) return;
-            if (n.type === 'Identifier') {
-                bindings.set(n.name, bindings.has(n.name) ? null : declaration);
-            } else if (n.type === 'AssignmentPattern') bind(n.left, declaration);
-            else if (n.type === 'RestElement') bind(n.argument, declaration);
-            else if (n.type === 'ArrayPattern') n.elements.forEach(x => bind(x, declaration));
-            else if (n.type === 'ObjectPattern') n.properties.forEach(x => bind(x.value || x, declaration));
+        const semiSplitTables = new Set();
+        const splitBindings = new Map();
+        const scopeOf = (node, blockScoped) => {
+            for (let scope = node.parent; scope; scope = scope.parent) {
+                if (scope.type === 'Program' || scope.type === 'StaticBlock' || /Function/.test(scope.type)) return scope;
+                if (blockScoped && /^(?:BlockStatement|ForStatement|ForInStatement|ForOfStatement|SwitchStatement)$/.test(scope.type)) return scope;
+            }
+            return ast;
         };
-        if (/\breplace(?:All)?\b/.test(src)) {
+        const bind = (n, declaration, scope, countGlobal = true) => {
+            if (!n) return;
+            const child = x => bind(x, declaration, scope, countGlobal);
+            if (n.type === 'Identifier') {
+                if (countGlobal) bindings.set(n.name, bindings.has(n.name) ? null : declaration);
+                if (scope) {
+                    let names = splitBindings.get(scope);
+                    if (!names) splitBindings.set(scope, names = new Map());
+                    names.set(n.name, names.has(n.name) ? null : declaration);
+                }
+            } else if (n.type === 'AssignmentPattern') child(n.left);
+            else if (n.type === 'RestElement') child(n.argument);
+            else if (n.type === 'ArrayPattern') n.elements.forEach(child);
+            else if (n.type === 'ObjectPattern') n.properties.forEach(x => child(x.value || x));
+        };
+        const hasReplace = /\breplace(?:All)?\b/.test(src);
+        const hasSemiSplit = src.includes('split');
+        if (hasReplace || hasSemiSplit) {
             walk(ast, n => {
-                if (n.type === 'VariableDeclarator') bind(n.id, n);
+                if (n.type === 'VariableDeclarator') bind(n.id, n, hasSemiSplit ? scopeOf(n, n.parent.kind !== 'var') : null);
                 else if (/Function/.test(n.type) && n.params) {
-                    bind(n.id, n);
-                    n.params.forEach(p => bind(p, n));
-                } else if (n.type === 'ClassDeclaration') bind(n.id, n);
-                else if (n.type === 'CatchClause') bind(n.param, n);
-                else if (/^Import.*Specifier$/.test(n.type)) bind(n.local, n);
+                    bind(n.id, n, hasSemiSplit ? (n.type === 'FunctionDeclaration' ? scopeOf(n, true) : n) : null);
+                    n.params.forEach(p => bind(p, n, hasSemiSplit ? n : null));
+                } else if (n.type === 'ClassDeclaration') bind(n.id, n, hasSemiSplit ? scopeOf(n, true) : null);
+                else if (hasSemiSplit && n.type === 'ClassExpression') bind(n.id, n, n, false);
+                else if (n.type === 'CatchClause') bind(n.param, n, hasSemiSplit ? n : null);
+                else if (/^Import.*Specifier$/.test(n.type)) bind(n.local, n, hasSemiSplit ? ast : null);
             });
-            walk(ast, n => {
+            if (hasReplace) walk(ast, n => {
                 if (n.type !== 'ForOfStatement' || inDebug(n)) return;
                 const { left, right } = n;
                 if (left.type !== 'VariableDeclaration' || left.kind !== 'const' || right.type !== 'CallExpression') return;
@@ -3484,6 +3502,37 @@
                     placeholders.add(ph.value);
                 });
             });
+            // 只接受 (const表[key] ?? ...).split(";")[0] 形式截取的文本表（如 OBJECTIVES），提取分号前半段到独立 split 键系列
+            if (hasSemiSplit) walk(ast, n => {
+                if (n.type !== 'MemberExpression' || !n.computed || n.property.type !== 'Literal' || n.property.value !== 0 || inDebug(n)) return;
+                const call = n.object;
+                if (!call || call.type !== 'CallExpression' || call.callee.type !== 'MemberExpression' ||
+                    propName(call.callee) !== 'split' || call.arguments.length !== 1 ||
+                    !isStr(call.arguments[0]) || call.arguments[0].value !== ';') return;
+                const cands = [];
+                const collectTables = (expr) => {
+                    if (!expr) return;
+                    if (expr.type === 'ParenthesizedExpression') { collectTables(expr.expression); return; }
+                    if (expr.type === 'LogicalExpression' && (expr.operator === '??' || expr.operator === '||')) {
+                        collectTables(expr.left);
+                        const value = expr.left;
+                        if (value.type !== 'Literal' || (expr.operator === '??' ? value.value == null : !value.value)) {
+                            collectTables(expr.right);
+                        }
+                        return;
+                    }
+                    if (expr.type === 'MemberExpression' && expr.computed && !expr.optional &&
+                        expr.object.type === 'Identifier' && expr.property.type === 'Identifier') cands.push(expr.object);
+                };
+                collectTables(call.callee.object);
+                for (const table of cands) {
+                    let scope = table.parent;
+                    while (scope && !splitBindings.get(scope)?.has(table.name)) scope = scope.parent;
+                    const declaration = splitBindings.get(scope)?.get(table.name);
+                    if (declaration?.type === 'VariableDeclarator' && declaration.parent.kind === 'const' &&
+                        declaration.init?.type === 'ObjectExpression' && !inDebug(declaration)) semiSplitTables.add(declaration);
+                }
+            });
         }
         for (const [declaration, tplPhs] of templateTables) {
             const props = declaration.init.properties.filter(p => p.type === 'Property' && !p.computed && isStr(p.value));
@@ -3500,6 +3549,24 @@
                     if (!ctx.isKey(k) && !exact.some(([x]) => x === k) && !deferredTopics.some(x => (Array.isArray(x) ? x[0] : x) === k)) deferredTopics.push([k, keyBase('suffix')]);
                 } else {
                     forceText(k, 'suffix');
+                }
+            }
+        }
+        for (const declaration of semiSplitTables) {
+            const props = declaration.init.properties.filter(p => p.type === 'Property' && !p.computed && isStr(p.value));
+            if (props.length < 4) continue;
+            const sentences = props.filter(p => looksLikeText(p.value.value, 'strict'));
+            if (sentences.length < props.length * 0.6) continue;
+            for (const p of props) {
+                const val = p.value.value, semi = val.indexOf(';');
+                if (semi < 0) continue;
+                const prefix = val.slice(0, semi).trim();
+                if (!prefix || prefix.length < 4 || !looksLikeText(prefix, 'strict') || isCodeNoise(prefix)) continue;
+                if (opts.deferTopics) {
+                    if (!injectRuntime) continue;
+                    if (!ctx.isKey(prefix) && !exact.some(([x]) => x === prefix) && !deferredTopics.some(x => (Array.isArray(x) ? x[0] : x) === prefix)) deferredTopics.push([prefix, keyBase('split')]);
+                } else {
+                    forceText(prefix, 'split');
                 }
             }
         }
