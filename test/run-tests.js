@@ -1941,6 +1941,15 @@ console.log(JSON.stringify(calls));`;
         const moved = shifted.alloc('script.big.str', 'Time: %1$s (0)', { file: 'x', kind: 'script' });
         const dt = Date.now() - t0;
         check('只放回译文的大系列按序号认领，不会逐条扫完整串', bad === 0 && moved === 'script.big.str' && dt < 2000, JSON.stringify({ bad, moved, dt, reused: ctx.reusedPrev }));
+        const cjk = new NS.ExtractContext({ knownKeys, existingValues: new Map([...existingValues].map(([k, vs]) => [k, new Set([...vs].map(v => '雷'.repeat(80) + v))])), keyLangs, prevKeys, splitNewlines: false, recordSeries: true });
+        const t1 = Date.now();
+        for (let i = 0; i < n; i++) {
+            const text = i % 17 === 0 ? `Time: %1$s (${i})` : `Quest note number ${i} stays here`;
+            cjk.alloc('script.big.str', text, { file: 'x', kind: 'script' });
+        }
+        NS.alignSeries(cjk);
+        const alignDt = Date.now() - t1;
+        check('长中文译文的大系列对齐不会逐格做词关联', alignDt < 1500, String(alignDt));
     }
     {
         // 相同英文按字典路径分成多条。只把译文 lang 放回原文件树时，译文前面的短记号不能让序号整体错位。
