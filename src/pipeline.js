@@ -546,10 +546,13 @@
         // 同时仍写入当前脚本的 reg()，确保即使其他脚本未加载或加载顺序不同，运行时查表也不会缺失
         for (const item of deferredScriptTopics) {
             const extra = [];
-            for (const topic of item.topics) {
+            for (const entry of item.topics) {
+                const topic = Array.isArray(entry) ? entry[0] : entry;
+                const suffix = Array.isArray(entry);
+                const base = suffix ? entry[1] : item.keyBaseWord;
                 if (ctx.isKey(topic)) continue;
                 const existing = ctx.dedupe.get('script\0' + topic);
-                const k = existing || ctx.alloc(item.keyBaseWord, topic, { file: item.file, kind: 'script', scope: 'script', hint: 'word' });
+                const k = existing || ctx.alloc(base, topic, { file: item.file, kind: 'script', scope: 'script', hint: suffix ? 'suffix' : 'word' });
                 extra.push([topic, k]);
             }
             if (!extra.length) continue;

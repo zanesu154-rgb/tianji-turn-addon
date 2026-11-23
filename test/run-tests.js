@@ -2831,6 +2831,132 @@ export function show(player, item) {
                 topicOnly.content.includes('// ---- end i18n runtime ----'));
         delete globalThis[key];
     }
+    {
+        // CV-1：说明模板表（如 suffixes）里带 {x} 占位符的首字母大写键名（Depth/Distance/Ticks/Rings/Rise）单独提取并在 cover() 运行时翻译；
+        // 反例（普通配置对象、全大写常量对象、不含 {x} 的键）不误提取，且旧 str_*/word_* 键与只放回译文零错配
+        const key = '__ADDON_I18N_TEST_CV1_SUFFIX_KEYS__';
+        delete globalThis[key];
+        const opt = { injectRuntime: true, runtimeKey: key, formSinksEnabled: true, collidingMethods: new Set(['title', 'body', 'button']) };
+        const src = [
+            'const help = {',
+            '  radius: "How far the effect reaches from its middle.",',
+            '  damage: "How much health a hit takes before armour and bonuses.",',
+            '  duration: "How long the move lasts.",',
+            '  cooldown: "The starting wait before using the move again.",',
+            '};',
+            'const families = {',
+            '  crater: "terrain crater",',
+            '  hold: "held target",',
+            '  pull: "grab pull",',
+            '  crown: "fang crown",',
+            '  wave: "rising wave",',
+            '};',
+            'const suffixes = {',
+            '  Radius: "Distance from the centre to the edge of {x}, in blocks.",',
+            '  Depth: "Maximum downward depth in blocks of {x}.",',
+            '  Distance: "Distance that must be reached or maintained for {x}.",',
+            '  Ticks: "How long {x} lasts; 20 game ticks equal one second.",',
+            '  Rings: "Number of expanding rings produced by {x}.",',
+            '  Rise: "Upward movement speed targeted by {x}.",',
+            '  PlainKey: "A plain note without any template placeholder.",',
+            '};',
+            'const CONFIG = {',
+            '  Mode: "Default server mode for normal players.",',
+            '  Theme: "Dark blue panel style for menus.",',
+            '  Layout: "Compact two-column form layout.",',
+            '  Region: "Primary region used for matching.",',
+            '};',
+            'const unrelated = {',
+            '  Notice: "The notice describes {x} for the player.",',
+            '  Warning: "The warning gives more details about {x}.",',
+            '  Reminder: "The reminder shows the owner of {x}.",',
+            '  Summary: "The summary explains the effects of {x}.",',
+            '};',
+            'const CAPS = {',
+            '  DEPTH: "Maximum downward depth in blocks of {x}.",',
+            '  DISTANCE: "Distance that must be reached for {x}.",',
+            '  TICKS: "How long {x} lasts for {x}.",',
+            '  RINGS: "Number of rings produced by {x}.",',
+            '};',
+            'const SHORT = { Alpha: "{x}", Beta: "{x}", Gamma: "{x}", Delta: "{x}" };',
+            'export function explain(k) {',
+            '  if (help[k]) return help[k];',
+            '  for (const [suffix, tpl] of Object.entries(suffixes)) {',
+            '    if (k.endsWith(suffix)) return tpl.replaceAll("{x}", families[k.slice(0, -suffix.length)] || "");',
+            '  }',
+            '  return unrelated[k] || CONFIG[k] || CAPS[k] || SHORT[k] || null;',
+            '}',
+            ''
+        ].join('\n');
+        const ctx = new NS.ExtractContext({ splitNewlines: false });
+        const out = NS.processScript(src, 'BP/scripts/masteryStatHelp.js', ctx, opt);
+        const vals = [...ctx.entries.values()].map(e => e.value);
+        const end = out.content.indexOf('// ---- end i18n runtime ----');
+        const rt = new Function(out.content.slice(0, end).replace(/^import.*$/mg, '') + '\nreturn __i18n;')();
+        const rawWords = (r) => {
+            const hit = [];
+            const walk = (n) => {
+                if (!n) return;
+                if (Array.isArray(n)) { n.forEach(walk); return; }
+                if (typeof n.text === 'string' && /\p{L}/u.test(n.text.replace(/\u00a7./g, ''))) hit.push(n.text);
+                if (n.with) walk(n.with);
+                if (n.rawtext) n.rawtext.forEach(walk);
+            };
+            walk(r);
+            return hit;
+        };
+        const expectedWords = ['Depth', 'Distance', 'Ticks', 'Rings', 'Rise'];
+        const missingWords = expectedWords.filter(w => !vals.includes(w));
+        const lines = ['Crater Depth: 1', 'Hold Distance: 3', 'Pull Ticks: 20', 'Crown Rings: 2', 'Wave Rise: 4'];
+        const runtimeMiss = lines.filter(line => {
+            const res = rt.M(line);
+            return !res || !res.rawtext || res.rawtext.filter(x => x.translate).length < 2 || rawWords(res).length > 0;
+        });
+        check('CV-1：说明模板表中的首字母大写后缀键 Depth/Distance/Ticks/Rings/Rise 均被提取并在 cover() 运行时翻译',
+            missingWords.length === 0 && runtimeMiss.length === 0,
+            JSON.stringify({ missingWords, runtimeMiss }));
+        const falsePos = ['Mode', 'Theme', 'Layout', 'Region', 'Notice', 'Warning', 'Reminder', 'Summary', 'DEPTH', 'DISTANCE', 'TICKS', 'RINGS', 'PlainKey', 'Alpha', 'Beta'].filter(w => vals.includes(w));
+        check('  └ 反例：未参与替换的同占位符说明表、普通配置、全大写常量及无占位符键不被误提取',
+            falsePos.length === 0,
+            JSON.stringify({ falsePos }));
+        // 旧键及原文来自 v100 对同一夹具的真实输出。只把合成译文交给当前版。
+        const runPack = async (zhLang) => {
+            const memFiles = new Map([
+                ['BP/manifest.json', JSON.stringify({ format_version: 2, header: { name: 'T', description: 'T', uuid: '11111111-1111-1111-1111-111111111111', version: [1, 0, 0] }, modules: [{ type: 'script', language: 'javascript', uuid: '22222222-2222-2222-2222-222222222222', version: [1, 0, 0], entry: 'scripts/masteryStatHelp.js' }] })],
+                ['RP/manifest.json', JSON.stringify({ format_version: 2, header: { name: 'T', description: 'T', uuid: '33333333-3333-3333-3333-333333333333', version: [1, 0, 0] }, modules: [{ type: 'resources', uuid: '44444444-4444-4444-4444-444444444444', version: [1, 0, 0] }] })],
+                ['BP/scripts/masteryStatHelp.js', src],
+            ]);
+            if (zhLang) memFiles.set('RP/texts/zh_CN.lang', zhLang);
+            const memFs = {
+                list: () => [...memFiles.keys()],
+                readText: async (p) => memFiles.get(p),
+                readBinary: async () => null,
+                writeText: async (p, c) => { memFiles.set(p, c); },
+            };
+            await NS.runPipeline(memFs, { sourceLang: 'en_US', targetLangs: ['zh_CN'], processScripts: true, injectRuntime: true, splitNewlines: false });
+            return { en: NS.parseLang(memFiles.get('RP/texts/en_US.lang') || ''), zh: NS.parseLang(memFiles.get('RP/texts/zh_CN.lang') || '') };
+        };
+        const { en: oldEn } = require('./cv1-v100-lang.json');
+        const fresh = await runPack(null);
+        const oldZhLines = oldEn.map(([k, v]) => `${k}=译:${v}`);
+        const pb = await runPack(['## ==== addon-i18n ====', ...oldZhLines].join('\n'));
+        const mismatches = oldEn.filter(([k, v]) =>
+            fresh.en.get(k) !== v || pb.en.get(k) !== v || pb.zh.get(k) !== `译:${v}`);
+        const oldKeys = new Set(oldEn.map(([k]) => k));
+        const oldValues = new Set(oldEn.map(([, v]) => v));
+        const reallocated = [...pb.en].filter(([k, v]) => !oldKeys.has(k) && oldValues.has(v));
+        check('  └ v100 跨版本回填：本次提取、只放回旧译文的新原文及旧译文均沿用既有键',
+            mismatches.length === 0 && reallocated.length === 0, JSON.stringify({ mismatches, reallocated }));
+
+        const keyFor = (entries, word) => [...entries].find(([, value]) => value === word)?.[0];
+        const direct = [...ctx.entries].map(([k, e]) => [k, e.value]);
+        const suffixKeys = expectedWords.map(word => [word, keyFor(direct, word), keyFor(fresh.en, word), keyFor(pb.en, word)]);
+        check('  └ 键分配：直接与流水线延后模式使用相同的 suffix 键，回填后保持一致',
+            suffixKeys.every(([, immediate, deferred, refilled]) =>
+                /^script\.masteryStatHelp\.suffix(?:_\d+)?$/.test(immediate) && immediate === deferred && deferred === refilled),
+            JSON.stringify(suffixKeys));
+        delete globalThis[key];
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
