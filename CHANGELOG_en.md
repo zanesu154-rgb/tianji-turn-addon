@@ -4,6 +4,17 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.23-96 (2026-11-23)
+
+### Fixed
+
+- On the adapter learning monitor, `% learned` swallowed the whole row after newlines were turned into spaces, so the translation of "learned" moved in front of the description and the bar no longer sat on its own line. A row that already translates on its own keeps the original line break
+- A color code in front of a challenge goal let `with … selected` swallow `- Goal:`, which came out as the ability name first and the goal still in English. The line is matched again with the color code removed, so the goal and `blocks swum underwater` translate separately
+- The power archive collapses repeated spaces, so `DOSSIER 01 / ALL POWERS` and `Scroll to browse powers` missed and only the last "powers" was replaced. The same pattern is also stored with the spaces collapsed
+- When a dossier page starts in the middle of a paragraph, each sentence is registered on its own. A finished sentence on that line translates; a sentence that continues on the next page stays as written
+- Action-bar `ready` and the learning monitor's `LOCKED` / `RETAINED` are registered. A status word after a bar still matches when nothing else on that line is a word
+- The action bar cuts a repeated ability name off the front of a message, and `Blink` was cutting into `Blinked`, leaving `ed 5 blocks!`. The ability name now has to end on a word boundary
+
 ## 2026.11.23-95 (2026-11-23)
 
 ### Fixed

@@ -1004,6 +1004,16 @@
         }
       }
     }
+    // 整句前面还有颜色码（"§f- Goal: …"）。以占位符开头的句式不等颜色码，会把 "- Goal:" 吞进参数。
+    // 去掉两端颜色码再对一次，留下的原文更少就用那条。
+    if (r && residue(r) > 0 && mm && mm[2] && mm[2] !== s) {
+      const inner = pat(mm[2]);
+      if (inner && residue(inner) < residue(r)) {
+        r = inner.slice();
+        if (mm[1]) r.unshift({ text: mm[1] });
+        if (mm[3]) r.push({ text: mm[3] });
+      }
+    }
     if (glued && (!r || residue(glued) < residue(r))) return glued;
     if (r) return r;
     // "Poison … · 30s"：奖品说明后面再拼持续时间。整句对不上时，先翻译前面的说明。
@@ -1025,6 +1035,18 @@
     if (plus) {
       const head = one(plus[1]);
       if (head && head.some((e) => e && e.translate)) return [{ text: "+ §r" }, ...head];
+    }
+    // "§8|||||||||| §7LOCKED"：进度条后面的状态词。前面没有单词时，把这个词换成译文。
+    const tailWord = /((?:\\u00a7.)*)([A-Za-z]{4,16})$/.exec(s);
+    if (tailWord && m.get(tailWord[2])) {
+      const pre = s.slice(0, s.length - tailWord[0].length);
+      if (!/\\p{L}/u.test(pre.replace(/\\u00a7./g, ""))) {
+        const els = [];
+        if (pre) els.push({ text: pre });
+        if (tailWord[1] && !pre.endsWith(tailWord[1])) els.push({ text: tailWord[1] });
+        els.push({ translate: m.get(tailWord[2]) });
+        return els;
+      }
     }
     if (long) return null;
     // 前面带序号（"01  Unstable Sneeze · Practice 1"）：序号原样，后面的整句再找
@@ -1079,6 +1101,25 @@
         if (w1) r2.unshift({ text: w1 });
         if (w3) r2.push({ text: w3 });
         return r2;
+      }
+    }
+    // 同一行里有两句（折页把 "It cannot fire in water. Its reach…" 留在一行）。整行对不上时，先翻译以句号收尾的那句。
+    // 多行正文交给逐行匹配，避免把标题和第一句切成一段。
+    if (s.indexOf("\\n") < 0 && /(?<=\\.)\\s+(?=[A-Z])/.test(s)) {
+      const bits = s.split(/(?<=\\.)\\s+(?=[A-Z])/);
+      if (bits.length > 1) {
+        const els = [];
+        let hit = false;
+        for (let i = 0; i < bits.length; i++) {
+          if (i) els.push({ text: " " });
+          const bit = bits[i];
+          const kk = m.get(bit);
+          if (kk) { els.push({ translate: kk }); hit = true; continue; }
+          const sub = pat(bit);
+          if (sub && residue(sub) < residue([{ text: bit }])) { els.push(...sub); hit = true; }
+          else els.push({ text: bit });
+        }
+        if (hit && residue(els) < residue([{ text: s }])) return els;
       }
     }
     return patF(s) || (mm && mm[2] !== s && mm[2] && patF(mm[2])) || runs(s) || list(s);
@@ -1296,7 +1337,15 @@
             if (j === i) continue;
             const joined = ls.slice(i, j + 1).join(" ").replace(/[ \\t]{2,}/g, " ");
             const hitJ = exactRun(joined) || one(joined);
-            if (hitJ && residue(hitJ) === 0) { span = hitJ; spanJ = j; }
+            if (hitJ && residue(hitJ) === 0) {
+              // 每一行自己就能译完时，不要用跨行的短句式把它们粘成一行（学习监控的进度条）。
+              let apart = true;
+              for (let k = i; k <= j; k++) {
+                const part = one(String(ls[k]));
+                if (!part || residue(part) !== 0) { apart = false; break; }
+              }
+              if (!apart) { span = hitJ; spanJ = j; }
+            }
           }
           if (span) { hit = true; els.push(...span); i = spanJ; continue; }
           const l = ls[i];
@@ -1306,8 +1355,17 @@
         }
         return hit;
       };
-      // 把换行还原成空格再匹配，是为了对上被按宽度折行的同一句。对上以后参数里还剩一大段原文，说明是整页被句式吞掉，改为逐行。
-      if (s.indexOf("\\u00a7r\\n") < 0) { const u = un(s); if (u && residue(u) <= 40) r = u; }
+      // 把换行还原成空格再匹配，是为了对上被按宽度折行的同一句。
+      // "% learned" 这类以占位符开头的短句式会在换行变成空格后吞掉整页，学习监控的进度条就被拉到说明同一行。
+      // 逐行留下的原文不多于整页匹配时，保留作者原来的换行。
+      if (s.indexOf("\\u00a7r\\n") < 0) {
+        const u = un(s);
+        const lineEls = [];
+        const lineHit = lines(s, lineEls, false);
+        const ur = u ? residue(u) : 1e9, lr = lineHit ? residue(lineEls) : 1e9;
+        if (lineHit && lr <= ur) r = lineEls;
+        else if (u && ur <= 40) r = u;
+      }
       if (!r) {
         // 多条拼在一起的（动作栏 "§r\\n" 分隔）：逐条找，每条再试还原换行、逐行
         const blocks = s.split("\\u00a7r\\n");
@@ -1848,7 +1906,14 @@
     }
 
     function processScript(source, file, ctx, opts = {}) {
-        const info = opts.info || collectScriptInfo(source);
+        // 动作栏先按技能名切掉消息开头。第二条正则没有词边界，"Blink" 会切进 "Blinked"，玩家看到 "ed 5 blocks!"。
+        let hudBoundary = false;
+        if (source.includes('withoutRepeatedAbility')) {
+            const next = source.replace(/(\[✦✖⚡\]\\\\s\*"\+escaped\+")\\\\s\*/g, '$1(?![A-Za-z])\\\\s*');
+            hudBoundary = next !== source;
+            source = next;
+        }
+        const info = hudBoundary ? collectScriptInfo(source) : (opts.info || collectScriptInfo(source));
         if (!info.ok) {
             ctx.warn(`${file}: 脚本解析失败（${info.error}），已跳过`);
             return { content: source, changed: false };
@@ -2784,7 +2849,14 @@
                 const hud = /^(?:\u00a7.)+\s*\[[A-Za-z][A-Za-z0-9 ]{1,24}\]$/.test(String(line).trim());
                 // "(continued)"：续页标题的后缀，去掉括号后只剩一个小写词
                 const parenWord = /^\([A-Za-z][A-Za-z ]{2,24}\)$/.test(String(line).trim());
-                if (!looksLikeText(line, 'strict') && !hud && !parenWord) continue;
+                // " §7ready"、"LOCKED"、"RETAINED"：动作栏和学习监控的状态。去掉颜色码后只剩一个词，strict 不收。
+                const statusBare = String(line).replace(/\u00a7./g, '').trim();
+                const statusWord = /^(?:ready|LOCKED|RETAINED)$/.test(statusBare);
+                if (!looksLikeText(line, 'strict') && !hud && !parenWord && !statusWord) continue;
+                if (statusWord) {
+                    if (!ctx.isKey(statusBare) && !exact.some(([x]) => x === statusBare)) exact.push([statusBare, ctx.alloc(keyBase('word'), statusBare, meta('word'))]);
+                    continue;
+                }
                 if (ctx.isKey(line)) continue;
                 // WaterGun、MeleeAttack 这种没有空格的驼峰词：代码里的标识符
                 if (/^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+$/.test(line.trim())) continue;
@@ -2806,6 +2878,12 @@
                 if (multi) { exact.push([line, k]); if (t !== line) exact.push([t, k]); }
                 // 单行首尾空格（如 " Starter kit added."）：lang 里存去空格的文字，运行时找到后再把空格补回
                 else exact.push([t, k]);
+                // 档案一页放不下整段，页尾从句子开头显示。整段对不上时，以句号分开的句子还能对上。
+                if (!fromSplit && t.length > 48 && /\. [A-Z]/.test(t)) {
+                    for (const part of t.split(/(?<=\.)\s+(?=[A-Z])/)) {
+                        if (part && part !== t) registerExact(part, true);
+                    }
+                }
                 // "句子\n" 被拼进多行正文：显示时换行已经被拆掉，按去掉首尾空白的每一行再登记
                 if (line.includes('\n')) {
                     for (const part of line.split(/\r?\n/)) {
@@ -2873,6 +2951,11 @@
         };
 
         const UNIT_WORD = /^(?:seconds|second|blocks|block|hearts|heart|health|resource|energy|degrees|targets|rays)$/;
+        const pushPattern = (key, lits) => {
+            patterns.push([key, lits]);
+            // 档案页把连续空格收成一个（"  /  "、"   |   "）。再记一份收过空格的，折页后的标题才能对上。
+            if (lits.some(s => /[ \t]{2,}/.test(s))) patterns.push([key, lits.map(s => s.replace(/[ \t]{2,}/g, ' '))]);
+        };
         const registerPattern = (parts, relaxed = false) => {
             parts = absorbLiteralPercent(parts);
             if (isKeyTemplate(parts)) return;
@@ -2890,7 +2973,7 @@
                         for (const x of line) { if ('lit' in x) lits[lits.length - 1] += x.lit; else lits.push(''); }
                         if (lits.every(l => !l.trim())) continue;   // 只有引用和变量，没有自己的文字
                         const key = ctx.alloc(keyBase('fmt'), partsToValue(line), meta('fmt'));
-                        patterns.push([key, lits]);
+                        pushPattern(key, lits);
                     }
                     return;
                 }
@@ -2945,7 +3028,7 @@
                     if (!ctx.isKey(u) && !exact.some(([x]) => x === u)) exact.push([u, ctx.alloc(keyBase('str'), u, meta('str'))]);
                 }
                 const key = ctx.alloc(keyBase('fmt'), partsToValue(line), meta('fmt'));
-                patterns.push([key, lits]);
+                pushPattern(key, lits);
                 // 整段正文是一条句式时，显示时往往按行拼起来（还可能先换掉颜色码）。每一行再单独登记，短按钮名才不会把说明吞掉。
                 if (lits.some(s => s.includes('\n'))) {
                     const rows = [[]];
