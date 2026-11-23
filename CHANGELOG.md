@@ -8,12 +8,12 @@
 
 ### 修复
 
-- 适应者学习监控里，`% learned` 在换行被收成空格后把整行吞掉，`已学会` 跑到说明前面，进度条也不再单独一行。每一行自己能译完时保留原来的换行
-- 挑战目标前面有颜色码时，`with … selected` 会把 `- Goal:` 吞进参数，译成“选中深潜时，- Goal: …”。去掉颜色码后再对，目标句和 `blocks swum underwater` 分开翻译
-- 能力档案折页把连续空格收成一个，`DOSSIER 01 / ALL POWERS` 和 `Scroll to browse powers` 对不上，只剩末尾的 powers。句式再记一份收过空格的
-- 档案一页从句子中间开始时，以句号分开的句子单独登记。同一行里已经写完的句子先翻译，跨到下一页的半句仍留在原文
-- 动作栏状态 `ready`、学习监控的 `LOCKED` / `RETAINED` 会登记。进度条后面没有别的单词时，这个状态词也能对上
-- 动作栏按技能名切掉消息开头时，`Blink` 会切进 `Blinked`，玩家看到 `ed 5 blocks!`。技能名后面必须是词边界
+- 适应者学习监控里，`% learned` 在换行被收成空格后把整行吞掉，`已学会` 跑到说明前面，进度条也不再单独一行。每一行自己能译完时保留原来的换行 ([#160](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/160))
+- 挑战目标前面有颜色码时，`with … selected` 会把 `- Goal:` 吞进参数，译成“选中深潜时，- Goal: …”。去掉颜色码后再对，目标句和 `blocks swum underwater` 分开翻译 ([#160](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/160))
+- 能力档案折页把连续空格收成一个，`DOSSIER 01 / ALL POWERS` 和 `Scroll to browse powers` 对不上，只剩末尾的 powers。句式再记一份收过空格的 ([#160](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/160))
+- 档案一页从句子中间开始时，以句号分开的句子单独登记。同一行里已经写完的句子先翻译，跨到下一页的半句仍留在原文 ([#160](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/160))
+- 动作栏状态 `ready`、学习监控的 `LOCKED` / `RETAINED` 会登记。进度条后面没有别的单词时，这个状态词也能对上 ([#160](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/160))
+- 动作栏按技能名切掉消息开头时，`Blink` 会切进 `Blinked`，玩家看到 `ed 5 blocks!`。技能名后面必须是词边界 ([#160](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/160))
 
 ## 2026.11.23-95（2026-11-23）
 
