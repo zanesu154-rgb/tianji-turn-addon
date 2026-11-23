@@ -434,6 +434,7 @@
 
         // ---------------- 4. 逐文件处理 ----------------
         let processed = 0;
+        const deferredScriptTopics = [];
         const total = allFiles.length;
         for (let i = 0; i < allFiles.length; i++) {
             await breathe();
@@ -470,10 +471,11 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, uiDataChannels: ctx.uiDataChannels, colonPrefix, bakeOf, localizers, localeBakeOf,
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, uiDataChannels: ctx.uiDataChannels, colonPrefix, deferTopics: true, bakeOf, localizers, localeBakeOf,
                 });
                 if (r.changed) {
                     pending.set(p, r.content);
+                    if (r.deferredTopics && r.deferredTopics.length) deferredScriptTopics.push({ file: p, topics: r.deferredTopics, rtName: r.rtName, keyBaseWord: r.keyBaseWord });
                     processed++;
                     log(`[脚本] ${p}（静态改写 ${r.stats.overrides} 处，运行时登记 ${r.stats.exact + r.stats.patterns} 条${r.stats.tables ? `，合并自带多语言 ${r.stats.tables} 条` : ''}）`);
                 }
@@ -538,6 +540,23 @@
                     for (const k of [`item.${id}.name`, `item.${id}`, `tile.${id}.name`]) ctx.hiddenKeys.delete(k);
                 }
             }
+        }
+
+        // 所有脚本提取完毕后再补登记升级冒号主题：已在其他脚本登记过的词直接复用其键（不新分配、不抢占），
+        // 同时仍写入当前脚本的 reg()，确保即使其他脚本未加载或加载顺序不同，运行时查表也不会缺失
+        for (const item of deferredScriptTopics) {
+            const extra = [];
+            for (const topic of item.topics) {
+                if (ctx.isKey(topic)) continue;
+                const existing = ctx.dedupe.get('script\0' + topic);
+                const k = existing || ctx.alloc(item.keyBaseWord, topic, { file: item.file, kind: 'script', scope: 'script', hint: 'word' });
+                extra.push([topic, k]);
+            }
+            if (!extra.length) continue;
+            const cur = pending.get(item.file);
+            const mark = '// ---- end i18n runtime ----';
+            const mi = cur ? cur.indexOf(mark) : -1;
+            if (mi >= 0) pending.set(item.file, cur.slice(0, mi) + `${item.rtName}.reg(${JSON.stringify(extra)}, []);\n` + cur.slice(mi));
         }
 
         // ---------------- 5. 缺失的默认名称 ----------------
