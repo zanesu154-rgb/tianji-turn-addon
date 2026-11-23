@@ -4,6 +4,12 @@ Grouped by date; each day shows the last version of that day (the current versio
 
 [简体中文](CHANGELOG.md)
 
+## 2026.11.23-97 (2026-11-23)
+
+### Fixed
+
+- Converting again with only the translated lang files rechecked every previous key in the same series for every new sentence. A series of several thousand entries stalled the scan on UI and script files. Claims now look only at the nearby index, and a sentence that does not match is still left unmatched
+
 ## 2026.11.23-96 (2026-11-23)
 
 ### Fixed
