@@ -4,6 +4,15 @@
 
 [English](CHANGELOG_en.md)
 
+## 2026.11.23-95（2026-11-23）
+
+### 修复
+
+- 手册续页在标题后面加上 ` (continued)` 后，原来的标题对不上。括号里的词会登记，标题先按原文对上 ([#159](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/159))
+- 能力档案按 62 列把空格换成换行，长说明被从句子中间切开。连续的非空行会用空格拼回去再对 ([#159](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/159))
+- 适应者学习进度 `0% learned` 在百分号收进参数后，剩下的 `learned` 被当成不是句子。现在会登记 ([#159](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/159))
+- 授权按钮前面的 `+ ` 让 `GRANT … to …` 对不上。前缀留下，后面的句子照常翻译 ([#159](https://github.com/zanesu154-rgb/tianji-turn-addon/pull/159))
+
 ## 2026.11.23-94（2026-11-23）
 
 ### 修复
