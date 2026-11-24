@@ -332,14 +332,25 @@ Never describe an incomplete verification as a successful result.
   - Unit & regression suite: `node test/run-tests.js`
   - Real sample suite: `node test/run-real-samples.js`
   - Syntax validation: Validate modified/generated JS with `node --check` or the repository's `vendor/acorn` parser.
-- Cross-repository large sample packs:
-  - When an Issue references a release tag or archive in the sample repository, download and extract it outside the repo workspace using `SAMPLE_REPO_TOKEN`:
-    ```bash
-    mkdir -p /tmp/sample
-    GH_TOKEN=$SAMPLE_REPO_TOKEN gh release download <tag> -R zanesu154-rgb/BUG-Test-addon-world -D /tmp/sample
-    unzip -q /tmp/sample/<archive> -d /tmp/sample/extracted
-    ```
-  - Never traverse or dump entire sample archives or large generated artifacts into stdout (to preserve context budget). Use `grep -rn` to locate specific failing snippets and `diff -u` to compare baseline vs. patched outputs.
+- Real-sample staging (GitHub Actions):
+  - Samples are selected by a GitHub Issue/PR label using the `sample-<NAME>` convention.
+  - Currently configured sample:
+    - `sample-JJK` -> private repository `zanesu154-rgb/BUG-Test-addon-world`, Release tag `JJK`, exactly one `.mcaddon` asset.
+  - The workflow reads the labels on the triggering Issue/PR. No `sample-` label means no sample is downloaded and ordinary source-only work may proceed.
+  - Exactly one `sample-` label is allowed. Multiple sample labels or an unknown/unconfigured label must stop the workflow with a clear error; never guess which sample was intended.
+  - After download, the workflow validates that exactly one expected asset exists, checks archive integrity, calculates SHA-256, and passes only these non-secret environment variables to Claude:
+    - `SAMPLE_LABEL`: selected label, for example `sample-JJK`.
+    - `SAMPLE_ARCHIVE`: absolute path to the staged archive, for example `/tmp/sample/JJK.mcaddon`.
+    - `SAMPLE_SHA256`: expected SHA-256 digest.
+  - When `SAMPLE_ARCHIVE` is provided, confirm the file exists, independently recompute SHA-256, compare it with `SAMPLE_SHA256`, and report the sample label, filename, and hash before using it.
+  - The private-repository access token is available only to the dedicated Actions download step. **Never request, print, copy, or attempt to use `SAMPLE_REPO_TOKEN` or another private-repository credential.** Do not download the sample repository yourself.
+  - If the assigned Issue requires a real sample but no matching sample label is present, or the archive is missing, the hash differs, or the archive cannot be inspected, stop sample-dependent work and report `UNCOVERED`; do not substitute mock data or another archive.
+  - `/tmp/sample` is ephemeral and exists only for the current workflow run. Do not stage or commit sample archives or extracted sample contents.
+  - To onboard a new sample, maintainers add one mapping entry in the workflow's `case` statement and document its label, Release tag, and expected asset format here. Do not add guessed Release names or asset patterns. Once configured, future Issues use the new label without editing the workflow again.
+- Sample inspection:
+  - Inspect only the files and paths relevant to the assigned Issue. Avoid extracting or printing the entire archive unless necessary.
+  - Never dump entire sample archives or large generated artifacts into stdout (to preserve context budget). Use targeted searches such as `grep -rn` and `diff -u` to compare baseline and patched outputs.
+
 
 **LFMC is a localization tool, not a JavaScript source-code rewriting engine with unrestricted authority.**
 
