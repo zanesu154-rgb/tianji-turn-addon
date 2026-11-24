@@ -61,7 +61,7 @@ jobs:
             && '--model claude-opus-5-5'
             || '--model claude-sonnet-5-5' }}
             --allowedTools "Bash(node:*),Bash(git:*),Bash(gh:*),Bash(unzip:*),Bash(mkdir:*),Bash(grep:*),Bash(diff:*),Bash(ls:*)"
-            --max-turns 15
+            --max-turns 30
 
           # 允许 Claude 读取 GitHub Actions CI 结果
           additional_permissions: |
