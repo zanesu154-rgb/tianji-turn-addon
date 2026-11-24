@@ -90,20 +90,22 @@ jobs:
               ;;
           esac
 
-          mkdir -p /tmp/sample
+          sample_dir="$GITHUB_WORKSPACE/.tmp-sample"
+          mkdir -p "$sample_dir"
+          grep -qxF '.tmp-sample/' .git/info/exclude || echo '.tmp-sample/' >> .git/info/exclude
 
           gh release download "$release_tag" \
             --repo zanesu154-rgb/BUG-Test-addon-world \
             --pattern "$asset_pattern" \
-            --dir /tmp/sample
+            --dir "$sample_dir"
 
-          mapfile -t assets < <(find /tmp/sample -maxdepth 1 -type f -iname "$asset_pattern" -print)
+          mapfile -t assets < <(find "$sample_dir" -maxdepth 1 -type f -iname "$asset_pattern" -print)
           if [[ "${#assets[@]}" -ne 1 ]]; then
             echo "::error::Expected exactly one $asset_pattern asset in Release $release_tag; found ${#assets[@]}."
             exit 1
           fi
 
-          sample_archive="/tmp/sample/$archive_filename"
+          sample_archive="$sample_dir/$archive_filename"
           if [[ "${assets[0]}" != "$sample_archive" ]]; then
             cp -- "${assets[0]}" "$sample_archive"
           fi
@@ -137,7 +139,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.AIHUBMIX_API_KEY }}
 
-          # 支持 /opus 切换模型、命令行白名单以及最大 30 轮熔断限制
+          # 支持 /opus 切换模型、命令行白名单、样包元数据注入以及最大 30 轮熔断限制
           claude_args: >-
             ${{ contains(format('{0} {1} {2}',
             github.event.comment.body,
@@ -146,7 +148,8 @@ jobs:
             '/opus')
             && '--model claude-opus-5-5'
             || '--model claude-sonnet-5-5' }}
-            --allowedTools "Bash(node:*),Bash(git:*),Bash(gh:*),Bash(unzip:*),Bash(mkdir:*),Bash(grep:*),Bash(diff:*),Bash(ls:*),Bash(sha256sum:*)"
+            --allowedTools "Bash(node:*),Bash(git:*),Bash(gh:*),Bash(unzip:*),Bash(mkdir:*),Bash(grep:*),Bash(diff:*),Bash(ls:*),Bash(sha256sum:*),Bash(printenv:*)"
+            ${{ steps.sample.outputs.archive != '' && format('--append-system-prompt "Staged real sample metadata: SAMPLE_LABEL={0}, SAMPLE_ARCHIVE={1}, SAMPLE_SHA256={2}"', steps.sample.outputs.label, steps.sample.outputs.archive, steps.sample.outputs.sha256) || '' }}
             --max-turns 30
 
           # 允许 Claude 读取 GitHub Actions CI 结果
