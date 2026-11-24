@@ -2389,6 +2389,14 @@
          * 翻译或换成 rawtext 都会让界面读错 → 原样保留
          * 判断：标题 / 动作栏的界面会截取文字，或开头是界面用来判断的前缀；并且字面部分都是“标签:”这类，没有成句的文字
          */
+        /** 文字以资源包界面的路由标记开头（#title_text - 'ACHV'）：标记后面不能紧跟字母，避免误伤普通单词 */
+        function hasUiMarker(text) {
+            if (!opts.uiMarkers || !opts.uiMarkers.size || typeof text !== 'string') return false;
+            const t = text.replace(/^(?:§.|\s)+/, '');
+            for (const m of opts.uiMarkers) if (t.startsWith(m) && !/^\p{L}/u.test(t.slice(m.length))) return true;
+            return false;
+        }
+
         function isUiData(parts, hint) {
             const lits = parts.filter(p => 'lit' in p).map(p => NS.stripFormatting(p.lit));
             const dyn = parts.length - lits.length;
@@ -2408,6 +2416,7 @@
             if (opts.uiCompared && isStr(e) && opts.uiCompared.has(e.value.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) { handled.add(e); return; }
             if (isStr(e) || e.type === 'TemplateLiteral' || (e.type === 'BinaryExpression' && e.operator === '+')) {
                 const parts = isStr(e) ? [{ lit: e.value }] : flattenConcat(e);
+                if (parts && parts.length && 'lit' in parts[0] && hasUiMarker(parts[0].lit)) { markHandled(e); return; }   // ACHV§l Progress：路由标记开头，整段保持原文
                 if (parts && isUiData(parts, hint)) { markHandled(e); uiDataKept++; return; }
                 if (parts) {
                     if (!parts.some(p => 'lit' in p)) { wrapM(e); return; }
@@ -2862,6 +2871,7 @@
             return false;
         };
         const registerExact = (text, fromSplit = false) => {
+            if (hasUiMarker(text)) return;
             if (opts.uiCompared && opts.uiCompared.has(String(text).replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) return;
             if (opts.refSyntax && (DICT_REF.lastIndex = 0, DICT_REF.test(text))) { DICT_REF.lastIndex = 0; registerPattern([{ lit: text }]); return; }
             if (isCodeNoise(text)) return;

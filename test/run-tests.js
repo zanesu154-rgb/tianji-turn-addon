@@ -1548,6 +1548,26 @@ console.log(JSON.stringify(calls));`;
         check('界面拿来比较的标题以 s 结尾也保持原文（运行时正则转义）', rt.M('Advancements') === 'Advancements' && rt.M('§lAdvancements ') === '§lAdvancements ');
     }
     {
+        // Issue #181：RP 界面用 (#title_text - 'ACHV') 识别专用表单 → 脚本里以 ACHV 开头的标题整段保持原文，不写入语言键；普通标题照常提取
+        const src = 'import { ActionFormData } from "@minecraft/server-ui";\n'
+            + 'export function f(p,t){const a=new ActionFormData();a.title("ACHV§l Progress");a.body("Pick one");'
+            + 'const b=new ActionFormData();b.title(`CHEAT§l${t}`);const c=new ActionFormData();c.title("Shop Menu");'
+            + 'const d=new ActionFormData();d.title("ACHVement unlocked");}\n';
+        const run = (markers) => {
+            const ctx = new NS.ExtractContext({});
+            const out = NS.processScript(src, 'scripts/achv.js', ctx, { injectRuntime: true, runtimeKey: '__achv_q', uiMarkers: markers, idKeys: () => [] }).content;
+            return { ctx, out, vals: [...ctx.entries.values()].map(e => e.value) };
+        };
+        const base = run(new Set());
+        check('ACHV 标记：没有登记标记时（基线行为）整段标题被提取', base.vals.includes('ACHV§l Progress'));
+        const fixed = run(new Set(['ACHV', 'CHEAT']));
+        check('ACHV 标记：带路由标记的标题不进语言键，脚本里保持原文', !fixed.vals.some(v => /^(ACHV§l|CHEAT)/.test(v)) && /a\.title\("ACHV§l Progress"\)/.test(fixed.out) && /b\.title\(`CHEAT§l\$\{t\}`\)/.test(fixed.out), fixed.vals.join('|'));
+        check('ACHV 标记：普通标题与正文照常提取', fixed.vals.includes('Shop Menu') && fixed.vals.includes('Pick one'), fixed.vals.join('|'));
+        check('ACHV 标记：标记后紧跟字母的普通文字（ACHVement）不受影响', fixed.vals.includes('ACHVement unlocked'), fixed.vals.join('|'));
+        try { acorn.parse(fixed.out.replace(/^import.*$/mg, ''), { ecmaVersion: 'latest', sourceType: 'module' }); check('ACHV 标记：转换结果语法有效', true); }
+        catch (e) { check('ACHV 标记：转换结果语法有效', false, e.message); }
+    }
+    {
         // 脚本读回 lore（getLore）按英文判断哪些行是自己加的再重写：lore 写成键后要还原成原文，否则每次再追加一遍
         const ctx = new NS.ExtractContext({});
         const src = 'import { world } from "@minecraft/server";\nconst B="§r§6Ancient Bark 0/3 Repairs Left";\nfunction A(e){return typeof e=="string"&&(e.includes("Ancient Bark")||e.startsWith("§r§7Durability: §f"))}\n'
