@@ -150,7 +150,7 @@ jobs:
             || '--model claude-sonnet-5-5' }}
             --allowedTools "Bash(node:*),Bash(git:*),Bash(gh:*),Bash(unzip:*),Bash(mkdir:*),Bash(grep:*),Bash(diff:*),Bash(ls:*),Bash(sha256sum:*),Bash(printenv:*)"
             ${{ steps.sample.outputs.archive != '' && format('--append-system-prompt "Staged real sample metadata: SAMPLE_LABEL={0}, SAMPLE_ARCHIVE={1}, SAMPLE_SHA256={2}"', steps.sample.outputs.label, steps.sample.outputs.archive, steps.sample.outputs.sha256) || '' }}
-            --max-turns 30
+            --max-turns 130
 
           # 允许 Claude 读取 GitHub Actions CI 结果
           additional_permissions: |
