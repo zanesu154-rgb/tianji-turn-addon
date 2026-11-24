@@ -51,7 +51,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.AIHUBMIX_API_KEY }}
 
-          # 支持 /opus 切换模型，并放行测试、基线对比与跨仓库拉取样包所需的终端命令
+          # 支持 /opus 切换模型、命令行白名单以及最大 15 轮熔断限制
           claude_args: >-
             ${{ contains(format('{0} {1} {2}',
             github.event.comment.body,
@@ -61,6 +61,7 @@ jobs:
             && '--model claude-opus-5-5'
             || '--model claude-sonnet-5-5' }}
             --allowedTools "Bash(node:*),Bash(git:*),Bash(gh:*),Bash(unzip:*),Bash(mkdir:*),Bash(grep:*),Bash(diff:*),Bash(ls:*)"
+            --max-turns 15
 
           # 允许 Claude 读取 GitHub Actions CI 结果
           additional_permissions: |
