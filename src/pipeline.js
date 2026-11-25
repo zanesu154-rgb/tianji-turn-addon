@@ -254,7 +254,7 @@
                 // (#title_text - 'inspecting:')：界面减掉这个前缀再显示，前缀后面的文字照常翻译
                 if (m[1] === '-' && m[2] && /[:|]$/.test(m[2])) ctx.uiPrefixes.add(m[2]);
                 // (#title_text - 'ACHV')：界面靠标题里的路由标记（ACHV§l Progress）识别专用表单，带标记的标题整段保持原文
-                if (m[1] === '-' && m[2] && /^[A-Z][A-Z0-9_]{2,}$/.test(m[2])) ctx.uiMarkers.add(m[2]);
+                if (m[1] === '-' && m[2] && m[2] === 'ACHV') ctx.uiMarkers.add(m[2]);
             }
             // 界面把标题 / 动作栏文字当数据读（按字符位置截取 '%.172s' * #text）：脚本发过去的是数据，不能翻译
             if (/'%\.\d+s'\s*\*/.test(txt)) {

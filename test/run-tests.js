@@ -1560,8 +1560,9 @@ console.log(JSON.stringify(calls));`;
         };
         const base = run(new Set());
         check('ACHV 标记：没有登记标记时（基线行为）整段标题被提取', base.vals.includes('ACHV§l Progress'));
-        const fixed = run(new Set(['ACHV', 'CHEAT']));
-        check('ACHV 标记：带路由标记的标题不进语言键，脚本里保持原文', !fixed.vals.some(v => /^(ACHV§l|CHEAT)/.test(v)) && /a\.title\("ACHV§l Progress"\)/.test(fixed.out) && /b\.title\(`CHEAT§l\$\{t\}`\)/.test(fixed.out), fixed.vals.join('|'));
+        const fixed = run(new Set(['ACHV']));
+        check('ACHV 标记：标记保持不可译 text 节点，只有可见标题 Progress 进语言键', fixed.vals.includes('Progress') && !fixed.vals.includes('ACHV§l Progress') && /a\.title\(\{"rawtext":\[\{"text":"ACHV"\},\{"text":"§l "\},\{"translate":"script\.achv\.title"\}\]\}\)/.test(fixed.out), fixed.out);
+        check('ACHV 标记：非 ACHV 的标记标题（CHEAT）不受影响，与基线一致', fixed.vals.includes('CHEAT§l%1$s') && base.vals.includes('CHEAT§l%1$s'), fixed.vals.join('|'));
         check('ACHV 标记：普通标题与正文照常提取', fixed.vals.includes('Shop Menu') && fixed.vals.includes('Pick one'), fixed.vals.join('|'));
         check('ACHV 标记：标记后紧跟字母的普通文字（ACHVement）不受影响', fixed.vals.includes('ACHVement unlocked'), fixed.vals.join('|'));
         try { acorn.parse(fixed.out.replace(/^import.*$/mg, ''), { ecmaVersion: 'latest', sourceType: 'module' }); check('ACHV 标记：转换结果语法有效', true); }
