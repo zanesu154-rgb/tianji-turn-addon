@@ -2318,7 +2318,7 @@
         }
 
         /** 片段 → rawtext 元素代码数组；返回 null 表示没有可翻译文本且无动态部分 */
-        function buildElements(parts, hint) {
+        function buildElements(parts, hint, uiTag) {
             parts = absorbLiteralPercent(parts);
             const lines = ctx.splitNewlines ? splitLines(parts) : [parts];
             const els = [];
@@ -2356,7 +2356,8 @@
                     }
                     const cleaned = body.filter(p => !('lit' in p) || p.lit);
                     const value = partsToValue(cleaned);
-                    const key = ctx.alloc(keyBase(hint), value, meta(hint));
+                    // uiTag：ACHV 标记后的可见文字。独立 scope 去重（不和普通文字共用键），沿用旧整段键并迁移旧译文
+                    const key = uiTag ? ctx.allocAfterTag(keyBase(hint), uiTag.marker + lead, value, { ...meta(hint), scope: uiTag.scope }) : ctx.alloc(keyBase(hint), value, meta(hint));
                     const args = cleaned.filter(p => !('lit' in p));
                     if (args.length) { const lits = ['']; for (const p of cleaned) { if ('lit' in p) lits[lits.length - 1] += p.lit; else lits.push(''); } srcPats.push([key, lits]); }
                     if (lead) els.push(JSON.stringify({ text: lead }));
@@ -2365,7 +2366,7 @@
                         els.push(`{"translate":${JSON.stringify(key)},"with":{"rawtext":[${args.map(a => `${RT}.T(${renderPart(a)})`).join(',')}]}}`);
                     } else {
                         els.push(JSON.stringify({ translate: key }));
-                        if (!line.some(p => !('lit' in p))) exact.push([litText(cleaned), key]);
+                        if (!uiTag && !line.some(p => !('lit' in p))) exact.push([litText(cleaned), key]);
                     }
                     if (tail) els.push(JSON.stringify({ text: tail }));
                     translated = true;
@@ -2422,7 +2423,7 @@
                     const marker = [...opts.uiMarkers].find(x => lit0.replace(/^(?:§.|\s)+/, '').startsWith(x));
                     const head = lit0.slice(0, lit0.indexOf(marker) + marker.length);
                     const rest = [{ lit: lit0.slice(head.length) }, ...parts.slice(1)].filter(p => !('lit' in p) || p.lit);
-                    const els = rest.length ? buildElements(rest, hint) : null;
+                    const els = rest.length ? buildElements(rest, hint, { marker, scope: 'script\u0000ui-marker:' + marker }) : null;
                     markHandled(e);
                     if (els) overrides.set(e, () => `{"rawtext":[${JSON.stringify({ text: head })},${els.join(',')}]}`);
                     return;

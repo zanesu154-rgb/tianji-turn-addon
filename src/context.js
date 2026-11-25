@@ -233,6 +233,40 @@
             return key;
         }
 
+        /**
+         * 界面路由标记（ACHV）移到译文外以后给标记后面的可见文字分配键：
+         * 1) 以前整段（标记 + 文字）写进 lang 的键：沿用，各语言值开头的标记去掉，译文保留。
+         *    身份判定：任一语言的值正好是 tag + value；或者只放回了译文时，同系列里仅有一个值都以 tag 开头的空闲键。
+         *    有多个候选就不认领（宁可当新文字处理，也不把译文挂错）。
+         * 2) 找不到旧键：用调用方给的独立 scope 去重，不和普通文字的同名文本共用一个键。
+         */
+        allocAfterTag(baseKey, tag, value, meta) {
+            const free = (k) => !this.entries.has(k) && !this.claimed.has(k) && !this.referenced.has(k);
+            const valsOf = (k) => { const ev = this.existingValues.get(k); return ev instanceof Set ? [...ev] : ev != null ? [ev] : []; };
+            const full = tag + value;
+            let found = null;
+            for (const [k] of this.existingValues) if (free(k) && valsOf(k).includes(full)) { found = k; break; }
+            if (!found) {
+                const base = sanitizeKey(baseKey);
+                const cands = [];
+                for (const k of this.existingValues.keys()) {
+                    if (k !== base && !(k.startsWith(base + '_') && /^[1-9]\d*$/.test(k.slice(base.length + 1)))) continue;
+                    const vs = valsOf(k).filter(v => typeof v === 'string');
+                    if (free(k) && vs.length && vs.every(v => v.startsWith(tag))) cands.push(k);
+                }
+                if (cands.length === 1) found = cands[0];
+            }
+            if (found) {
+                this.claimed.add(found);
+                this.entries.set(found, { value, file: meta.file, kind: meta.kind });
+                if (meta.file) { if (!this.keyFiles.has(found)) this.keyFiles.set(found, new Set()); this.keyFiles.get(found).add(meta.file); }
+                if (meta.scope) this.dedupe.set(meta.scope + '\u0000' + value, found);
+                this.tagStrip.set(found, tag);
+                return found;
+            }
+            return this.alloc(baseKey, value, meta);
+        }
+
         _alloc(baseKey, text, { file = '', kind = '', scope = null } = {}) {
             text = dedentCode(text);
             const base = sanitizeKey(baseKey);

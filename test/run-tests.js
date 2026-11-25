@@ -1567,6 +1567,28 @@ console.log(JSON.stringify(calls));`;
         check('ACHV 标记：标记后紧跟字母的普通文字（ACHVement）不受影响', fixed.vals.includes('ACHVement unlocked'), fixed.vals.join('|'));
         try { acorn.parse(fixed.out.replace(/^import.*$/mg, ''), { ecmaVersion: 'latest', sourceType: 'module' }); check('ACHV 标记：转换结果语法有效', true); }
         catch (e) { check('ACHV 标记：转换结果语法有效', false, e.message); }
+        {
+            // 评审 #168 第二轮：1) ACHV 标题的可见文字不和普通同名文字共用键  2) 旧整段译文迁移到沿用的键
+            const src2 = 'import { ActionFormData } from "@minecraft/server-ui";\n'
+                + 'export function f(){const a=new ActionFormData();a.title("ACHV§l Progress");a.body("Pick one");'
+                + 'const m=[{name:"Progress"}];}\n';
+            const mk = (opt) => {
+                const ctx = new NS.ExtractContext(opt || {});
+                const out = NS.processScript(src2, 'scripts/achv.js', ctx, { injectRuntime: true, runtimeKey: '__achv_q', uiMarkers: new Set(['ACHV']), idKeys: () => [] }).content;
+                return { ctx, out, ents: [...ctx.entries].map(([k, e]) => `${k}=${e.value}`) };
+            };
+            const f1 = mk();
+            const progKeys = [...f1.ctx.entries].filter(([, e]) => e.value === 'Progress').map(([k]) => k);
+            check('ACHV 标记：标题里的 Progress 与普通 Progress 各自独立成键', progKeys.length === 2, f1.ents.join('|'));
+            check('ACHV 标记：ACHV 后缀不进运行时精确匹配表', !/\["Progress","script\.achv\.title"\]/.test(f1.out), f1.out);
+            for (const [name, langs] of [['双语', ['en_US', 'zh_CN']], ['仅中文', ['zh_CN']]]) {
+                const ev = new Map([['script.achv.title', new Set(langs.map(l => l === 'zh_CN' ? 'ACHV§l 进度' : 'ACHV§l Progress'))]]);
+                const kl = new Map([['script.achv.title', new Set(langs)]]);
+                const f2 = mk({ knownKeys: new Set(ev.keys()), existingValues: ev, keyLangs: kl });
+                check(`ACHV 标记：${name}回填沿用旧键并登记标记剥离`, f2.ctx.tagStrip.get('script.achv.title') === 'ACHV§l ' && /\{"translate":"script\.achv\.title"\}/.test(f2.out) && f2.ctx.entries.get('script.achv.title').value === 'Progress', f2.ents.join('|') + ' ' + f2.out);
+            }
+        }
+
     }
     {
         // 脚本读回 lore（getLore）按英文判断哪些行是自己加的再重写：lore 写成键后要还原成原文，否则每次再追加一遍
