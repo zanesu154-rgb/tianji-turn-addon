@@ -926,6 +926,7 @@
     function collectAchvTitles(infos) {
         const uses = new Map();
         const titleTexts = new Map();
+        const titleUnits = new Map();
         const isAchv = (t) => typeof t === 'string' && /^ACHV(?:\u00a7.|\s)/.test(t);
         const count = (t, isTitle) => {
             let u = uses.get(t);
@@ -950,25 +951,33 @@
             const fb = fileBaseOf(file);
             if (!titleTexts.has(fb)) titleTexts.set(fb, new Set());
             const tset = titleTexts.get(fb);
+            if (!titleUnits.has(fb)) titleUnits.set(fb, { set: new Set(), multi: false });
+            const uset = titleUnits.get(fb);
             const titleArgs = [];
             walk(info.ast, (n) => {
                 if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && propName(n.callee) === 'title') titleArgs.push(...n.arguments);
                 const t = staticText(n);
-                if (!isAchv(t)) return;
-                // 拼接里的片段、拼出来的整段、模板：都算其他用法；只有"确定是原生 ActionFormData 的 title() 的字符串字面量参数"算标题用法
-                if (inConcat(n)) { count(t, false); return; }
+                if (typeof t !== 'string') return;
+                // 提取器写 lang 时会去掉首尾格式码（含尾部 §r）和空白："ACHV§l " + "Progress§r" 与 "ACHV§l Progress" 共用一个键
+                const key = trimCodes(t);
+                if (!isAchv(key)) return;
+                // 拼接里的片段、拼出来的整段、模板：都算其他用法；只有"确定是原生 ActionFormData 的 title() 的、没有首尾格式码的字符串字面量参数"算标题用法
+                if (inConcat(n)) { count(key, false); return; }
                 const p = n.parent;
-                const isTitle = isStr(n) && p && p.type === 'CallExpression' && p.arguments[0] === n && p.callee.type === 'MemberExpression' && propName(p.callee) === 'title' && recvOk(p.callee.object);
-                count(t, isTitle);
+                const isTitle = isStr(n) && t === key && p && p.type === 'CallExpression' && p.arguments[0] === n && p.callee.type === 'MemberExpression' && propName(p.callee) === 'title' && recvOk(p.callee.object);
+                count(key, isTitle);
             });
             // title(...) 参数里的静态文字（条件表达式分支、拼接片段也会落进同一个 title 系列）：原样、去首尾格式码、按行
             for (const a of titleArgs) walk(a, (x) => {
                 const t = staticText(x);
                 if (t == null) return;
                 for (const v of [t, trimCodes(t), ...t.split(/\r?\n/).map(trimCodes)]) if (v) tset.add(v);
+                // 每个不同的整段静态标题文字（去首尾格式码）需要一个自己的键：用来判断旧 lang 的 title 系列是否"每个标题一个旧键"
+                if (trimCodes(t)) uset.set.add(trimCodes(t));
+                if (/[\r\n]/.test(t)) uset.multi = true;
             });
         }
-        return { uses, titleTexts };
+        return { uses, titleTexts, titleUnits };
     }
 
     // ---------------------------------------------------------------
@@ -2533,9 +2542,10 @@
             if (/(?:\u00a7.|\s)$/.test(body) || /[\r\n]/.test(body) || !looksLikeText(body, 'loose')) return false;
             const use = opts.achvTitles.uses.get(e.value);
             if (!use || use.other > 0) return false;   // 整段文字在别处（任何脚本、包括静态拼接）也出现：它们共用一个键，不拆
-            // 可见文字也被同一 title 系列里的普通标题使用：旧键不能凭文字认领，改按旧版同参数分配
-            const contested = !!(opts.achvTitles.titleTexts.get(fb) || new Set()).has(body);
-            const r = ctx.allocMarked(keyBase('title'), tag, body, meta('title'), { contested });
+            // 可见文字也被同一 title 系列里的普通标题使用：拆分后两个键的值都是正文，旧键不能凭文字认领（见 allocMarked）
+            const contested = (opts.achvTitles.titleTexts.get(fb) || new Set()).has(body);
+            const units = opts.achvTitles.titleUnits.get(fb);
+            const r = ctx.allocMarked(keyBase('title'), tag, body, meta('title'), contested ? { consumers: units && !units.multi ? [...units.set].map(x => x.replace(/^ACHV(?:\u00a7.|\s)+/, '')) : [] } : null);
             if (!r.split) return false;
             markHandled(e);
             // 不登记精确表：运行时拿到整段 "ACHV§l …" 时不能映射到不含标记的译文

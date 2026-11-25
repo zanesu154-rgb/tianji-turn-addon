@@ -237,12 +237,10 @@
          * 界面路由标记标题（ACHV§l Progress）：标记留在译文外，只把标记后的可见文字写进 lang。
          * 所有分配仍走 alloc/_alloc（系列序号、预演对齐、去重与旧版完全一致）；这里只在 _alloc 之后改 entries / tagStrip。
          *  - 同系列旧键里有以 tag 开头的空闲键：恰好 1 个才可能迁移（旧值形态必须可确认），0 个走正文分配，多个保守回退
-         *  - 0 个候选但可见文字也被同系列普通标题使用（contested）：按旧版同参数分配整段；得到全新键才拆分，
-         *    认领到任何已有键都说明归属无法确认 → 保持整段。不能凭正文相同去认领普通标题的旧键
          *  - 整段文字已被别处占用（共享）、alloc 没返回唯一候选、旧值不能安全迁移：保持旧版行为（整段）并警告
          * 返回 { key, split }。split=false 时调用方按旧路径处理（整段键已分配，再 alloc 会命中去重）。
          */
-        allocMarked(baseKey, tag, body, meta, { contested = false } = {}) {
+        allocMarked(baseKey, tag, body, meta, contested = null) {
             const full = tag + body;
             if (!this._achvKeys) this._achvKeys = new Map();
             if (this._achvKeys.has(full)) return { key: this._achvKeys.get(full), split: true };
@@ -262,9 +260,20 @@
             if (!cands.length) {
                 if (shared) return keep(this.alloc(baseKey, full, meta), '的整段文字已被别处使用');
                 if (contested) {
-                    const key = this.alloc(baseKey, full, meta);   // 与旧版同参数
-                    if (this.knownKeys.has(key)) return keep(key, `的可见文字 "${body}" 也用于普通标题，旧键 ${key} 的归属无法确认`);
-                    return splitAs(key);
+                    // 可见文字也是同系列普通标题的文字：拆分后两个键的值都是正文，不能凭文字认领旧键。
+                    // 只有旧 lang 里同系列空闲旧键的数量正好等于这个文件 title 的静态文字种数（上次转换的输出：每个标题一个键），
+                    // 才按出现顺序认领（与首次转换的分配顺序一致）；否则按旧版同参数分配整段，只在得到全新键时拆分，认到已有键就保持整段
+                    const idx = (k) => k === base ? 0 : +k.slice(base.length + 1);
+                    const oldKeys = [...this.knownKeys].filter(k => (k === base || (k.startsWith(base + '_') && /^[1-9]\d*$/.test(k.slice(base.length + 1)))) && !this.referenced.has(k)).sort((a, b) => idx(a) - idx(b));
+                    // 按出现顺序一一对应：第 i 个标题文字（ACHV 标题取标记后的正文）必须和第 i 个旧键的某个旧值“看起来是同一句话的原文/译文”
+                    // （占位符、格式码、数字、长度比例，沿用系列认领的同一套判断）；任何一对对不上就不认领
+                    const aligned = contested.consumers.length > 0 && oldKeys.length === contested.consumers.length &&
+                        oldKeys.every((k, i) => valsOf(k).some(v => seriesCompat(seriesFeat(contested.consumers[i]), seriesFeat(v), true)));
+                    if (!aligned) {
+                        const key = this.alloc(baseKey, full, meta);   // 与旧版同参数
+                        if (this.knownKeys.has(key)) return keep(key, `的可见文字 "${body}" 也用于普通标题，旧键 ${key} 的归属无法确认`);
+                        return splitAs(key);
+                    }
                 }
                 const key = this.alloc(baseKey, body, { ...meta, scope: 'script\u0000ui-marker:ACHV' });
                 this._achvKeys.set(full, key);

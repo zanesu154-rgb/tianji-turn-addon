@@ -244,6 +244,10 @@ for (const [order, body] of [
     ['title then concat message', '  gui.title("ACHV§l Progress");\n  player.sendMessage("ACHV§l " + "Progress");\n'],
     ['concat message then title', '  player.sendMessage("ACHV§l " + "Progress");\n  gui.title("ACHV§l Progress");\n'],
     ['title then three-piece concat message', '  gui.title("ACHV§l Progress");\n  player.sendMessage("ACHV" + "§l " + "Progress");\n'],
+    ['title then concat message with trailing §r (Codex round 2)', '  gui.title("ACHV§l Progress");\n  player.sendMessage("ACHV§l " + "Progress§r");\n'],
+    ['concat message with trailing §r then title', '  player.sendMessage("ACHV§l " + "Progress§r");\n  gui.title("ACHV§l Progress");\n'],
+    ['title then concat message with leading colour code', '  gui.title("ACHV§l Progress");\n  player.sendMessage("§a" + "ACHV§l " + "Progress");\n'],
+    ['title then plain message with trailing §r', '  gui.title("ACHV§l Progress");\n  player.sendMessage("ACHV§l Progress§r");\n'],
 ]) {
     cases.push([`#184 P2-1 ${order}: shared text keeps baseline key and translation in all modes`, async () => {
         const source = withPlayer(body);
@@ -253,8 +257,9 @@ for (const [order, body] of [
             const { base, cand } = await pair(source, { existing });
             identical(base, cand);
             const out = shown(cand.scripts[SCRIPT], cand.zh);
-            const want = mode === 'fresh' ? T : A[1];
-            assert.deepEqual(out, [want, want], mode + ': 标题和消息都读回同一译文，消息不回退英文');
+            // 标题和消息读回的文字与基线逐项相同（消息可能带前导/尾部格式码）；有旧译文时两处都是中文，消息不回退英文
+            assert.deepEqual(out, shown(base.scripts[SCRIPT], base.zh), mode + ': 读回与基线相同');
+            if (mode !== 'fresh') out.forEach(s => assert.ok(s.includes('进度'), mode + ': ' + s));
             out.forEach(s => assert.equal(countAchv(s), 1));
             assert.deepEqual(cand.warnACHV, []);
         }
@@ -309,11 +314,26 @@ for (const achvFirst of [true, false]) {
         }
     }]);
 }
-// 无法唯一确认：没有 ACHV 形态的旧键，但旧版按位置/特征把整段认给了一个已有键 → 不拆，与基线相同并警告
+// 无法唯一确认：旧 lang 的 title 系列键数与这个文件的 title 种数对不上 → 不按位置认领，按旧版同参数分配整段；
+// 认到已有键就保持整段并警告，得到全新键才拆分
+cases.push(['#184 P2-2 old title series that does not match the title count: no guess, baseline key kept, warning', async () => {
+    const zh = new Map([['script.ui.title', '§l成就进度'], ['script.ui.title_1', '普通进度'], ['script.ui.title_2', '多出来的旧键']]);
+    const { base, cand } = await pair(achvAndPlain(true), { existing: { zh_CN: zh } });
+    assert.equal(keyOf(base.titles[0]), 'script.ui.title', '前提：基线把整段认给了已有键');
+    identical(base, cand);
+    assert.ok(cand.warnACHV.length >= 1);
+}]);
+// 旧 lang 的 title 系列键数与 title 种数相同，但旧值和标题文字对不上（旧键 title 的译文是"§l成就进度"，不像"Progress"的译文）：
+// 即使数量吻合也不能按位置认领 → 与基线相同并警告（最初的回归断言，原样保留）
 cases.push(['#184 P2-2 unconfirmed old key with a contested visible text falls back to baseline with a warning', async () => {
     const zh = new Map([['script.ui.title', '§l成就进度'], ['script.ui.title_1', '普通进度']]);
     const { base, cand } = await pair(achvAndPlain(true), { existing: { zh_CN: zh } });
     assert.equal(keyOf(base.titles[0]), 'script.ui.title', '前提：基线把整段认给了已有键');
+    identical(base, cand);
+    assert.ok(cand.warnACHV.length >= 1);
+}]);cases.push(['#184 P2-2 old title series larger than the title count: no guess, baseline key kept, warning', async () => {
+    const zh = new Map([['script.ui.title', '§l成就进度'], ['script.ui.title_1', '普通进度'], ['script.ui.title_2', '多出来的旧键']]);
+    const { base, cand } = await pair(achvAndPlain(true), { existing: { zh_CN: zh } });
     identical(base, cand);
     assert.ok(cand.warnACHV.length >= 1);
 }]);
@@ -323,6 +343,64 @@ cases.push(['#184 P2-2 two ACHV-shaped old keys next to a plain Progress title: 
     identical(base, cand);
     assert.ok(cand.warnACHV.length >= 1);
 }]);
+
+// ---- PR #184 第三轮 P2-2：把上一轮输出的 lang 反复放回同一份原始脚本（至少五轮），逐轮核对键名、译文归属和有序语言文件 ----
+// roles：每个标题的角色 A=ACHV 标题 P=普通 Progress I=IDCARD 标题。首轮输出后按角色"翻译"一次，之后每轮只放回上一轮的输出
+const ROLE_ZH = { A: ['进度', 'ACHV§l 进度'], P: ['普通进度', '普通进度'], I: ['IDCARD§l 学生证', 'IDCARD§l 学生证'] };
+const uiOnly = (arr) => arr.filter(([k]) => /^script\.ui\./.test(k));
+async function reconvert(source, roles, mode, achv, rounds = 5) {
+    const snaps = [];
+    let cur = await convert(source, { achv });
+    const isSplit = (t) => typeof t !== 'string' && t.rawtext.some(n => n.text === 'ACHV');
+    let zh = new Map(uiOnly(cur.zh)), en = new Map(uiOnly(cur.en));
+    cur.titles.forEach((t, i) => zh.set(keyOf(t), ROLE_ZH[roles[i]][isSplit(t) ? 0 : 1]));
+    for (let r = 1; r <= rounds; r++) {
+        const existing = mode === 'bilingual' ? { en_US: en, zh_CN: zh } : { zh_CN: zh };
+        cur = await convert(source, { achv, existing });
+        snaps.push({
+            refs: cur.titles.map(keyOf), shown: cur.titles.map(t => render(t, cur.zh)),
+            en: uiOnly(cur.en), zh: uiOnly(cur.zh), warn: cur.warnACHV.length,
+        });
+        en = new Map(uiOnly(cur.en)); zh = new Map(uiOnly(cur.zh));
+    }
+    return snaps;
+}
+const RERUNS = [
+    ['ACHV + plain Progress', 'AP', prelude + fn('a', T) + fn('b', 'Progress')],
+    ['plain Progress + ACHV', 'PA', prelude + fn('b', 'Progress') + fn('a', T)],
+    ['ACHV + IDCARD + plain Progress', 'AIP', prelude + fn('a', T) + fn('c', I) + fn('b', 'Progress')],
+    ['IDCARD + plain Progress + ACHV', 'IPA', prelude + fn('c', I) + fn('b', 'Progress') + fn('a', T)],
+    ['ACHV + IDCARD (no plain Progress)', 'AI', prelude + fn('a', T) + fn('c', I)],
+    ['ACHV alone', 'A', prelude + fn('a', T)],
+];
+for (const [name, roles, source] of RERUNS) {
+    for (const mode of ['bilingual', 'zh-only']) {
+        cases.push([`#184 P2-2 five rounds of re-feeding the previous output (${name}, ${mode}): keys, translations and ordered lang stay put`, async () => {
+            const cand = await reconvert(source, roles, mode, true);
+            const base = await reconvert(source, roles, mode, false);
+            for (let r = 0; r < cand.length; r++) {
+                const c = cand[r], b = base[r], tag = `round ${r + 1}`;
+                // 标题引用的键：与基线逐轮相同（基线本身是稳定的）
+                assert.deepEqual(c.refs, b.refs, tag + ': title keys vs baseline');
+                // 每个标题读回的译文属于它自己的角色（ACHV 恰好一次，普通标题不拿成就译文）
+                c.shown.forEach((s, i) => {
+                    const want = { A: 'ACHV§l 进度', P: '普通进度', I: 'IDCARD§l 学生证' }[roles[i]];
+                    assert.equal(s, want, `${tag}: title #${i} (${roles[i]})`);
+                    if (roles[i] === 'A') assert.equal(countAchv(s), 1, tag);
+                });
+                // 有序语言文件：键序与基线相同；除 ACHV 键的值以外各键值与基线相同；每轮都与第 1 轮完全相同（没有逐轮漂移）
+                assert.deepEqual(c.en.map(([k]) => k), b.en.map(([k]) => k), tag + ': en key order vs baseline');
+                assert.deepEqual(c.zh.map(([k]) => k), b.zh.map(([k]) => k), tag + ': zh key order vs baseline');
+                const achvKey = c.refs[roles.indexOf('A')];
+                const strip = (arr) => arr.filter(([k]) => k !== achvKey);
+                assert.deepEqual(strip(c.en), strip(b.en), tag + ': non-ACHV en');
+                assert.deepEqual(strip(c.zh), strip(b.zh), tag + ': non-ACHV zh');
+                assert.deepEqual(c, cand[0], tag + ': identical to round 1');
+                assert.equal(c.warn, 0, tag + ': no ACHV warning on a clean re-feed');
+            }
+        }]);
+    }
+}
 async function runAchvRegressions() {
     const results = [];
     for (const [name, run] of cases) {
