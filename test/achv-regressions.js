@@ -221,6 +221,108 @@ cases.push(['#168 runtime replay: whole-marker text is not remapped; rawtext ren
     assert.equal(render(cand.titles[0], cand.zh), 'ACHV§l 进度');
     assert.equal(countAchv(render(cand.titles[0], cand.zh)), 1);
 }]);
+// ---- PR #184 独立复审（Codex）第二轮的两个 P2 反例 ----
+// 脚本里所有 rawtext 显示调用（title / sendMessage）用 zh 读回后的实际文字
+const shown = (script, zh) => {
+    const m = new Map(zh);
+    return [...script.matchAll(/(?:title|sendMessage)\((\{"rawtext":\[.*?\]\})\)/g)].map(x => JSON.parse(x[1]).rawtext.map(n => n.text ?? m.get(n.translate) ?? '<' + n.translate + '>').join(''));
+};
+const withPlayer = (body) => prelude + 'export function a(player) {\n  const gui = new ActionFormData();\n' + body + '  return gui.show(player);\n}\n';
+
+// 旧版译文夹具：取基线（main 行为）在 fresh 下实际生成的 script.ui.* 键值，按原文换成中文。这样夹具与源码顺序一致，不是凭空编的键
+const ZH = new Map([[T, A[1]], ['Progress', '普通进度'], [I, D[1]]]);
+async function oldLangs(source) {
+    const fresh = await convert(source, { achv: false });
+    const en = new Map(fresh.en.filter(([k]) => /^script\.ui\./.test(k)));
+    const zh = new Map([...en].map(([k, v]) => [k, ZH.get(v) ?? v]));
+    return { en, zh };
+}
+const MODES = (old) => [['fresh', {}], ['bilingual', { en_US: old.en, zh_CN: old.zh }], ['zh-only', { zh_CN: old.zh }]];
+
+// P2-1：整段文字也以静态拼接用于消息。提取器把 "ACHV§l " + "Progress" 当作同一段文字，与标题共用一个键 → 不能只拆标题
+for (const [order, body] of [
+    ['title then concat message', '  gui.title("ACHV§l Progress");\n  player.sendMessage("ACHV§l " + "Progress");\n'],
+    ['concat message then title', '  player.sendMessage("ACHV§l " + "Progress");\n  gui.title("ACHV§l Progress");\n'],
+    ['title then three-piece concat message', '  gui.title("ACHV§l Progress");\n  player.sendMessage("ACHV" + "§l " + "Progress");\n'],
+]) {
+    cases.push([`#184 P2-1 ${order}: shared text keeps baseline key and translation in all modes`, async () => {
+        const source = withPlayer(body);
+        const old = await oldLangs(source);
+        assert.equal(old.en.size, 1, '前提：基线里标题和消息共用一个键');
+        for (const [mode, existing] of MODES(old)) {
+            const { base, cand } = await pair(source, { existing });
+            identical(base, cand);
+            const out = shown(cand.scripts[SCRIPT], cand.zh);
+            const want = mode === 'fresh' ? T : A[1];
+            assert.deepEqual(out, [want, want], mode + ': 标题和消息都读回同一译文，消息不回退英文');
+            out.forEach(s => assert.equal(countAchv(s), 1));
+            assert.deepEqual(cand.warnACHV, []);
+        }
+    }]);
+}
+// 对照：消息模板里带插值（${…}）时提取器给它独立的带参数键，不与标题共用 → 标题照常拆分，消息与基线相同
+cases.push(['#184 P2-1 control: template message with an interpolation does not share the title key', async () => {
+    const source = withPlayer('  gui.title("ACHV§l Progress");\n  player.sendMessage(`ACHV§l ${"Progress"}`);\n');
+    const { base, cand } = await pair(source);
+    sameExcept(base, cand, 'script.ui.title');
+    split(cand.titles[0], 'script.ui.title');
+    const msgLine = (s) => s.split('\n').find(l => l.includes('player.sendMessage(')).replace(/^.*?player\.sendMessage\(/, '');
+    assert.equal(msgLine(cand.scripts[SCRIPT]), msgLine(base.scripts[SCRIPT]));
+}]);
+
+// P2-2：ACHV 标题与普通 "Progress" 标题共存。普通标题的旧键只能由普通标题使用
+const achvAndPlain = (achvFirst) => prelude + (achvFirst ? fn('a', T) + fn('b', 'Progress') : fn('b', 'Progress') + fn('a', T));
+for (const achvFirst of [true, false]) {
+    const order = achvFirst ? 'ACHV first' : 'plain first';
+    const ai = achvFirst ? 0 : 1, pi = 1 - ai;
+    // Codex 的原始反例：只有普通标题的旧键 title_1（en=Progress，zh=普通进度）
+    const plainOnly = { en: new Map([['script.ui.title_1', 'Progress']]), zh: new Map([['script.ui.title_1', '普通进度']]) };
+    for (const [mode, existing] of MODES(plainOnly)) {
+        cases.push([`#184 P2-2 ${order} (${mode}, only the plain title_1 old key): ACHV does not take it`, async () => {
+            const { base, cand } = await pair(achvAndPlain(achvFirst), { existing });
+            const achvKey = keyOf(base.titles[ai]);
+            assert.equal(keyOf(cand.titles[pi]), keyOf(base.titles[pi]), '普通标题的键与基线相同');
+            assert.equal(render(cand.titles[pi], cand.zh), render(base.titles[pi], base.zh), '普通标题读回的译文与基线相同');
+            if (mode === 'bilingual' && achvFirst) assert.equal(render(cand.titles[pi], cand.zh), '普通进度');
+            sameExcept(base, cand, achvKey);
+            split(cand.titles[ai], achvKey);
+            assert.notEqual(keyOf(cand.titles[ai]), keyOf(cand.titles[pi]));
+            assert.equal(render(cand.titles[ai], cand.zh), render(base.titles[ai], base.zh));
+            assert.equal(countAchv(render(cand.titles[ai], cand.zh)), 1);
+        }]);
+    }
+    // 基线自己生成的两个旧键（顺序与源码一致）都放回：各自沿用、各自的译文读回
+    cases.push([`#184 P2-2 ${order} (both old keys from the baseline output): each title keeps its own key`, async () => {
+        const source = achvAndPlain(achvFirst);
+        const old = await oldLangs(source);
+        for (const [mode, existing] of MODES(old)) {
+            const { base, cand } = await pair(source, { existing });
+            const achvKey = keyOf(base.titles[ai]);
+            assert.equal(keyOf(cand.titles[ai]), achvKey, mode);
+            assert.equal(keyOf(cand.titles[pi]), keyOf(base.titles[pi]), mode);
+            split(cand.titles[ai], achvKey);
+            sameExcept(base, cand, achvKey);
+            if (mode !== 'fresh') {
+                assert.equal(render(cand.titles[ai], cand.zh), A[1], mode);
+                assert.equal(render(cand.titles[pi], cand.zh), '普通进度', mode);
+            }
+        }
+    }]);
+}
+// 无法唯一确认：没有 ACHV 形态的旧键，但旧版按位置/特征把整段认给了一个已有键 → 不拆，与基线相同并警告
+cases.push(['#184 P2-2 unconfirmed old key with a contested visible text falls back to baseline with a warning', async () => {
+    const zh = new Map([['script.ui.title', '§l成就进度'], ['script.ui.title_1', '普通进度']]);
+    const { base, cand } = await pair(achvAndPlain(true), { existing: { zh_CN: zh } });
+    assert.equal(keyOf(base.titles[0]), 'script.ui.title', '前提：基线把整段认给了已有键');
+    identical(base, cand);
+    assert.ok(cand.warnACHV.length >= 1);
+}]);
+cases.push(['#184 P2-2 two ACHV-shaped old keys next to a plain Progress title: no guess', async () => {
+    const zh = new Map([['script.ui.title', A[1]], ['script.ui.title_1', 'ACHV§l 成就'], ['script.ui.title_2', '普通进度']]);
+    const { base, cand } = await pair(achvAndPlain(true), { existing: { zh_CN: zh } });
+    identical(base, cand);
+    assert.ok(cand.warnACHV.length >= 1);
+}]);
 async function runAchvRegressions() {
     const results = [];
     for (const [name, run] of cases) {

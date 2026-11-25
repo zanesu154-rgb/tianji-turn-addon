@@ -918,27 +918,57 @@
     /**
      * 跨文件预扫描：路由标记标题（"ACHV§l Progress"）的整段文字在所有脚本里分别以"title() 的第一个参数"和"其他位置"出现几次。
      * 只有它在所有脚本里都只出现在 title() 参数位置时才允许拆分标记；否则整段文字会和别处共用同一个键，拆分会改掉别处的显示。
-     * 返回 Map(整段文字 → { title, other })。
+     * 整段文字按提取器同样的拼接语义（flattenConcat）计算："ACHV§l " + "Progress" 也是这段文字的一次"其他用法"。
+     * 另外按文件基名记下所有 .title(…) 参数里出现的静态文字：标记后面的可见文字（Progress）如果也被普通标题使用，
+     * 同一个 title 系列里的旧键就无法凭文字判断归属。
+     * 返回 { uses: Map(整段文字 → { title, other }), titleTexts: Map(文件基名 → Set(文字)) }。
      */
     function collectAchvTitles(infos) {
-        const out = new Map();
-        for (const info of infos.values()) {
+        const uses = new Map();
+        const titleTexts = new Map();
+        const isAchv = (t) => typeof t === 'string' && /^ACHV(?:\u00a7.|\s)/.test(t);
+        const count = (t, isTitle) => {
+            let u = uses.get(t);
+            if (!u) uses.set(t, u = { title: 0, other: 0 });
+            if (isTitle) u.title++; else u.other++;
+        };
+        // 与提取器相同：字符串、模板、+ 拼接；全部片段都是字面量时得到整段文字，否则 null
+        const staticText = (n) => {
+            if (isStr(n)) return n.value;
+            if (n.type !== 'TemplateLiteral' && !(n.type === 'BinaryExpression' && n.operator === '+')) return null;
+            const parts = flattenConcat(n);
+            return parts && parts.every(p => 'lit' in p) ? parts.map(p => p.lit).join('') : null;
+        };
+        const inConcat = (n) => {
+            const p = n.parent;
+            return !!p && ((p.type === 'BinaryExpression' && p.operator === '+') || p.type === 'TemplateLiteral');
+        };
+        const trimCodes = (t) => t.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, '');
+        for (const [file, info] of infos) {
             if (!info || !info.ast) continue;
             const recvOk = actionFormChecker(info.ast);
+            const fb = fileBaseOf(file);
+            if (!titleTexts.has(fb)) titleTexts.set(fb, new Set());
+            const tset = titleTexts.get(fb);
+            const titleArgs = [];
             walk(info.ast, (n) => {
-                let t = null;
-                if (isStr(n)) t = n.value;
-                else if (n.type === 'TemplateLiteral' && n.expressions.length === 0 && n.quasis.length === 1) t = n.quasis[0].value.cooked;
-                if (typeof t !== 'string' || !/^ACHV(?:\u00a7.|\s)/.test(t)) return;
+                if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && propName(n.callee) === 'title') titleArgs.push(...n.arguments);
+                const t = staticText(n);
+                if (!isAchv(t)) return;
+                // 拼接里的片段、拼出来的整段、模板：都算其他用法；只有"确定是原生 ActionFormData 的 title() 的字符串字面量参数"算标题用法
+                if (inConcat(n)) { count(t, false); return; }
                 const p = n.parent;
-                // 只有"确定是原生 ActionFormData 的 title() 参数"才算标题用法；Modal/Message 表单或无法确认的接收者算其他用法（同文字共用一个键，不能拆）
-                const isTitle = p && p.type === 'CallExpression' && p.arguments[0] === n && p.callee.type === 'MemberExpression' && propName(p.callee) === 'title' && recvOk(p.callee.object);
-                let u = out.get(t);
-                if (!u) out.set(t, u = { title: 0, other: 0 });
-                if (isTitle) u.title++; else u.other++;
+                const isTitle = isStr(n) && p && p.type === 'CallExpression' && p.arguments[0] === n && p.callee.type === 'MemberExpression' && propName(p.callee) === 'title' && recvOk(p.callee.object);
+                count(t, isTitle);
+            });
+            // title(...) 参数里的静态文字（条件表达式分支、拼接片段也会落进同一个 title 系列）：原样、去首尾格式码、按行
+            for (const a of titleArgs) walk(a, (x) => {
+                const t = staticText(x);
+                if (t == null) return;
+                for (const v of [t, trimCodes(t), ...t.split(/\r?\n/).map(trimCodes)]) if (v) tset.add(v);
             });
         }
-        return out;
+        return { uses, titleTexts };
     }
 
     // ---------------------------------------------------------------
@@ -2501,9 +2531,11 @@
             if (!m) return false;
             const tag = 'ACHV' + m[1], body = m[2];
             if (/(?:\u00a7.|\s)$/.test(body) || /[\r\n]/.test(body) || !looksLikeText(body, 'loose')) return false;
-            const use = opts.achvTitles.get(e.value);
-            if (!use || use.other > 0) return false;   // 整段文字在别处（任何脚本）也出现：它们共用一个键，不拆
-            const r = ctx.allocMarked(keyBase('title'), tag, body, meta('title'));
+            const use = opts.achvTitles.uses.get(e.value);
+            if (!use || use.other > 0) return false;   // 整段文字在别处（任何脚本、包括静态拼接）也出现：它们共用一个键，不拆
+            // 可见文字也被同一 title 系列里的普通标题使用：旧键不能凭文字认领，改按旧版同参数分配
+            const contested = !!(opts.achvTitles.titleTexts.get(fb) || new Set()).has(body);
+            const r = ctx.allocMarked(keyBase('title'), tag, body, meta('title'), { contested });
             if (!r.split) return false;
             markHandled(e);
             // 不登记精确表：运行时拿到整段 "ACHV§l …" 时不能映射到不含标记的译文
