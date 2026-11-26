@@ -3223,6 +3223,9 @@ export function show(player, item) {
     for (const { name, error } of await require('./review-regressions.js').runReviewRegressions()) {
         check(name, !error, error?.message);
     }
+    for (const { name, error } of await require('./achv-regressions.js').runAchvRegressions()) {
+        check(name, !error, error?.message);
+    }
     console.log(`\n结果：${passed} 通过，${failed} 失败，私人存档跳过 ${skippedPrivate} 项`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

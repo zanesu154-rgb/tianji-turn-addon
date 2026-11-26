@@ -240,6 +240,7 @@
         // 这些文字翻译后比较就失败，自定义界面不再生效 → 脚本和界面里都保持原文
         ctx.uiCompared = new Set();
         ctx.uiPrefixes = new Set();
+        ctx.uiMarkers = new Set();
         ctx.uiDataChannels = new Set();
         for (const p of allFiles) {
             const pk = packOf(p);
@@ -252,6 +253,8 @@
                 if (v && /\p{L}{2,}/u.test(NS.stripFormatting(v))) ctx.uiCompared.add(v);
                 // (#title_text - 'inspecting:')：界面减掉这个前缀再显示，前缀后面的文字照常翻译
                 if (m[1] === '-' && m[2] && /[:|]$/.test(m[2])) ctx.uiPrefixes.add(m[2]);
+                // (#title_text - 'ACHV')：界面靠标题开头的路由标记识别成就表单，标记不能进译文（只保护 ACHV，其他标记不动）
+                if (m[1] === '-' && m[2] === 'ACHV') ctx.uiMarkers.add('ACHV');
             }
             // 界面把标题 / 动作栏文字当数据读（按字符位置截取 '%.172s' * #text）：脚本发过去的是数据，不能翻译
             if (/'%\.\d+s'\s*\*/.test(txt)) {
@@ -349,6 +352,7 @@
             if (si.usesServerUi) usesServerUi = true;
         }
         const collidingMethods = new Set(Object.keys(NS.SCRIPT_SINKS).filter(n => userMethods.has(n)));
+        ctx.achvTitles = ctx.uiMarkers.has('ACHV') && NS.collectAchvTitles ? NS.collectAchvTitles(scriptInfos) : null;
         const bpManifest = packs.find(p => p.type === 'BP');
         // @minecraft/server 2.2.0（1.21.110）起 ItemStack.setLore 接受 RawMessage，物品描述也能翻译
         const rawLore = packs.some(pk => (pk.manifest.dependencies || []).some(d => {
@@ -471,7 +475,7 @@
                 const content = await fs.readText(p);
                 const r = NS.processScript(content, p, ctx, {
                     info: scriptInfos.get(p), formSinksEnabled: usesServerUi, collidingMethods,
-                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, uiDataChannels: ctx.uiDataChannels, colonPrefix, deferTopics: true, bakeOf, localizers, localeBakeOf,
+                    runtimeKey, injectRuntime: opt.injectRuntime, langFields, paramTexts: paramTexts.get(p), crossDict: crossDicts.get(p), asciiTexts, refSyntax: !!crossDicts.refSyntax, idKeys, rawLore, uiCompared: ctx.uiCompared, uiPrefixes: ctx.uiPrefixes, uiMarkers: ctx.uiMarkers, achvTitles: ctx.achvTitles, uiDataChannels: ctx.uiDataChannels, colonPrefix, deferTopics: true, bakeOf, localizers, localeBakeOf,
                 });
                 if (r.changed) {
                     pending.set(p, r.content);

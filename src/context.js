@@ -233,6 +233,63 @@
             return key;
         }
 
+        /**
+         * 界面路由标记标题（ACHV§l Progress）：标记留在译文外，只把标记后的可见文字写进 lang。
+         * 所有分配仍走 alloc/_alloc（系列序号、预演对齐、去重与旧版完全一致）；这里只在 _alloc 之后改 entries / tagStrip。
+         *  - 同系列旧键里有以 tag 开头的空闲键：恰好 1 个才可能迁移（旧值形态必须可确认），0 个走正文分配，多个保守回退
+         *  - 整段文字已被别处占用（共享）、alloc 没返回唯一候选、旧值不能安全迁移：保持旧版行为（整段）并警告
+         * 返回 { key, split }。split=false 时调用方按旧路径处理（整段键已分配，再 alloc 会命中去重）。
+         */
+        allocMarked(baseKey, tag, body, meta, contested = null) {
+            const full = tag + body;
+            if (!this._achvKeys) this._achvKeys = new Map();
+            if (this._achvKeys.has(full)) return { key: this._achvKeys.get(full), split: true };
+            const base = sanitizeKey(baseKey);
+            const free = (k) => !this.entries.has(k) && !this.claimed.has(k) && !this.referenced.has(k);
+            const valsOf = (k) => { const ev = this.existingValues.get(k); return (ev instanceof Set ? [...ev] : ev != null ? [ev] : []).filter(v => typeof v === 'string'); };
+            const cands = [...this.knownKeys].filter(k => (k === base || (k.startsWith(base + '_') && /^[1-9]\d*$/.test(k.slice(base.length + 1)))) &&
+                free(k) && valsOf(k).some(v => v.startsWith(tag)));
+            const shared = this.dedupe.has(meta.scope + '\u0000' + full);
+            const keep = (key, why) => { this.warn(`${meta.file}: ACHV 标题 "${full}" ${why}，保持整段（路由标记仍在译文里，请人工确认译文没有改动 ACHV）`); return { key, split: false }; };
+            const splitAs = (key) => {
+                this.entries.set(key, { value: body, file: meta.file, kind: meta.kind });
+                this.dedupe.delete(meta.scope + '\u0000' + full);
+                this._achvKeys.set(full, key);
+                return { key, split: true };
+            };
+            if (!cands.length) {
+                if (shared) return keep(this.alloc(baseKey, full, meta), '的整段文字已被别处使用');
+                if (contested) {
+                    // 可见文字也是同系列普通标题的文字：拆分后两个键的值都是正文，不能凭文字认领旧键。
+                    // 只有旧 lang 里同系列空闲旧键的数量正好等于这个文件 title 的静态文字种数（上次转换的输出：每个标题一个键），
+                    // 才按出现顺序认领（与首次转换的分配顺序一致）；否则按旧版同参数分配整段，只在得到全新键时拆分，认到已有键就保持整段
+                    const idx = (k) => k === base ? 0 : +k.slice(base.length + 1);
+                    const oldKeys = [...this.knownKeys].filter(k => (k === base || (k.startsWith(base + '_') && /^[1-9]\d*$/.test(k.slice(base.length + 1)))) && !this.referenced.has(k)).sort((a, b) => idx(a) - idx(b));
+                    // 按出现顺序一一对应：第 i 个标题文字（ACHV 标题取标记后的正文）必须和第 i 个旧键的某个旧值“看起来是同一句话的原文/译文”
+                    // （占位符、格式码、数字、长度比例，沿用系列认领的同一套判断）；任何一对对不上就不认领
+                    const aligned = contested.consumers.length > 0 && oldKeys.length === contested.consumers.length &&
+                        oldKeys.every((k, i) => valsOf(k).some(v => seriesCompat(seriesFeat(contested.consumers[i]), seriesFeat(v), true)));
+                    if (!aligned) {
+                        const key = this.alloc(baseKey, full, meta);   // 与旧版同参数
+                        if (this.knownKeys.has(key)) return keep(key, `的可见文字 "${body}" 也用于普通标题，旧键 ${key} 的归属无法确认`);
+                        return splitAs(key);
+                    }
+                }
+                const key = this.alloc(baseKey, body, { ...meta, scope: 'script\u0000ui-marker:ACHV' });
+                this._achvKeys.set(full, key);
+                return { key, split: true };
+            }
+            const key = this.alloc(baseKey, full, meta);     // 与旧版同参数：序号、seriesLog、alignPlan、去重完全一致
+            if (cands.length > 1) return keep(key, `有多个同系列旧键（${cands.join('、')}）含 ACHV，无法确认身份`);
+            if (shared) return keep(key, '的整段文字已被别处使用');
+            if (key !== cands[0]) return keep(key, `的旧键 ${cands[0]} 没有被认领`);
+            const vals = valsOf(key);
+            const ok = vals.every(v => v.startsWith(tag) ? !v.slice(tag.length).includes('ACHV') : !v.includes('ACHV'));
+            if (!ok) return keep(key, `的旧译文（键 ${key}）含 ACHV 但不是以 "${tag}" 开头，不能安全迁移`);
+            this.tagStrip.set(key, tag);
+            return splitAs(key);
+        }
+
         _alloc(baseKey, text, { file = '', kind = '', scope = null } = {}) {
             text = dedentCode(text);
             const base = sanitizeKey(baseKey);

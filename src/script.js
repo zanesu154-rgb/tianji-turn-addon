@@ -852,6 +852,134 @@
         return info;
     }
 
+    /**
+     * 保守判定 "接收者确定是原生 ActionFormData"：构造器本地名来自 @minecraft/server-ui 且全文件只有这一个绑定；
+     * 接收者变量的每个绑定都是普通声明、每个初值/赋值都是 new ActionFormData(...)（链式亦可）。不做作用域推理，任何不确定都返回 false。
+     */
+    function actionFormChecker(ast) {
+  let actionInfo = null;
+        const getActionInfo = () => {
+            if (actionInfo) return actionInfo;
+            const bindCount = new Map(), inits = new Map(), declN = new Map(), actionNames = new Set();
+            const addB = (nm) => bindCount.set(nm, (bindCount.get(nm) || 0) + 1);
+            const pat = (p) => {
+                if (!p) return;
+                if (p.type === 'Identifier') addB(p.name);
+                else if (p.type === 'ObjectPattern') p.properties.forEach(x => pat(x.type === 'RestElement' ? x.argument : x.value));
+                else if (p.type === 'ArrayPattern') p.elements.forEach(pat);
+                else if (p.type === 'AssignmentPattern') pat(p.left);
+                else if (p.type === 'RestElement') pat(p.argument);
+            };
+            const addInit = (nm, init) => { if (!inits.has(nm)) inits.set(nm, []); inits.get(nm).push(init); };
+            walk(ast, (n) => {
+                if (n.type === 'ImportSpecifier' || n.type === 'ImportDefaultSpecifier' || n.type === 'ImportNamespaceSpecifier') {
+                    addB(n.local.name);
+                    if (n.type === 'ImportSpecifier' && n.parent && n.parent.source && n.parent.source.value === '@minecraft/server-ui' && (n.imported.name || n.imported.value) === 'ActionFormData') actionNames.add(n.local.name);
+                } else if (n.type === 'VariableDeclarator') { pat(n.id); if (n.id.type === 'Identifier') { addInit(n.id.name, n.init); declN.set(n.id.name, (declN.get(n.id.name) || 0) + 1); } }
+                else if (n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression') { if (n.id) addB(n.id.name); n.params.forEach(pat); }
+                else if (n.type === 'ClassDeclaration' || n.type === 'ClassExpression') { if (n.id) addB(n.id.name); }
+                else if (n.type === 'CatchClause') pat(n.param);
+                else if (n.type === 'AssignmentExpression') { if (n.left.type === 'Identifier') addInit(n.left.name, n.operator === '=' ? n.right : null); else if (n.left.type !== 'MemberExpression') pat(n.left); }
+            });
+            actionInfo = { bindCount, inits, declN, actionNames };
+            return actionInfo;
+        };
+        const isActionNew = (e) => {
+            const { bindCount, actionNames } = getActionInfo();
+            return !!e && e.type === 'NewExpression' && e.callee.type === 'Identifier' && actionNames.has(e.callee.name) && bindCount.get(e.callee.name) === 1;
+        };
+        const chainIsActionNew = (e) => {
+            for (let g = 0; g < 200 && e; g++) {
+                if (isActionNew(e)) return true;
+                if (e.type === 'CallExpression' && e.callee.type === 'MemberExpression') e = e.callee.object;
+                else if (e.type === 'ParenthesizedExpression') e = e.expression;
+                else return false;
+            }
+            return false;
+        };
+        const definitelyActionRecv = (recv) => {
+            let e = recv;
+            for (let g = 0; g < 200 && e; g++) {
+                if (e.type === 'CallExpression' && e.callee.type === 'MemberExpression') e = e.callee.object;
+                else if (e.type === 'ParenthesizedExpression') e = e.expression;
+                else break;
+            }
+            if (!e) return false;
+            if (isActionNew(e)) return true;
+            if (e.type !== 'Identifier') return false;
+            const { bindCount, inits, declN } = getActionInfo();
+            const list = inits.get(e.name) || [];
+            // 所有绑定都是普通 `const/let/var N = …` 声明（排除参数、解构、导入等别的绑定），且每个初值/赋值都是 new ActionFormData(...)
+            return list.length > 0 && (bindCount.get(e.name) || 0) === (declN.get(e.name) || 0) && list.every(x => chainIsActionNew(x));
+        };
+        return definitelyActionRecv;
+    }
+
+    /**
+     * 跨文件预扫描：路由标记标题（"ACHV§l Progress"）的整段文字在所有脚本里分别以"title() 的第一个参数"和"其他位置"出现几次。
+     * 只有它在所有脚本里都只出现在 title() 参数位置时才允许拆分标记；否则整段文字会和别处共用同一个键，拆分会改掉别处的显示。
+     * 整段文字按提取器同样的拼接语义（flattenConcat）计算："ACHV§l " + "Progress" 也是这段文字的一次"其他用法"。
+     * 另外按文件基名记下所有 .title(…) 参数里出现的静态文字：标记后面的可见文字（Progress）如果也被普通标题使用，
+     * 同一个 title 系列里的旧键就无法凭文字判断归属。
+     * 返回 { uses: Map(整段文字 → { title, other }), titleTexts: Map(文件基名 → Set(文字)) }。
+     */
+    function collectAchvTitles(infos) {
+        const uses = new Map();
+        const titleTexts = new Map();
+        const titleUnits = new Map();
+        const isAchv = (t) => typeof t === 'string' && /^ACHV(?:\u00a7.|\s)/.test(t);
+        const count = (t, isTitle) => {
+            let u = uses.get(t);
+            if (!u) uses.set(t, u = { title: 0, other: 0 });
+            if (isTitle) u.title++; else u.other++;
+        };
+        // 与提取器相同：字符串、模板、+ 拼接；全部片段都是字面量时得到整段文字，否则 null
+        const staticText = (n) => {
+            if (isStr(n)) return n.value;
+            if (n.type !== 'TemplateLiteral' && !(n.type === 'BinaryExpression' && n.operator === '+')) return null;
+            const parts = flattenConcat(n);
+            return parts && parts.every(p => 'lit' in p) ? parts.map(p => p.lit).join('') : null;
+        };
+        const inConcat = (n) => {
+            const p = n.parent;
+            return !!p && ((p.type === 'BinaryExpression' && p.operator === '+') || p.type === 'TemplateLiteral');
+        };
+        const trimCodes = (t) => t.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, '');
+        for (const [file, info] of infos) {
+            if (!info || !info.ast) continue;
+            const recvOk = actionFormChecker(info.ast);
+            const fb = fileBaseOf(file);
+            if (!titleTexts.has(fb)) titleTexts.set(fb, new Set());
+            const tset = titleTexts.get(fb);
+            if (!titleUnits.has(fb)) titleUnits.set(fb, { set: new Set(), multi: false });
+            const uset = titleUnits.get(fb);
+            const titleArgs = [];
+            walk(info.ast, (n) => {
+                if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && propName(n.callee) === 'title') titleArgs.push(...n.arguments);
+                const t = staticText(n);
+                if (typeof t !== 'string') return;
+                // 提取器写 lang 时会去掉首尾格式码（含尾部 §r）和空白："ACHV§l " + "Progress§r" 与 "ACHV§l Progress" 共用一个键
+                const key = trimCodes(t);
+                if (!isAchv(key)) return;
+                // 拼接里的片段、拼出来的整段、模板：都算其他用法；只有"确定是原生 ActionFormData 的 title() 的、没有首尾格式码的字符串字面量参数"算标题用法
+                if (inConcat(n)) { count(key, false); return; }
+                const p = n.parent;
+                const isTitle = isStr(n) && t === key && p && p.type === 'CallExpression' && p.arguments[0] === n && p.callee.type === 'MemberExpression' && propName(p.callee) === 'title' && recvOk(p.callee.object);
+                count(key, isTitle);
+            });
+            // title(...) 参数里的静态文字（条件表达式分支、拼接片段也会落进同一个 title 系列）：原样、去首尾格式码、按行
+            for (const a of titleArgs) walk(a, (x) => {
+                const t = staticText(x);
+                if (t == null) return;
+                for (const v of [t, trimCodes(t), ...t.split(/\r?\n/).map(trimCodes)]) if (v) tset.add(v);
+                // 每个不同的整段静态标题文字（去首尾格式码）需要一个自己的键：用来判断旧 lang 的 title 系列是否"每个标题一个旧键"
+                if (trimCodes(t)) uset.set.add(trimCodes(t));
+                if (/[\r\n]/.test(t)) uset.multi = true;
+            });
+        }
+        return { uses, titleTexts, titleUnits };
+    }
+
     // ---------------------------------------------------------------
     //  运行时（注入到脚本顶部）
     // ---------------------------------------------------------------
@@ -2125,6 +2253,8 @@
             return isFormNew(e) || (e && e.type === 'Identifier' && formVars.has(e.name));
         };
 
+        const definitelyActionRecv = actionFormChecker(ast);
+
         // ---- 改写表 ----
         const overrides = new Map();   // node → () => string
         // 套在表达式本身外面、又不影响别的改写（M(…) 等）的包装：H(id, 拼出来的名字)
@@ -2400,12 +2530,36 @@
             return prefixed || (channel && dyn >= 3);
         }
 
+        /**
+         * ACHV§l Progress（资源包界面靠标题里的 ACHV 路由到成就表单）：ACHV 和后面的格式码留成不可译的 {"text"} 节点，
+         * 只把可见文字交给语言键。条件不满足一律返回 false，由调用方按旧路径处理。
+         */
+        function achvSplit(e) {
+            if (!isStr(e) || !opts.achvTitles) return false;
+            const m = /^ACHV((?:\u00a7.|\s)+)(\S[\s\S]*)$/.exec(e.value);
+            if (!m) return false;
+            const tag = 'ACHV' + m[1], body = m[2];
+            if (/(?:\u00a7.|\s)$/.test(body) || /[\r\n]/.test(body) || !looksLikeText(body, 'loose')) return false;
+            const use = opts.achvTitles.uses.get(e.value);
+            if (!use || use.other > 0) return false;   // 整段文字在别处（任何脚本、包括静态拼接）也出现：它们共用一个键，不拆
+            // 可见文字也被同一 title 系列里的普通标题使用：拆分后两个键的值都是正文，旧键不能凭文字认领（见 allocMarked）
+            const contested = (opts.achvTitles.titleTexts.get(fb) || new Set()).has(body);
+            const units = opts.achvTitles.titleUnits.get(fb);
+            const r = ctx.allocMarked(keyBase('title'), tag, body, meta('title'), contested ? { consumers: units && !units.multi ? [...units.set].map(x => x.replace(/^ACHV(?:\u00a7.|\s)+/, '')) : [] } : null);
+            if (!r.split) return false;
+            markHandled(e);
+            // 不登记精确表：运行时拿到整段 "ACHV§l …" 时不能映射到不含标记的译文
+            overrides.set(e, () => `{"rawtext":[${JSON.stringify({ text: 'ACHV' })},${JSON.stringify({ text: m[1] })},${JSON.stringify({ translate: r.key })}]}`);
+            return true;
+        }
+
         /** 处理一个“显示参数”表达式 */
-        function transformSinkExpr(e, hint) {
+        function transformSinkExpr(e, hint, achvOK) {
             if (!e || e.type === 'SpreadElement') return;
             if (inDebug(e)) { skipDebug(e); return; }   // p.sendMessage(DEBUG ? "…" : "…") 的调试分支
             // 资源包界面拿来比较的文字（form.title("Magic") 时显示自定义界面）：保持原文
             if (opts.uiCompared && isStr(e) && opts.uiCompared.has(e.value.replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) { handled.add(e); return; }
+            if (achvOK && achvSplit(e)) return;
             if (isStr(e) || e.type === 'TemplateLiteral' || (e.type === 'BinaryExpression' && e.operator === '+')) {
                 const parts = isStr(e) ? [{ lit: e.value }] : flattenConcat(e);
                 if (parts && isUiData(parts, hint)) { markHandled(e); uiDataKept++; return; }
@@ -2496,7 +2650,8 @@
                         if (n.arguments[0]) transformCommandExpr(n.arguments[0]);
                         return;
                     }
-                    (spec.args || []).forEach(i => transformSinkExpr(n.arguments[i], hint));
+                    const achvOK = name === 'title' && spec.kind === 'form' && !!(opts.uiMarkers && opts.uiMarkers.has('ACHV')) && definitelyActionRecv(n.callee.object);
+                    (spec.args || []).forEach(i => transformSinkExpr(n.arguments[i], hint, achvOK));
                     (spec.arrays || []).forEach(i => {
                         const a = n.arguments[i];
                         if (!a) return;
@@ -3684,6 +3839,7 @@
     }
     NS.upgradeRuntime = upgradeRuntime;
     NS.collectScriptInfo = collectScriptInfo;
+    NS.collectAchvTitles = collectAchvTitles;
     NS.guessLang = guessLang;
     NS.regexPhrases = regexPhrases;
     NS.langHintFromFile = langHintFromFile;
