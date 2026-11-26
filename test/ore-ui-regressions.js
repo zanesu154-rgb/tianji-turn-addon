@@ -16,9 +16,12 @@ function color(form, value) {
     return refresh;
 }
 function displayColor(form, value) { return color(form, value); }
+function addRows(form, options) { options.rowsEnd && options.rowsEnd(form); }
 export function settings(player, initial, ExistingRaw) {
     const title = new Text(initial, { clientWritable: false });
-    const form = new Form(player, title);
+    let form;
+    try { form = new Form(player, title); }
+    catch (error) { throw error; }
     const summaries = {}, actions = {};
     for (const slot of slots) {
         summaries[slot] = new Text("");
@@ -27,7 +30,10 @@ export function settings(player, initial, ExistingRaw) {
         form.button(actions[slot]);
     }
     const refreshColor = displayColor(form, "§8No color");
-    const refreshOff = color(form, "§8Off");
+    let refreshOff;
+    const options = {};
+    options.rowsEnd = receiver => { refreshOff = color(receiver, "§8Off"); };
+    addRows(form, options);
     const refresh = state => {
         for (const slot of slots) {
             const value = state[slot];
@@ -47,11 +53,22 @@ export function nonDisplay(player, opts, OtherForm) {
     form.textField("Blueprint", writable);
     if (mode.getData() === "toggle") form.label(mode);
     form.label(shared);
+    let reassigned;
+    reassigned = new Form(player, "Label");
+    reassigned = new OtherForm(player, "Other");
+    const unknown = new Text("White");
+    reassigned.label(unknown);
     for (let Form = OtherForm, i = 0; i < 1; i++) {
         const label = new Text("White");
         new Form(player, "Other").label(label);
     }
-    return { form, writable, mode, shared };
+    const escapingOptions = {};
+    escapingOptions.rowsEnd = receiver => {
+        const label = new Text("White");
+        receiver.label(label);
+    };
+    addRows(form, escapingOptions);
+    return { form, writable, mode, shared, escapingOptions };
 }
 export const catalog = ["Light - Settings", "Set action", "Change action", "White", "§8Off", "§8No color"];
 `;
@@ -155,10 +172,11 @@ async function runOreUiRegressions() {
         assert.equal(render(form.labels[3]), '§8无颜色');
 
         class OtherForm { label(observable) { assert.equal(observable.getData(), 'White'); } }
-        const { writable, mode, shared } = nonDisplay({}, { clientWritable: true }, OtherForm);
+        const { writable, mode, shared, escapingOptions } = nonDisplay({}, { clientWritable: true }, OtherForm);
         assert.equal(writable.options.clientWritable, true);
         assert.equal(mode.getData(), 'toggle');
         assert.equal(shared.getData(), 'White');
+        escapingOptions.rowsEnd(new OtherForm());
     });
     await check('#169 fresh、双语与仅中文回填保留 lang 字节、键顺序和用户译文', async () => {
         assert.deepEqual(texts(converted), texts(control));

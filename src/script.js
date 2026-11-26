@@ -2099,7 +2099,7 @@
             if (node.type === 'VariableDeclarator') {
                 const scope = scopeOf(node, node.parent.kind !== 'var');
                 bind(node.id, scope, node);
-                if (node.id.type === 'Identifier' && node.init) locals.push(node);
+                if (node.id.type === 'Identifier') locals.push(node);
             } else if (isFunction(node)) {
                 if (node.type === 'FunctionDeclaration') {
                     bind(node.id, scopeOf(node, true), node);
@@ -2158,37 +2158,111 @@
                 ((p.type === 'AssignmentExpression' || p.type === 'ForOfStatement' || p.type === 'ForInStatement') && p.left === node);
         };
         const forms = new Set();
-        const markForm = binding => {
+        const markForm = (binding, constructorAssignment = null) => {
             if (binding && !binding.refs.some(ref => {
+                if (ref === constructorAssignment) return false;
                 const member = ref.parent;
                 return isWrite(ref) || (member.type === 'MemberExpression' && member.object === ref &&
                     (isWrite(member) || (member.parent.type === 'UnaryExpression' && member.parent.operator === 'delete')));
             })) forms.add(binding);
         };
         for (const d of locals) {
-            if (isForm(d.init) && !isExported(d.parent)) markForm(resolve(d.id));
+            if (isExported(d.parent)) continue;
+            const binding = resolve(d.id);
+            if (binding?.declaration !== d) continue;
+            if (isForm(d.init)) markForm(binding);
+            else if (!d.init && isFunction(scopeOf(d, false))) {
+                // A form can be declared outside a try block and created inside it.
+                // Allow one direct constructor assignment and reject any other write.
+                const assignment = binding.refs.find(ref => {
+                    const p = ref.parent;
+                    return p.type === 'AssignmentExpression' && p.left === ref && p.operator === '=' && isForm(p.right);
+                });
+                if (assignment) markForm(binding, assignment);
+            }
         }
         const knownForm = node => !!node && (isForm(node) || forms.has(resolve(node)));
 
         // Propagate through direct calls to named functions only. A returned,
         // exported or aliased function can receive a different kind of object.
-        const directHelpers = [];
+        const directHelpers = new Map();
         for (const fn of helpers) {
             const binding = resolve(fn.id, fn.parent);
             if (!binding?.refs.length || isExported(fn) || binding.refs.some(ref =>
                 ref.parent.type !== 'CallExpression' || ref.parent.callee !== ref ||
                 ref.parent.arguments.some(arg => arg.type === 'SpreadElement'))) continue;
-            directHelpers.push({ fn, calls: binding.refs.map(ref => ref.parent) });
+            directHelpers.set(binding, { fn, calls: binding.refs.map(ref => ref.parent) });
         }
-        for (let pass = 0; pass < 2; pass++) {
-            for (const { fn, calls } of directHelpers) {
+        const propagateForms = () => {
+            for (const { fn, calls } of directHelpers.values()) {
                 fn.params.forEach((param, i) => {
                     if (param.type === 'Identifier' && calls.every(call => knownForm(call.arguments[i]))) {
                         markForm(resolve(param, fn));
                     }
                 });
             }
+        };
+        propagateForms();
+        propagateForms();
+
+        // An options object may hold a local display callback (such as a
+        // form's row builder). Follow its one direct handoff, never an
+        // exported, returned, computed or aliased callback.
+        for (const d of locals) {
+            if (d.init?.type !== 'ObjectExpression' || !isFunction(scopeOf(d, false))) continue;
+            const binding = resolve(d.id);
+            if (binding?.declaration !== d) continue;
+            const callbacks = new Map();
+            const arrowProperties = new Set();
+            if (!d.init.properties.every(p => p.type === 'Property' && !p.computed && p.kind === 'init' &&
+                (p.key.name || p.key.value) !== '__proto__')) continue;
+            for (const p of d.init.properties) {
+                if (p.value.type === 'ArrowFunctionExpression') arrowProperties.add(p.key.name || p.key.value);
+            }
+            let handoff;
+            const local = binding.refs.every(ref => {
+                const p = ref.parent;
+                if (p.type === 'MemberExpression' && p.object === ref && !p.computed && propName(p) !== '__proto__') {
+                    const assign = p.parent;
+                    if (assign.type !== 'AssignmentExpression' || assign.operator !== '=' || assign.left !== p) return false;
+                    const key = propName(p);
+                    if (callbacks.has(key) || arrowProperties.has(key)) return false;
+                    callbacks.set(key, assign.right);
+                    return true;
+                }
+                if (handoff || p.type !== 'CallExpression' || p.callee.type !== 'Identifier' ||
+                    !directHelpers.has(resolve(p.callee)) || p.arguments.some(arg => arg.type === 'SpreadElement')) return false;
+                handoff = p;
+                return true;
+            });
+            if (!local || !handoff || !callbacks.size) continue;
+            const { fn } = directHelpers.get(resolve(handoff.callee));
+            const param = fn.params[handoff.arguments.findIndex(arg => resolve(arg) === binding)];
+            if (param?.type !== 'Identifier') continue;
+            const option = resolve(param, fn);
+            for (const [key, callback] of callbacks) {
+                const receiver = callback.params?.[0];
+                if (callback.type !== 'ArrowFunctionExpression' || receiver?.type !== 'Identifier' || !option) continue;
+                let invoked = false;
+                const confined = option.refs.every(ref => {
+                    const member = ref.parent;
+                    if (member.type !== 'MemberExpression' || member.object !== ref || member.computed ||
+                        isWrite(member) || (member.parent.type === 'UnaryExpression' && member.parent.operator === 'delete')) return false;
+                    const use = member.parent;
+                    const called = use.type === 'CallExpression' && use.callee === member;
+                    const property = propName(member);
+                    if (property !== key) {
+                        return !called || arrowProperties.has(property) || callbacks.get(property)?.type === 'ArrowFunctionExpression' ||
+                            !callbacks.has(property) && !d.init.properties.some(p => (p.key.name || p.key.value) === property);
+                    }
+                    if (!called) return use.type === 'LogicalExpression' && use.operator === '&&' && use.left === member;
+                    invoked = true;
+                    return knownForm(use.arguments[0]) && !use.arguments.some(arg => arg.type === 'SpreadElement');
+                });
+                if (confined && invoked) markForm(resolve(receiver, callback));
+            }
         }
+        propagateForms();
 
         const displayMethods = new Set(['label', 'button', 'header']);
         const displayArg = node => {
@@ -2211,7 +2285,7 @@
             if (isReadonly(node) && displayArg(node)) initializers.add(node);
         }
         for (const d of locals) {
-            if (!isFunction(scopeOf(d, false))) continue;
+            if (!d.init || !isFunction(scopeOf(d, false))) continue;
             const binding = resolve(d.id);
             if (!binding || binding.declaration !== d) continue;
             const single = isReadonly(d.init);
