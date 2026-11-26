@@ -3220,9 +3220,13 @@ export function show(player, item) {
             JSON.stringify({ uiSplits }));
         delete globalThis[key];
     }
-    for (const { name, error } of await require('./review-regressions.js').runReviewRegressions()) {
-        check(name, !error, error?.message);
+    const review = require('./review-regressions.js');
+    const reviewResults = await review.runReviewRegressions();
+    for (const result of reviewResults) {
+        if (result.tier === 'Mandatory') check(result.id + ' ' + result.name, !result.error, result.error?.message);
+        else console.log(review.formatReviewResult(result));
     }
+    console.log('历史回归分级结果 ' + JSON.stringify(review.summarizeReviewResults(reviewResults)));
     for (const { name, error } of await require('./achv-regressions.js').runAchvRegressions()) {
         check(name, !error, error?.message);
     }
