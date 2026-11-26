@@ -18,5 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Check approved regression tiers
+        run: node test/review-tier-check.js
       - name: Run tests
         run: node test/run-tests.js

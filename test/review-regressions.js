@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const vm = require('node:vm');
 const { NS, MemFS, readDir } = require('./load.js');
+const { tests: classifications } = require('./review-regression-tiers.json');
 
 const scriptPath = 'BP/scripts/achv_ui.js';
 const target = 'script.achv_ui.title';
@@ -209,19 +210,44 @@ const acceptance = [
 ];
 
 async function runReviewRegressions({ includeAcceptance = false } = {}) {
+    assert.equal(classifications.length, cases.length, 'classification coverage');
+    assert.equal(new Set(classifications.map(test => test.id)).size, cases.length, 'unique stable IDs');
+    assert.deepEqual([...new Set(classifications.map(test => test.name))].sort(), cases.map(([name]) => name).sort(), 'classification names');
+    for (const test of classifications) {
+        assert.match(test.id, /^HR-\d{3}$/, 'stable historical ID');
+        assert.ok(['Mandatory', 'Compatibility', 'Exploratory'].includes(test.tier), 'valid regression tier: ' + test.id);
+    }
     const results = [];
     for (const [name, run] of includeAcceptance ? [...cases, ...acceptance] : cases) {
-        try { await run(); results.push({ name }); }
-        catch (error) { results.push({ name, error }); }
+        const classification = classifications.find(test => test.name === name);
+        const metadata = classification || { id: 'ACCEPTANCE', tier: 'Mandatory' };
+        try { await run(); results.push({ ...metadata, name }); }
+        catch (error) { results.push({ ...metadata, name, error }); }
     }
     return results;
 }
 
 if (require.main === module) {
     runReviewRegressions({ includeAcceptance: process.argv.includes('--acceptance') }).then(results => {
-        for (const { name, error } of results) console.log(error ? 'FAIL ' + name + '\n' + error.message : 'PASS ' + name);
-        process.exitCode = results.some(result => result.error) ? 1 : 0;
+        for (const result of results) console.log(formatReviewResult(result));
+        console.log(JSON.stringify(summarizeReviewResults(results)));
+        process.exitCode = hasMandatoryFailure(results) ? 1 : 0;
     }).catch(error => { console.error(error); process.exitCode = 1; });
 }
 
-module.exports = { runReviewRegressions };
+function hasMandatoryFailure(results) {
+    return results.some(result => result.error && result.tier === 'Mandatory');
+}
+
+function formatReviewResult({ id, tier, name, error }) {
+    return (error ? 'FAIL ' : 'PASS ') + '[' + tier + ' ' + id + '] ' + name + (error ? '\n' + error.message : '');
+}
+
+function summarizeReviewResults(results) {
+    return Object.fromEntries(['Mandatory', 'Compatibility', 'Exploratory'].map(tier => {
+        const group = results.filter(result => result.tier === tier);
+        return [tier, { passed: group.filter(result => !result.error).length, failed: group.filter(result => result.error).length }];
+    }));
+}
+
+module.exports = { runReviewRegressions, hasMandatoryFailure, formatReviewResult, summarizeReviewResults };
