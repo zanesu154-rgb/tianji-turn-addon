@@ -3227,6 +3227,9 @@ export function show(player, item) {
         else console.log(review.formatReviewResult(result));
     }
     console.log('历史回归分级结果 ' + JSON.stringify(review.summarizeReviewResults(reviewResults)));
+    for (const { name, error } of await require('./ore-ui-regressions.js').runOreUiRegressions()) {
+        check(name, !error, error && error.stack);
+    }
     for (const { name, error } of await require('./achv-regressions.js').runAchvRegressions()) {
         check(name, !error, error?.message);
     }
