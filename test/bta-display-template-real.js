@@ -184,12 +184,15 @@ async function checkBtaRealSample(originalPath, translatedPath) {
             }
         }
     }
-    // Exercise raw historical zh_CN input separately from the exported-lang loops.
-    const zhOnly = await convert(historical, ['zh_CN']);
-    const zhTemplates = inspectTemplates(zhOnly);
-    assert.deepEqual(zhTemplates, inspectTemplates(translated));
-    console.log(JSON.stringify({ source: 'original historical lang', mode: 'zh-only', modules: 100, templates: zhTemplates,
-        spanish: await checkSpanishPolice(zhOnly, zhTemplates, true), taxi: await checkTaxi(zhOnly, zhTemplates, true) }));
+    // Seed a separate closed loop directly from the original historical zh_CN bytes.
+    let zhOnly = historical;
+    for (let round = 0; round <= 2; round++) {
+        zhOnly = await convert(zhOnly, ['zh_CN']);
+        const zhTemplates = inspectTemplates(zhOnly);
+        assert.deepEqual(zhTemplates, inspectTemplates(translated));
+        console.log(JSON.stringify({ source: 'original historical zh_CN', mode: 'zh-only-' + round, modules: 100, templates: zhTemplates,
+            spanish: await checkSpanishPolice(zhOnly, zhTemplates, true), taxi: await checkTaxi(zhOnly, zhTemplates, true) }));
+    }
     assert.equal(checksum(fs.readFileSync(originalPath)), checksum(bytes));
     console.log('PASS BTA6 2.7.0 ' + checksum(bytes));
 }
