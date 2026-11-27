@@ -2056,6 +2056,265 @@
         return out;
     }
 
+    // Only local, read-only Ore UI flows can change their Observable type. In
+    // particular, a method on an object says nothing about its other callers.
+    function collectReadonlyOreObservables(ast) {
+        const imports = new Map();
+        for (const node of ast.body) {
+            if (node.type !== 'ImportDeclaration' || node.source.value !== '@minecraft/server-ui') continue;
+            for (const spec of node.specifiers) {
+                if (spec.type === 'ImportSpecifier') imports.set(spec.imported.name || spec.imported.value, spec);
+            }
+        }
+        if (!imports.has('CustomForm') || !imports.has('ObservableString')) return null;
+
+        const isFunction = node => !!node.params && /Function/.test(node.type);
+        const scopeOf = (node, lexical) => {
+            for (let p = node.parent; p; p = p.parent) {
+                if (p === ast || isFunction(p) || p.type === 'StaticBlock' ||
+                    (lexical && /^(BlockStatement|ForStatement|ForInStatement|ForOfStatement|SwitchStatement|CatchClause)$/.test(p.type))) return p;
+            }
+            return ast;
+        };
+        const scopes = new Map(), declarations = new Set();
+        const bind = (pattern, scope, declaration) => {
+            if (!pattern) return;
+            const bindChild = child => bind(child, scope, declaration);
+            switch (pattern.type) {
+                case 'Identifier': {
+                    declarations.add(pattern);
+                    if (!scopes.has(scope)) scopes.set(scope, new Map());
+                    const names = scopes.get(scope);
+                    names.set(pattern.name, names.has(pattern.name) ? null : { declaration, refs: [] });
+                    break;
+                }
+                case 'AssignmentPattern': bindChild(pattern.left); break;
+                case 'RestElement': bindChild(pattern.argument); break;
+                case 'ArrayPattern': pattern.elements.forEach(bindChild); break;
+                case 'ObjectPattern': pattern.properties.forEach(p => bindChild(p.value || p)); break;
+            }
+        };
+        const locals = [], helpers = [], constructors = [];
+        walk(ast, node => {
+            if (node.type === 'VariableDeclarator') {
+                const scope = scopeOf(node, node.parent.kind !== 'var');
+                bind(node.id, scope, node);
+                if (node.id.type === 'Identifier') locals.push(node);
+            } else if (isFunction(node)) {
+                if (node.type === 'FunctionDeclaration') {
+                    bind(node.id, scopeOf(node, true), node);
+                    if (node.id) helpers.push(node);
+                } else bind(node.id, node, node);
+                for (const param of node.params) bind(param, node, node);
+            } else if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') {
+                bind(node.id, node.type === 'ClassDeclaration' ? scopeOf(node, true) : node, node);
+            } else if (node.type === 'CatchClause') bind(node.param, node, node);
+            else if (/^Import.*Specifier$/.test(node.type)) bind(node.local, ast, node);
+            else if (node.type === 'NewExpression') constructors.push(node);
+        });
+        const resolve = (id, scope = id.parent) => {
+            if (id.type !== 'Identifier') return null;
+            for (let p = scope; p; p = p.parent) {
+                const names = scopes.get(p);
+                if (names?.has(id.name)) return names.get(id.name);
+            }
+            return null;
+        };
+        let dynamicScope = false;
+        walk(ast, node => {
+            if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'eval') dynamicScope = true;
+            if (node.type !== 'Identifier' || declarations.has(node)) return;
+            const p = node.parent;
+            if ((p.type === 'MemberExpression' && p.property === node && !p.computed) ||
+                ((p.type === 'Property' || p.type === 'MethodDefinition' || p.type === 'PropertyDefinition') && p.key === node && !p.computed) ||
+                /^Import.*Specifier$/.test(p.type) ||
+                (p.type === 'ExportSpecifier' && p.local !== node) || p.label === node) return;
+            resolve(node)?.refs.push(node);
+        });
+        if (dynamicScope) return null;
+
+        const directNew = (node, name) => node?.type === 'NewExpression' &&
+            resolve(node.callee)?.declaration === imports.get(name) &&
+            node.arguments.every(arg => arg.type !== 'SpreadElement');
+        const isForm = node => directNew(node, 'CustomForm');
+        const isReadonly = node => {
+            if (!directNew(node, 'ObservableString') || node.arguments.length < 1 || node.arguments.length > 2) return false;
+            const options = node.arguments[1];
+            return !options || (options.type === 'ObjectExpression' && options.properties.every(p =>
+                p.type === 'Property' && !p.computed && p.kind === 'init' &&
+                (isStr(p.key) ? p.key.value : p.key.name) === 'clientWritable' &&
+                p.value.type === 'Literal' && p.value.value === false));
+        };
+        const isExported = node => /^(ExportNamedDeclaration|ExportDefaultDeclaration)$/.test(node.parent.type);
+        const isWrite = ref => {
+            let node = ref, p = node.parent;
+            while ((p.type === 'AssignmentPattern' && p.left === node) || p.type === 'RestElement' ||
+                   p.type === 'ArrayPattern' || p.type === 'ObjectPattern' ||
+                   (p.type === 'Property' && p.value === node && p.parent.type === 'ObjectPattern')) {
+                node = p;
+                p = p.parent;
+            }
+            return p.type === 'UpdateExpression' ||
+                ((p.type === 'AssignmentExpression' || p.type === 'ForOfStatement' || p.type === 'ForInStatement') && p.left === node);
+        };
+        const forms = new Set();
+        const markForm = (binding, constructorAssignment = null) => {
+            if (binding && !binding.refs.some(ref => {
+                if (ref === constructorAssignment) return false;
+                const member = ref.parent;
+                return isWrite(ref) || (member.type === 'MemberExpression' && member.object === ref &&
+                    (isWrite(member) || (member.parent.type === 'UnaryExpression' && member.parent.operator === 'delete')));
+            })) forms.add(binding);
+        };
+        for (const d of locals) {
+            if (isExported(d.parent)) continue;
+            const binding = resolve(d.id);
+            if (binding?.declaration !== d) continue;
+            if (isForm(d.init)) markForm(binding);
+            else if (!d.init && isFunction(scopeOf(d, false))) {
+                // A form can be declared outside a try block and created inside it.
+                // Allow one direct constructor assignment and reject any other write.
+                const assignment = binding.refs.find(ref => {
+                    const p = ref.parent;
+                    return p.type === 'AssignmentExpression' && p.left === ref && p.operator === '=' && isForm(p.right);
+                });
+                if (assignment) markForm(binding, assignment);
+            }
+        }
+        const knownForm = node => !!node && (isForm(node) || forms.has(resolve(node)));
+
+        // Propagate through direct calls to named functions only. A returned,
+        // exported or aliased function can receive a different kind of object.
+        const directHelpers = new Map();
+        for (const fn of helpers) {
+            const binding = resolve(fn.id, fn.parent);
+            if (!binding?.refs.length || isExported(fn) || binding.refs.some(ref =>
+                ref.parent.type !== 'CallExpression' || ref.parent.callee !== ref ||
+                ref.parent.arguments.some(arg => arg.type === 'SpreadElement'))) continue;
+            directHelpers.set(binding, { fn, calls: binding.refs.map(ref => ref.parent) });
+        }
+        const propagateForms = () => {
+            for (const { fn, calls } of directHelpers.values()) {
+                fn.params.forEach((param, i) => {
+                    if (param.type === 'Identifier' && calls.every(call => knownForm(call.arguments[i]))) {
+                        markForm(resolve(param, fn));
+                    }
+                });
+            }
+        };
+        propagateForms();
+        propagateForms();
+
+        // An options object may hold a local display callback (such as a
+        // form's row builder). Follow its one direct handoff, never an
+        // exported, returned, computed or aliased callback.
+        for (const d of locals) {
+            if (d.init?.type !== 'ObjectExpression' || !isFunction(scopeOf(d, false))) continue;
+            const binding = resolve(d.id);
+            if (binding?.declaration !== d) continue;
+            const callbacks = new Map();
+            const arrowProperties = new Set();
+            if (!d.init.properties.every(p => p.type === 'Property' && !p.computed && p.kind === 'init' &&
+                (p.key.name || p.key.value) !== '__proto__')) continue;
+            for (const p of d.init.properties) {
+                if (p.value.type === 'ArrowFunctionExpression') arrowProperties.add(p.key.name || p.key.value);
+            }
+            let handoff;
+            const local = binding.refs.every(ref => {
+                const p = ref.parent;
+                if (p.type === 'MemberExpression' && p.object === ref && !p.computed && propName(p) !== '__proto__') {
+                    const assign = p.parent;
+                    if (assign.type !== 'AssignmentExpression' || assign.operator !== '=' || assign.left !== p) return false;
+                    const key = propName(p);
+                    if (callbacks.has(key) || arrowProperties.has(key)) return false;
+                    callbacks.set(key, assign.right);
+                    return true;
+                }
+                if (handoff || p.type !== 'CallExpression' || p.callee.type !== 'Identifier' ||
+                    !directHelpers.has(resolve(p.callee)) || p.arguments.some(arg => arg.type === 'SpreadElement')) return false;
+                handoff = p;
+                return true;
+            });
+            if (!local || !handoff || !callbacks.size) continue;
+            const { fn } = directHelpers.get(resolve(handoff.callee));
+            const param = fn.params[handoff.arguments.findIndex(arg => resolve(arg) === binding)];
+            if (param?.type !== 'Identifier') continue;
+            const option = resolve(param, fn);
+            for (const [key, callback] of callbacks) {
+                const receiver = callback.params?.[0];
+                if (callback.type !== 'ArrowFunctionExpression' || receiver?.type !== 'Identifier' || !option) continue;
+                let invoked = false;
+                const confined = option.refs.every(ref => {
+                    const member = ref.parent;
+                    if (member.type !== 'MemberExpression' || member.object !== ref || member.computed ||
+                        isWrite(member) || (member.parent.type === 'UnaryExpression' && member.parent.operator === 'delete')) return false;
+                    const use = member.parent;
+                    const called = use.type === 'CallExpression' && use.callee === member;
+                    const property = propName(member);
+                    if (property !== key) {
+                        return !called || arrowProperties.has(property) || callbacks.get(property)?.type === 'ArrowFunctionExpression' ||
+                            !callbacks.has(property) && !d.init.properties.some(p => (p.key.name || p.key.value) === property);
+                    }
+                    if (!called) return use.type === 'LogicalExpression' && use.operator === '&&' && use.left === member;
+                    invoked = true;
+                    return knownForm(use.arguments[0]) && !use.arguments.some(arg => arg.type === 'SpreadElement');
+                });
+                if (confined && invoked) markForm(resolve(receiver, callback));
+            }
+        }
+        propagateForms();
+
+        const displayMethods = new Set(['label', 'button', 'header']);
+        const displayArg = node => {
+            const p = node.parent;
+            if (isForm(p)) return p.arguments[1] === node;
+            return p.type === 'CallExpression' && p.arguments[0] === node &&
+                p.callee.type === 'MemberExpression' && !p.callee.computed &&
+                displayMethods.has(propName(p.callee)) && knownForm(p.callee.object);
+        };
+        const setterArg = node => {
+            const member = node.parent, call = member.parent;
+            if (member.type === 'MemberExpression' && member.object === node && !member.computed &&
+                propName(member) === 'setData' && call?.type === 'CallExpression' && call.callee === member &&
+                call.arguments.length === 1 && call.arguments[0].type !== 'SpreadElement') return call.arguments[0];
+            return null;
+        };
+
+        const initializers = new Set(), updates = new Set();
+        for (const node of constructors) {
+            if (isReadonly(node) && displayArg(node)) initializers.add(node);
+        }
+        for (const d of locals) {
+            if (!d.init || !isFunction(scopeOf(d, false))) continue;
+            const binding = resolve(d.id);
+            if (!binding || binding.declaration !== d) continue;
+            const single = isReadonly(d.init);
+            if (!single && !(d.init.type === 'ObjectExpression' && !d.init.properties.length)) continue;
+            const inits = single ? [d.init] : [], setters = [];
+            let displayed = false;
+            const supported = binding.refs.every(ref => {
+                const value = single ? ref : ref.parent;
+                if (!single) {
+                    if (value.type !== 'MemberExpression' || value.object !== ref || !value.computed) return false;
+                    const p = value.parent;
+                    if (p.type === 'AssignmentExpression' && p.left === value && p.operator === '=' && isReadonly(p.right)) {
+                        inits.push(p.right);
+                        return true;
+                    }
+                }
+                if (displayArg(value)) { displayed = true; return true; }
+                const arg = setterArg(value);
+                if (!arg) return false;
+                setters.push(arg);
+                return true;
+            });
+            if (!supported || !displayed || !inits.length) continue;
+            for (const init of inits) initializers.add(init);
+            for (const arg of setters) updates.add(arg);
+        }
+        return initializers.size ? { initializers, updates } : null;
+    }
+
     function processScript(source, file, ctx, opts = {}) {
         // 动作栏先按技能名切掉消息开头。第二条正则没有词边界，"Blink" 会切进 "Blinked"，玩家看到 "ed 5 blocks!"。
         let hudBoundary = false;
@@ -3750,6 +4009,31 @@
         if (debugSkipped) ctx.warn(`${file}: ${debugFile ? '调试脚本' : '调试分支'}里的 ${debugSkipped} 处文本未提取`);
         if (uiDataKept) ctx.warn(`${file}: ${uiDataKept} 处发给自定义界面的数据（界面按前缀 / 字符位置读取），保持原样`);
 
+        // Adapt the display values after extraction so the existing keys and
+        // registrations stay in their original order.
+        const ore = injectRuntime && collectReadonlyOreObservables(ast);
+        let oreImport = '', oreAdapter = '';
+        if (ore) {
+            usesRuntime = true;
+            const Observable = `${RT}_UIRaw`, toRaw = `${RT}_oreText`;
+            oreImport = `import { ObservableUIRawMessage as ${Observable} } from "@minecraft/server-ui";\n`;
+            oreAdapter = `const ${toRaw} = (value) => {
+    const message = ${RT}.M(value);
+    return message && typeof message === "object" &&
+        (typeof message.text === "string" || typeof message.translate === "string" || Array.isArray(message.rawtext))
+        ? message : { text: value == null ? "" : String(value) };
+};\n`;
+            const wrap = arg => {
+                const original = overrides.get(arg) || (() => renderOrig(arg));
+                overrides.set(arg, () => `${toRaw}((${original()}))`);
+            };
+            for (const node of ore.initializers) {
+                overrides.set(node.callee, () => Observable);
+                wrap(node.arguments[0]);
+            }
+            for (const arg of ore.updates) wrap(arg);
+        }
+
         // ---- 生成输出 ----
         if (!usesGL) srcPats.length = 0;
         const hasRegistrations = exact.length > 0 || patterns.length > 0 || srcPats.length > 0 || deferredTopics.length > 0;
@@ -3807,7 +4091,7 @@
             head = body.slice(0, nl + 1);
             body = body.slice(nl + 1);
         }
-        const content = head + (prelude ? `// ---- i18n runtime (auto-generated) ----\n${prelude}// ---- end i18n runtime ----\n` : '') + body;
+        const content = head + oreImport + (prelude ? `// ---- i18n runtime (auto-generated) ----\n${prelude}// ---- end i18n runtime ----\n` : '') + oreAdapter + body;
         return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length, tables: tableEntries }, deferredTopics, rtName: RT, keyBaseWord: keyBase('word') };
     }
 
