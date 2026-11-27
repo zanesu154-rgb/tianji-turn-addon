@@ -155,9 +155,11 @@
         if (node.type === 'BinaryExpression' && node.operator === '+') {
             // 收集左脊上的操作数
             const operands = [];
+            const prefixes = [];
             let cur = node;
             while (cur.type === 'BinaryExpression' && cur.operator === '+' && !cur.extra_paren) {
                 operands.unshift(cur.right);
+                prefixes.unshift(cur.left);
                 cur = cur.left;
             }
             operands.unshift(cur);
@@ -165,8 +167,9 @@
             if (firstStr < 0) return null;
             const parts = [];
             if (firstStr > 0) {
-                // 前面的整体当作一个表达式：取源码区间 [operands[0].start, operands[firstStr-1].end]
-                parts.push({ exprRange: [operands[0], operands[firstStr - 1]], prefixNode: firstStr === 1 ? operands[0] : null });
+                // 用 '+' 节点保存完整前缀。单个操作数的 AST 区间可能省略自身括号。
+                const prefix = prefixes[firstStr - 1];
+                parts.push(firstStr === 1 ? { prefixNode: prefix } : { prefixExpression: prefix });
             }
             for (let i = firstStr; i < operands.length; i++) {
                 const o = operands[i];
@@ -2647,8 +2650,8 @@
             else if (p.prefixNode) code = render(p.prefixNode);
             else {
                 // 拼接链左侧多个非字符串操作数（如 a + b + "文字"）：保持原样整体求值
-                const [a, b] = p.exprRange;
-                code = `(${src.slice(a.start, b.end)})`;
+                const { start, end } = p.prefixExpression;
+                code = `(${src.slice(start, end)})`;
             }
             return p.pct ? `(${code}+"%")` : code;
         };
