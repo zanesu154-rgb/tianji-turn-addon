@@ -213,6 +213,7 @@
             this.untranslatable = [];      // { file, where, text, reason }
             this.warnings = [];
             this.inputTables = [];         // 玩家输入匹配（聊天关键词/正则），只导出
+            this.numberedScriptKeys = new Set();  // Already allocated keys with a zero-based author placeholder.
             this.translations = new Map(); // 键 → Map(语言 → 已有译文)，来自脚本自带的多语言表
             this.packEntries = new Map();  // 包根目录 → Map(键→值)，用于 pack.name / pack.description
             this.stats = { files: 0 };

@@ -1010,6 +1010,41 @@
     //  运行时（注入到脚本顶部）
     // ---------------------------------------------------------------
 
+    // BTA6 fills these numbered strings in t() before the display API sees them.
+    // Use the existing dictionary keys and restrict the captures to the observed values.
+    function collectBtaDisplayTemplates(ast, file, exact) {
+        if (!/(?:^|\/)scripts\/bta\/i18n\.js$/.test(file)) return [];
+        const tables = new Map();
+        for (const statement of ast.body) {
+            if (statement.type !== 'VariableDeclaration') continue;
+            for (const { id, init } of statement.declarations) {
+                if (!['EN', 'ES'].includes(id.name) || init?.type !== 'ObjectExpression') continue;
+                tables.set(id.name, new Map(init.properties.filter(p => propKey(p) != null && isStr(p.value))
+                    .map(p => [propKey(p), p.value.value])));
+            }
+        }
+        if (!tables.has('EN') || !tables.has('ES') || !ast.body.some(n =>
+            n.type === 'ExportNamedDeclaration' && n.declaration?.type === 'FunctionDeclaration' &&
+            n.declaration.id?.name === 't' && n.declaration.params[2]?.type === 'RestElement')) return [];
+
+        const keys = new Map();
+        for (const [text, key] of exact) if (!keys.has(text)) keys.set(text, key);
+        const rules = [];
+        for (const table of tables.values()) {
+            const jobs = ['taxi', 'delivery', 'transporter', 'security', 'police']
+                .map(id => table.get('job.' + id)).filter(Boolean);
+            for (const id of ['job.salary', 'job.current', 'hud.day']) {
+                const text = table.get(id);
+                const key = keys.get(text);
+                if (!key || text.split('{0}').length !== 2 || /\{(?!0\})/.test(text)) continue;
+                const [head, tail] = text.split('{0}');
+                if (head.trim().length < 3 || /[\r\n]/.test(text)) continue;
+                rules.push([key, head, tail, id === 'job.current' ? jobs : null, id === 'hud.day']);
+            }
+        }
+        return rules;
+    }
+
     function buildRuntime(rtName, globalKey) {
         return `const ${rtName} = (() => {
   const g = globalThis, K = ${JSON.stringify(globalKey)};
@@ -1036,6 +1071,30 @@
     return 0;
   };
   let patDepth = 0;
+  const numbered = [];
+  const regNumbered = (rules) => {
+    for (const [key, head, tail, labels, clock] of rules) {
+      if (labels && !labels.length) continue;
+      const frame = clock ? "((?:§r§r§r)?§f[0-9]{2}:[0-9]{2}  §7|(?:§.)*)" : "((?:§.)*)";
+      const slot = labels ? labels.map(esc).join("|") : "[0-9]+";
+      numbered.push([key, new RegExp("^" + frame + esc(head) + "(" + slot + ")" + esc(tail) + "((?:§.)*)$"), labels]);
+    }
+    cache.clear();
+  };
+  const numberedLine = (s) => {
+    if (s.length > 160 || s.includes("\\n")) return null;
+    for (const [key, re, labels] of numbered) {
+      const match = re.exec(s);
+      if (!match) continue;
+      const [, prefix, arg, suffix] = match;
+      const nameKey = labels && m.get(arg);
+      const result = [{ translate: key, with: { rawtext: [nameKey ? { translate: nameKey } : { text: arg }] } }];
+      if (prefix) result.unshift({ text: prefix });
+      if (suffix) result.push({ text: suffix });
+      return result;
+    }
+    return null;
+  };
   const one = (s) => {
     let k = m.get(s);
     if (k) return [{ translate: k }];
@@ -1046,6 +1105,10 @@
       if (mm[1]) r.unshift({ text: mm[1] });
       if (mm[3]) r.push({ text: mm[3] });
       return r;
+    }
+    if (numbered.length) {
+      const r = numberedLine(s);
+      if (r) return r;
     }
     // 全大写显示的标题（"EXPLOSIVE SNEEZES"、ability.toUpperCase()）：按不分大小写再找一次
     const up = mm ? mm[2] : s;
@@ -1750,7 +1813,7 @@
     return tb ? bakeWith(tb, s) : s;
   };
   const BA = (a) => (Array.isArray(a) ? a.map(B) : a);
-  return (g[K] = { T, M, MA, J, TJ, C, reg, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
+  return (g[K] = { T, M, MA, J, TJ, C, reg, regNumbered, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
 })();
 `;
     }
@@ -4098,6 +4161,8 @@
         }
 
         // ---- 生成输出 ----
+        const numbered = injectRuntime ? collectBtaDisplayTemplates(ast, file, exact) : [];
+        for (const [key] of numbered) ctx.numberedScriptKeys.add(key);
         if (!usesGL) srcPats.length = 0;
         const hasRegistrations = exact.length > 0 || patterns.length > 0 || srcPats.length > 0 || deferredTopics.length > 0;
         if (overrides.size === 0 && !hasRegistrations) return { content: source, changed: false };
@@ -4112,6 +4177,7 @@
                 for (const [s, k] of exact) { if (!seen.has(s)) { seen.add(s); ex.push([s, k]); } }
                 prelude += `${RT}.reg(${JSON.stringify(ex)}, ${JSON.stringify(patterns)}${joinSeps.length || srcPats.length ? ', ' + JSON.stringify(joinSeps) : ''}${srcPats.length ? ', ' + JSON.stringify(srcPats) : ''});\n`;
             }
+            if (numbered.length) prelude += `${RT}.regNumbered(${JSON.stringify(numbered)});\n`;
             if ((opts.uiCompared && opts.uiCompared.size) || (opts.uiPrefixes && opts.uiPrefixes.size)) prelude += `${RT}.keep(${JSON.stringify([...(opts.uiCompared || [])])}, ${JSON.stringify([...(opts.uiPrefixes || [])])});\n`;
             const own = {};
             if (humanizers) {
@@ -4186,7 +4252,7 @@
         const endMark = txt.indexOf('// ---- end i18n runtime ----', from);
         if (endMark < 0) return null;
         let to = txt.indexOf(`\n${rt}.reg(`, from);
-        for (const fn of ['regIds', 'keep', 'bake']) {
+        for (const fn of ['regNumbered', 'regIds', 'keep', 'bake']) {
             const to2 = txt.indexOf(`\n${rt}.${fn}(`, from);
             if (to2 >= 0 && to2 < endMark && (to < 0 || to2 < to)) to = to2;
         }

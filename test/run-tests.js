@@ -3234,6 +3234,13 @@ export function show(player, item) {
     } catch (error) {
         check(displaySinkCheck, false, error.stack);
     }
+    const btaTemplateCheck = '#199 BTA6 工资、当前职业、时钟及旧译文占位符';
+    try {
+        await require('./bta-display-template-regressions.js').checkBtaDisplayTemplates();
+        check(btaTemplateCheck, true);
+    } catch (error) {
+        check(btaTemplateCheck, false, error.stack);
+    }
     const review = require('./review-regressions.js');
     const reviewResults = await review.runReviewRegressions();
     for (const result of reviewResults) {
