@@ -1027,16 +1027,26 @@
             n.type === 'ExportNamedDeclaration' && n.declaration?.type === 'FunctionDeclaration' &&
             n.declaration.id?.name === 't' && n.declaration.params[2]?.type === 'RestElement')) return [];
 
-        const counts = new Map();
-        for (const table of tables.values()) for (const { value } of table.values()) {
-            counts.set(value, (counts.get(value) || 0) + 1);
+        const occurrences = new Map();
+        for (const table of tables.values()) for (const node of table.values()) {
+            if (!occurrences.has(node.value)) occurrences.set(node.value, []);
+            occurrences.get(node.value).push(node);
         }
         const rules = [];
-        for (const table of tables.values()) {
+        for (const [language, table] of tables) {
+            const [taxiText, taxiKey] = language === 'EN'
+                ? ['Taxi driver', 'script.i18n.str_573'] : ['Taxista', 'script.i18n.str_1495'];
             const jobs = ['taxi', 'delivery', 'transporter', 'security', 'police']
                 .filter(id => table.has('job.' + id)).map(id => {
                     const node = table.get('job.' + id);
-                    return { id, node, unambiguous: counts.get(node.value) === 1 };
+                    const same = occurrences.get(node.value);
+                    const npcRole = table.get('role.taxi_driver');
+                    // In BTA6 2.7.0 the job node is registered first. The later NPC
+                    // role shares that exact entry through the existing script dedupe.
+                    const taxiAlias = id === 'taxi' && same.length === 2 &&
+                        same[0] === node && same[1] === npcRole && node.start < npcRole.start;
+                    const historicalKey = taxiAlias && node.value === taxiText ? taxiKey : null;
+                    return { id, node, canOwnKey: same.length === 1 || taxiAlias, historicalKey };
                 });
             for (const id of ['job.salary', 'job.current', 'hud.day']) {
                 const node = table.get(id);
@@ -2449,8 +2459,8 @@
         const injectRuntime = opts.injectRuntime !== false;
         const btaTemplates = injectRuntime ? collectBtaDisplayTemplates(ast, file) : [];
         const btaTemplateNodes = new Set(btaTemplates.map(rule => rule.node));
-        const btaRoleNodes = new Set(btaTemplates.flatMap(rule => (rule.jobs || [])
-            .filter(role => role.unambiguous).map(role => role.node)));
+        const btaRoleNodes = new Map(btaTemplates.flatMap(rule => (rule.jobs || [])
+            .filter(role => role.canOwnKey).map(role => [role.node, role])));
         const btaKeys = new Map();
         const btaJobLocalizer = /(?:^|\/)scripts\/bta\/jobs\.js$/.test(file) && ast.body
             .find(n => n.type === 'ImportDeclaration' && n.source.value === './i18n.js')
@@ -3467,13 +3477,17 @@
                 const multi = lines.length > 1 || fromSplit || line.indexOf('\n') >= 0;
                 const t = (lines.length > 1 || fromSplit || !multi) ? line.trim() : line;
                 const numbered = btaTemplateNodes.has(sourceNode);
-                const role = btaRoleNodes.has(sourceNode) && !ctx.dedupe.has('script\u0000' + t);
+                const role = !ctx.dedupe.has('script\u0000' + t) && btaRoleNodes.get(sourceNode);
                 const k = ctx.alloc(keyBase('str'), t, numbered ? { ...meta('str'), numbered } : meta('str'));
-                // Positional alignment can reclaim an old key without proving which occupation it belongs to.
                 if (numbered) btaKeys.set(sourceNode, k);
-                if (role && (k === keyBase('str') || k.startsWith(keyBase('str') + '_')) &&
-                    ctx.keyFiles.get(k)?.size === 1 && (!ctx.knownKeys.has(k) || ctx.existingValues.get(k)?.has?.(t))) {
-                    btaKeys.set(sourceNode, k);
+                if (role && (k === keyBase('str') || k.startsWith(keyBase('str') + '_')) && ctx.keyFiles.get(k)?.size === 1) {
+                    // A translation-only positional claim is insufficient without a verified historical key.
+                    const langs = ctx.keyLangs.get(k);
+                    const taxiHistory = k === role.historicalKey && ctx.prevKeys.has(k) &&
+                        langs?.size === 1 && langs.has('zh_CN');
+                    if (!ctx.knownKeys.has(k) || ctx.existingValues.get(k)?.has?.(t) || taxiHistory) {
+                        btaKeys.set(sourceNode, k);
+                    }
                 }
                 // 别处代码会取“xxx: 数值”冒号前那段单独显示（"Applies to: " + 前半段）：前半段也登记
                 if (opts.colonPrefix) {
