@@ -139,6 +139,29 @@
         return propName(c);
     }
 
+    // A nullish global hook can forward its original arguments to a direct
+    // ScreenDisplay fallback. Translate forwarded options only inside it.
+    function forwardedTitleOptions(call) {
+        const arrow = call.parent, choice = arrow?.parent, invoke = choice?.parent;
+        const screen = call.callee.object;
+        if (arrow?.type !== 'ArrowFunctionExpression' || arrow.body !== call || arrow.async ||
+            arrow.params.length !== 3 || !arrow.params.every(p => p.type === 'Identifier') ||
+            choice?.type !== 'LogicalExpression' || choice.operator !== '??' || choice.right !== arrow ||
+            choice.left.type !== 'MemberExpression' || choice.left.object.name !== 'globalThis' ||
+            invoke?.type !== 'CallExpression' || invoke.callee !== choice ||
+            invoke.arguments.length !== 3 || invoke.arguments.some(a => a.type === 'SpreadElement') ||
+            screen?.type !== 'MemberExpression' || propName(screen) !== 'onScreenDisplay' ||
+            screen.object.type !== 'Identifier' || screen.object.name !== arrow.params[0].name ||
+            call.arguments.length !== 2 ||
+            !call.arguments.every((a, i) => a.type === 'Identifier' && a.name === arrow.params[i + 1].name)) return null;
+
+        const options = invoke.arguments[2];
+        if (options.type !== 'ObjectExpression' || !options.properties.every(p =>
+            p.type === 'Property' && !p.computed && !p.method && p.kind === 'init' &&
+            (p.key.name || p.key.value) !== '__proto__')) return null;
+        return options.properties.some(p => (p.key.name || p.key.value) === 'subtitle') ? call.arguments[1] : null;
+    }
+
     /**
      * 把模板字符串 / 字符串拼接拆成 [{lit} | {expr}] 片段。
      * 拼接链左侧连续的非字符串操作数（可能是数值加法）作为一个整体表达式。
@@ -2891,6 +2914,23 @@
             }
         }
 
+        const chatPrefixes = new Map();
+        const chatImports = injectRuntime && colliding.has('sendMessage') ? ast.body.filter(node =>
+            node.type === 'ImportDeclaration' && node.source.value === '@minecraft/server') : [];
+        const worldNames = new Set(chatImports.flatMap(node => node.specifiers
+            .filter(spec => spec.imported?.name === 'world').map(spec => spec.local.name)));
+        const chatHelper = `${RT}_playerChat`;
+        let usesChatHelper = false;
+        if (chatImports.length) for (const statement of ast.body) {
+            const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
+            if (declaration?.type !== 'VariableDeclaration' || declaration.kind !== 'const') continue;
+            for (const { id, init } of declaration.declarations) {
+                if (id.type === 'Identifier' && isStr(init) && /^\[[^\[\]\r\n]+\][ \t]+$/.test(NS.stripFormatting(init.value))) {
+                    chatPrefixes.set(id.name, init.value);
+                }
+            }
+        }
+
         // ---- 第一遍：显示类 API ----
         walk(ast, (n) => {
             if (n.type === 'CallExpression') {
@@ -2901,6 +2941,18 @@
                     const definitelyForm = spec.kind === 'form' && rootIsForm(n.callee.object);
                     if (spec.kind === 'form' && !definitelyForm && !formEnabled) return;
                     if (!definitelyForm && colliding.has(name)) {
+                        const receiver = n.callee.object, arg = n.arguments[0];
+                        if (name === 'sendMessage' && chatImports.length && receiver.type === 'Identifier' && !worldNames.has(receiver.name) &&
+                            n.arguments.length === 1 && arg.type !== 'SpreadElement' && arg.type !== 'ObjectExpression') {
+                            // The pack also calls mock or custom recipients. Keep the original
+                            // argument for those, and map text only for a native Player.
+                            const prefix = arg.type === 'BinaryExpression' && arg.operator === '+' &&
+                                arg.left.type === 'Identifier' ? chatPrefixes.get(arg.left.name) : undefined;
+                            const prefixArg = prefix ? ', ' + JSON.stringify(prefix) : '';
+                            overrides.set(arg, () => `${chatHelper}(${receiver.name}, (${renderOrig(arg)})${prefixArg})`);
+                            usesRuntime = usesChatHelper = true;
+                            return;
+                        }
                         if (!warnedCollide.has(name)) {
                             warnedCollide.add(name);
                             ctx.warn(`${file}: 脚本中自定义了同名方法 ${name}()，为避免误改，未处理无法确认类型的 .${name}() 调用`);
@@ -2932,6 +2984,14 @@
                                 }
                             }
                         });
+                    }
+                    if (name === 'setTitle' && injectRuntime) {
+                        const forwarded = forwardedTitleOptions(n);
+                        if (forwarded) {
+                            const opt = forwarded.name;
+                            overrides.set(forwarded, () => `{ ...${opt}, subtitle: ${RT}.M(${opt}.subtitle) }`);
+                            usesRuntime = true;
+                        }
                     }
                 }
                 // @minecraft/server 2.2.0 起 setLore 接受 RawMessage：按显示文字处理
@@ -4094,7 +4154,18 @@
             head = body.slice(0, nl + 1);
             body = body.slice(nl + 1);
         }
-        const content = head + oreImport + (prelude ? `// ---- i18n runtime (auto-generated) ----\n${prelude}// ---- end i18n runtime ----\n` : '') + oreAdapter + body;
+        const playerAlias = `${RT}_ChatPlayer`;
+        const chatImport = usesChatHelper ? `import { Player as ${playerAlias} } from "@minecraft/server";\n` : '';
+        const chatAdapter = usesChatHelper ? `const ${chatHelper} = (player, message, prefix) => {
+    if (typeof message !== "string" || !(player instanceof ${playerAlias})) return message;
+    if (prefix && message.startsWith(prefix)) {
+        const text = message.slice(prefix.length);
+        const mapped = ${RT}.M(text);
+        return mapped === text ? message : { rawtext: [{ text: prefix }, mapped] };
+    }
+    return ${RT}.M(message);
+};\n` : '';
+        const content = head + oreImport + chatImport + (prelude ? `// ---- i18n runtime (auto-generated) ----\n${prelude}// ---- end i18n runtime ----\n` : '') + oreAdapter + chatAdapter + body;
         return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length, tables: tableEntries }, deferredTopics, rtName: RT, keyBaseWord: keyBase('word') };
     }
 

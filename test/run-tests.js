@@ -3227,6 +3227,13 @@ export function show(player, item) {
     } catch (error) {
         check(concatCheck, false, error.stack);
     }
+    const displaySinkCheck = '#196 聊天保留自定义接收者，备用标题映射副标题且保留原作者钩子';
+    try {
+        require('./display-sink-regressions.js').checkForwardedDisplaySinks();
+        check(displaySinkCheck, true);
+    } catch (error) {
+        check(displaySinkCheck, false, error.stack);
+    }
     const review = require('./review-regressions.js');
     const reviewResults = await review.runReviewRegressions();
     for (const result of reviewResults) {
