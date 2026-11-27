@@ -6,10 +6,10 @@ const dictionary = `
 const EN = {
     "job.transporter": "Transporter", "job.police": "Police officer",
     "job.salary": "Salary {0}$ per task", "job.current": "Current job: {0}",
-    "hud.day": "Day {0}", "hud.bank": "Bank balance",
+    "hud.day": "Day {0}", "hud.bank": "Bank balance", "wallet.break": "Break one {0}",
 };
 const ES = {
-    "job.transporter": "Transportista", "job.police": "Policía",
+    "fac.police": "Policía", "job.transporter": "Transportista", "job.police": "Policía",
     "job.salary": "Salario {0}$ por tarea", "job.current": "Trabajo actual: {0}",
     "hud.day": "Día {0}", "hud.bank": "Saldo bancario",
 };
@@ -27,7 +27,7 @@ import { t } from "./i18n.js";
 const SALARY = { transporter: 55 };
 export function jobsMenu(p) {
     const cur = p.job;
-    const f = new ActionFormData().title(t(p, "job.transporter")).body(t(p, "job.current", t(p, "job." + cur)));
+    const f = new ActionFormData().title(t(p, "job.transporter")).body(cur ? t(p, "job.current", t(p, "job." + cur)) : t(p, "job.none"));
     for (const id of Object.keys(SALARY)) f.button(\`\${t(p, "job." + id)}\\n§7\${t(p, "job.salary", SALARY[id])}\`);
     return f;
 }
@@ -77,10 +77,11 @@ async function checkBtaDisplayTemplates() {
         assert.ok(match, value);
         return match[0];
     };
+    key('Break one {0}');
     const salary = key('Salary %1$s$ per task'), current = key('Current job: %1$s'), day = key('Day %1$s');
     const role = key('Police officer'), transporter = key('Transporter');
     const backfilled = new Map(files);
-    backfilled.set(enPath, fresh.get(enPath).replaceAll('%1$s', '{0}'));
+    backfilled.set(enPath, fresh.get(enPath));
     backfilled.set(zhPath, [
         `${salary}=每单工资 {0}$## {0} comment`, `${current}=当前职业：{0}`,
         `${day}=第 {0} 天`, `${role}=警员`, 'sample.existing=原译文',
@@ -124,6 +125,7 @@ async function checkBtaDisplayTemplates() {
     assert.deepEqual(panel.options, { subtitle: ' ', stayDuration: 40 });
     const spanish = jobsMenu({ ...player, lang: 'es' });
     assert.ok(flatten(plain(spanish.buttonText)).some(e => e.translate === key('Salario %1$s$ por tarea')));
+    assert.deepEqual(plain(spanish.bodyText), { rawtext: [withArg(key('Trabajo actual: %1$s'), { text: 'Policía' })] });
     assert.equal(sandbox.t(player, 'job.salary', 55), 'Salary 55$ per task');
     for (const line of ['Current job: custom role', 'Salary variable$ per task', 'Wanted level 1']) {
         assert.equal(sandbox.mapDisplay(line), line);

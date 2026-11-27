@@ -1012,7 +1012,7 @@
 
     // BTA6 fills these numbered strings in t() before the display API sees them.
     // Use the existing dictionary keys and restrict the captures to the observed values.
-    function collectBtaDisplayTemplates(ast, file, exact) {
+    function collectBtaDisplayTemplates(ast, file) {
         if (!/(?:^|\/)scripts\/bta\/i18n\.js$/.test(file)) return [];
         const tables = new Map();
         for (const statement of ast.body) {
@@ -1020,29 +1020,46 @@
             for (const { id, init } of statement.declarations) {
                 if (!['EN', 'ES'].includes(id.name) || init?.type !== 'ObjectExpression') continue;
                 tables.set(id.name, new Map(init.properties.filter(p => propKey(p) != null && isStr(p.value))
-                    .map(p => [propKey(p), p.value.value])));
+                    .map(p => [propKey(p), p.value])));
             }
         }
         if (!tables.has('EN') || !tables.has('ES') || !ast.body.some(n =>
             n.type === 'ExportNamedDeclaration' && n.declaration?.type === 'FunctionDeclaration' &&
             n.declaration.id?.name === 't' && n.declaration.params[2]?.type === 'RestElement')) return [];
 
-        const keys = new Map();
-        for (const [text, key] of exact) if (!keys.has(text)) keys.set(text, key);
+        const counts = new Map();
+        for (const table of tables.values()) for (const { value } of table.values()) {
+            counts.set(value, (counts.get(value) || 0) + 1);
+        }
         const rules = [];
         for (const table of tables.values()) {
             const jobs = ['taxi', 'delivery', 'transporter', 'security', 'police']
-                .map(id => table.get('job.' + id)).filter(Boolean);
+                .filter(id => table.has('job.' + id)).map(id => {
+                    const node = table.get('job.' + id);
+                    return { id, node, unambiguous: counts.get(node.value) === 1 };
+                });
             for (const id of ['job.salary', 'job.current', 'hud.day']) {
-                const text = table.get(id);
-                const key = keys.get(text);
-                if (!key || text.split('{0}').length !== 2 || /\{(?!0\})/.test(text)) continue;
+                const node = table.get(id);
+                const text = node?.value;
+                if (!text || text.split('{0}').length !== 2 || /\{(?!0\})|[\r\n]/.test(text)) continue;
                 const [head, tail] = text.split('{0}');
-                if (head.trim().length < 3 || /[\r\n]/.test(text)) continue;
-                rules.push([key, head, tail, id === 'job.current' ? jobs : null, id === 'hud.day']);
+                if (head.trim().length < 3) continue;
+                rules.push({ node, head, tail, jobs: id === 'job.current' ? jobs : null, clock: id === 'hud.day' });
             }
         }
         return rules;
+    }
+
+    function btaCurrentJobArgument(node, localizer) {
+        const call = (n, count) => n?.type === 'CallExpression' && n.callee.type === 'Identifier' &&
+            n.callee.name === localizer && n.arguments.length === count;
+        if (!localizer || !call(node, 3) || node.arguments[1]?.value !== 'job.current') return null;
+        const [player, , role] = node.arguments;
+        if (!call(role, 2) || player.type !== 'Identifier' || role.arguments[0].type !== 'Identifier' ||
+            player.name !== role.arguments[0].name) return null;
+        const id = role.arguments[1];
+        return id.type === 'BinaryExpression' && id.operator === '+' && id.left.value === 'job.' &&
+            id.right.type === 'Identifier' ? id.right.name : null;
     }
 
     function buildRuntime(rtName, globalKey) {
@@ -1076,18 +1093,23 @@
     for (const [key, head, tail, labels, clock] of rules) {
       if (labels && !labels.length) continue;
       const frame = clock ? "((?:§r§r§r)?§f[0-9]{2}:[0-9]{2}  §7|(?:§.)*)" : "((?:§.)*)";
-      const slot = labels ? labels.map(esc).join("|") : "[0-9]+";
-      numbered.push([key, new RegExp("^" + frame + esc(head) + "(" + slot + ")" + esc(tail) + "((?:§.)*)$"), labels]);
+      // Previously generated registrations stored role names without their identities.
+      const jobs = labels && Array.isArray(labels[0]) ? labels : null;
+      const slot = labels ? (jobs ? jobs.map(([, name]) => name) : labels).map(esc).join("|") : "[0-9]+";
+      numbered.push([key, new RegExp("^" + frame + esc(head) + "(" + slot + ")" + esc(tail) + "((?:§.)*)$"), jobs]);
     }
     cache.clear();
   };
-  const numberedLine = (s) => {
+  const numberedLine = (s, jobId) => {
     if (s.length > 160 || s.includes("\\n")) return null;
     for (const [key, re, labels] of numbered) {
+      if (Boolean(labels) !== (jobId !== undefined)) continue;
       const match = re.exec(s);
       if (!match) continue;
       const [, prefix, arg, suffix] = match;
-      const nameKey = labels && m.get(arg);
+      const role = labels?.find(([id, name]) => id === jobId && name === arg);
+      if (jobId !== undefined && !role) continue;
+      const nameKey = role?.[2];
       const result = [{ translate: key, with: { rawtext: [nameKey ? { translate: nameKey } : { text: arg }] } }];
       if (prefix) result.unshift({ text: prefix });
       if (suffix) result.push({ text: suffix });
@@ -1644,6 +1666,11 @@
     return v;
   };
   const M = (v) => (typeof v === "string" ? lookup(v) || v : R(v, 0));
+  const currentJob = (text, id) => {
+    if (typeof text !== "string") return text;
+    const line = numberedLine(text, id);
+    return line ? { rawtext: line } : text;
+  };
   const MA = (a) => (Array.isArray(a) ? a.map(M) : a);
   const J = (v) => JSON.stringify(String(v)).slice(1, -1);
   const TJ = (v) => JSON.stringify(T(v));
@@ -1813,7 +1840,7 @@
     return tb ? bakeWith(tb, s) : s;
   };
   const BA = (a) => (Array.isArray(a) ? a.map(B) : a);
-  return (g[K] = { T, M, MA, J, TJ, C, reg, regNumbered, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
+  return (g[K] = { T, M, MA, J, TJ, C, currentJob, reg, regNumbered, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
 })();
 `;
     }
@@ -2420,6 +2447,14 @@
         const ast = info.ast;
         const fb = fileBaseOf(file);
         const injectRuntime = opts.injectRuntime !== false;
+        const btaTemplates = injectRuntime ? collectBtaDisplayTemplates(ast, file) : [];
+        const btaTemplateNodes = new Set(btaTemplates.map(rule => rule.node));
+        const btaRoleNodes = new Set(btaTemplates.flatMap(rule => (rule.jobs || [])
+            .filter(role => role.unambiguous).map(role => role.node)));
+        const btaKeys = new Map();
+        const btaJobLocalizer = /(?:^|\/)scripts\/bta\/jobs\.js$/.test(file) && ast.body
+            .find(n => n.type === 'ImportDeclaration' && n.source.value === './i18n.js')
+            ?.specifiers.find(s => s.imported?.name === 't')?.local.name;
         const colliding = opts.collidingMethods || new Set();
         const formEnabled = opts.formSinksEnabled !== false;
 
@@ -2935,7 +2970,11 @@
         function wrapM(e) {
             if (!injectRuntime) return;
             usesRuntime = true;
-            overrides.set(e, () => `${RT}.M(${renderOrig(e)})`);
+            const jobId = e.parent?.type === 'ConditionalExpression' && e.parent.test.type === 'Identifier' &&
+                e.parent.parent?.type === 'CallExpression' && propName(e.parent.parent.callee) === 'body' &&
+                btaCurrentJobArgument(e, btaJobLocalizer);
+            overrides.set(e, () => jobId && e.parent.test.name === jobId
+                ? `${RT}.currentJob(${renderOrig(e)}, ${jobId})` : `${RT}.M(${renderOrig(e)})`);
         }
 
         /** 处理 runCommand 的参数 */
@@ -3401,7 +3440,7 @@
             if (/\bis being mocked\b|\bit is a noop\b|\bnot implemented\b|\bis deprecated\b/i.test(t)) return true;
             return false;
         };
-        const registerExact = (text, fromSplit = false) => {
+        const registerExact = (text, fromSplit = false, sourceNode) => {
             if (opts.uiCompared && opts.uiCompared.has(String(text).replace(/^(?:\u00a7.|\s)+|(?:\u00a7.|\s)+$/g, ''))) return;
             if (opts.refSyntax && (DICT_REF.lastIndex = 0, DICT_REF.test(text))) { DICT_REF.lastIndex = 0; registerPattern([{ lit: text }]); return; }
             if (isCodeNoise(text)) return;
@@ -3427,7 +3466,15 @@
                 // 拆行时每行去掉代码缩进；原样和去空白后的写法都登记
                 const multi = lines.length > 1 || fromSplit || line.indexOf('\n') >= 0;
                 const t = (lines.length > 1 || fromSplit || !multi) ? line.trim() : line;
-                const k = ctx.alloc(keyBase('str'), t, meta('str'));
+                const numbered = btaTemplateNodes.has(sourceNode);
+                const role = btaRoleNodes.has(sourceNode) && !ctx.dedupe.has('script\u0000' + t);
+                const k = ctx.alloc(keyBase('str'), t, numbered ? { ...meta('str'), numbered } : meta('str'));
+                // Positional alignment can reclaim an old key without proving which occupation it belongs to.
+                if (numbered) btaKeys.set(sourceNode, k);
+                if (role && (k === keyBase('str') || k.startsWith(keyBase('str') + '_')) &&
+                    ctx.keyFiles.get(k)?.size === 1 && (!ctx.knownKeys.has(k) || ctx.existingValues.get(k)?.has?.(t))) {
+                    btaKeys.set(sourceNode, k);
+                }
                 // 别处代码会取“xxx: 数值”冒号前那段单独显示（"Applies to: " + 前半段）：前半段也登记
                 if (opts.colonPrefix) {
                     // 升级说明会把冒号前半段单独拿出来显示（"Applies to: " + 前半段）。
@@ -3656,7 +3703,7 @@
                     exact.push([v, ctx.alloc(keyBase('word'), v, meta('word'))]);
                     return;
                 }
-                registerExact(v);
+                registerExact(v, false, n);
                 return;
             }
             const isConcatRoot = (n.type === 'TemplateLiteral' && !isPlusOperand(n) && !(n.parent && n.parent.type === 'TaggedTemplateExpression')) ||
@@ -4161,7 +4208,9 @@
         }
 
         // ---- 生成输出 ----
-        const numbered = injectRuntime ? collectBtaDisplayTemplates(ast, file, exact) : [];
+        const numbered = btaTemplates.filter(rule => btaKeys.has(rule.node)).map(({ node, head, tail, jobs, clock }) => [
+            btaKeys.get(node), head, tail, jobs?.map(({ id, node }) => [id, node.value, btaKeys.get(node)]) ?? null, clock,
+        ]);
         for (const [key] of numbered) ctx.numberedScriptKeys.add(key);
         if (!usesGL) srcPats.length = 0;
         const hasRegistrations = exact.length > 0 || patterns.length > 0 || srcPats.length > 0 || deferredTopics.length > 0;
