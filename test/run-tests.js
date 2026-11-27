@@ -3220,6 +3220,13 @@ export function show(player, item) {
             JSON.stringify({ uiSplits }));
         delete globalThis[key];
     }
+    const concatCheck = '#188 队伍按钮拼接保留括号、颜色、译文和运行时参数';
+    try {
+        require('./concat-regressions.js').checkTeamButtonConcat();
+        check(concatCheck, true);
+    } catch (error) {
+        check(concatCheck, false, error.stack);
+    }
     const review = require('./review-regressions.js');
     const reviewResults = await review.runReviewRegressions();
     for (const result of reviewResults) {
