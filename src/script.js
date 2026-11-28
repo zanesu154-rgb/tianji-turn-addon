@@ -1098,6 +1098,35 @@
         return null;
     }
 
+    function sandoFormEntry(node, dictionary) {
+        const name = node.parent && propKey(node.parent);
+        const table = node.parent?.parent?.parent?.parent;
+        if (!name || table?.parent?.id?.name !== dictionary) return null;
+        return /^(sando\.ui\.(?:status$|neutral\.body$|owned_by$|none$|btn\.|role\.|order\.|stance\.)|sando\.team\.|ext\.rank\.(?:[0-4]$|status$|next$|max$)|w\.)/.test(name) ? name : null;
+    }
+
+    function sandoSoldierFormSites(ast, file) {
+        if (!/(?:^|\/)scripts\/bod\/sando\/warfare\.js$/.test(file)) return null;
+        const fn = name => ast.body.find(n => n.type === 'FunctionDeclaration' && n.id?.name === name);
+        const proxy = fn('LF'), menu = fn('openSoldierMenu');
+        const dictionary = ast.body.some(n => n.type === 'ImportDeclaration' && n.source.value === './lang.js' &&
+            n.specifiers.some(spec => spec.imported?.name === 'STR' && spec.local.name === 'STR'));
+        if (!dictionary || !proxy || !menu || proxy.params.length !== 2 ||
+            proxy.params[0].name !== 'p' || proxy.params[1].name !== 'form') return null;
+        const delegates = [], forms = [];
+        walk(proxy.body, n => {
+            if (n.type === 'CallExpression' && n.callee.name === 'R' && n.arguments.length === 2 &&
+                n.arguments[0].name === 'p' && n.arguments[1].name === 'a' &&
+                n.parent?.type === 'ConditionalExpression' && n.parent.consequent === n) delegates.push(n.callee);
+        });
+        walk(menu.body, n => {
+            if (n.type === 'CallExpression' && n.callee.name === 'LF' && n.arguments.length === 2 &&
+                n.arguments[0].name === 'player' && n.arguments[1].type === 'NewExpression' &&
+                n.arguments[1].callee.name === 'ActionFormData') forms.push(n.arguments[1]);
+        });
+        return delegates.length === 1 && forms.length ? { parameter: proxy.params[1], delegate: delegates[0], forms } : null;
+    }
+
     function buildRuntime(rtName, globalKey) {
         return `const ${rtName} = (() => {
   const g = globalThis, K = ${JSON.stringify(globalKey)};
@@ -1702,6 +1731,60 @@
     return v;
   };
   const M = (v) => (typeof v === "string" ? lookup(v) || v : R(v, 0));
+  const formKeys = new Map();
+  const regForm = (entries) => {
+    for (const [id, key, originals] of entries) {
+      if (!formKeys.has(id)) formKeys.set(id, new Map());
+      for (const original of originals) formKeys.get(id).set(original, key);
+    }
+  };
+  const formLocales = new Map();
+  const regFormLocales = (routes) => {
+    for (const [key, locales, fallbacks] of routes) formLocales.set(key, { locales, fallbacks });
+  };
+  const soldierText = (message, lang, dictionary, player) => {
+    const own = (table, key) => Object.prototype.hasOwnProperty.call(table || {}, key) ? table[key] : undefined;
+    let locale = "";
+    try { locale = String(player?.clientSystemInfo?.locale || "").toLowerCase().replace(/-/g, "_"); } catch { }
+    const resolve = x => {
+      if (x == null || typeof x === "string" || typeof x === "number") return { text: String(x ?? "") };
+      const id = x.__t || x.translate;
+      const authored = id && own(dictionary[lang], id);
+      const source = authored ?? (id && own(dictionary.en, id));
+      if (x.__t || typeof source === "string") {
+        const input = x.__t ? x.a : (Array.isArray(x.with) ? x.with : x.with?.rawtext);
+        const args = (input || []).map(resolve);
+        const key = formKeys.get(id)?.get(source);
+        const route = formLocales.get(key);
+        // Older Script API versions cannot expose the game locale. The client
+        // selects the qualified key whose resource rows carry the author fallback.
+        const fallback = authored != null && lang === "es" ? "es" : "en";
+        const nativeKey = locale ? (route?.locales.includes(locale) ? key : null) : route?.fallbacks[fallback];
+        if (nativeKey) return args.length ? { translate: nativeKey, with: { rawtext: args } } : { translate: nativeKey };
+        // Author fallback can contain a native translation as an argument.
+        const template = source ?? id;
+        const parts = template.split(/%([1-9][0-9]*)/);
+        if (!args.length || parts.length === 1) return { text: template };
+        return { rawtext: parts.map((part, i) => i % 2 ? args[Number(part) - 1] ?? { text: "%" + part } : { text: part }) };
+      }
+      if (Array.isArray(x.rawtext)) {
+        const rawtext = x.rawtext.map(resolve);
+        return rawtext.every((node, i) => node === x.rawtext[i]) ? x : { ...x, rawtext };
+      }
+      if (x.translate && x.with) {
+        if (Array.isArray(x.with)) {
+          if (x.with.every(arg => typeof arg === "string")) return x;
+          return { ...x, with: { rawtext: x.with.map(resolve) } };
+        }
+        if (Array.isArray(x.with.rawtext)) {
+          const withArgs = resolve(x.with);
+          return withArgs === x.with ? x : { ...x, with: withArgs };
+        }
+      }
+      return x.translate || x.text !== undefined ? x : { text: "" };
+    };
+    return resolve(message);
+  };
   const panelTitle = (text) => {
     if (typeof text !== "string" || !text.startsWith("§r§r§r") || !text.includes("\\n")) return M(text);
     const rawtext = [];
@@ -1890,7 +1973,7 @@
     return tb ? bakeWith(tb, s) : s;
   };
   const BA = (a) => (Array.isArray(a) ? a.map(B) : a);
-  return (g[K] = { T, M, MA, J, TJ, C, currentJob, panelTitle, reg, regNumbered, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
+  return (g[K] = { T, M, MA, J, TJ, C, currentJob, panelTitle, soldierText, regForm, regFormLocales, reg, regNumbered, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
 })();
 `;
     }
@@ -3303,6 +3386,9 @@
             patterns.push(...opts.crossDict.patterns);
         }
         const tables = collectTranslationGroups(ast, { mode: lf.mode === 'manual' && !fileMap.size ? 'auto' : lf.mode, map: fileMap, fileHint: langHintFromFile(file) });
+        const sandoDictionary = injectRuntime && (/(?:^|\/)scripts\/bod\/sando\/lang\.js$/.test(file) ? 'STR'
+            : /(?:^|\/)scripts\/bod\/sando\/ext\/lang_ext\.js$/.test(file) ? 'EXT' : null);
+        const soldierEntries = [];
         let tableEntries = 0;
         // 原文优先用英文；没有英文时用拉丁字母语言（方便译者），最后才用其他文字
         const pickSource = (g) => {
@@ -3360,9 +3446,16 @@
             // 以英文为原文（没有英文时用第一列）
             const [firstLang, firstNode] = pickSource(g);
             // 字典条目按路径分配。普通句子仍用整个脚本做去重，这里不改那条路径。
+            const authorEntry = sandoDictionary && sandoFormEntry(firstNode, sandoDictionary);
+            const numbered = authorEntry && [...g.values()].some(nd => NS.numberedValue(nd.value, 'sando') !== nd.value) ? 'sando' : false;
             const key = ctx.alloc(keyBase('str'), firstNode.value, g.entryId
-                ? { file, kind: 'script', scope: 'dict:' + file + '\0' + g.entryId, hint: 'str' }
+                ? { file, kind: 'script', scope: 'dict:' + file + '\0' + g.entryId, hint: 'str', numbered }
                 : meta('str'));
+            if (authorEntry) {
+                soldierEntries.push([authorEntry, key, [...g.values()].map(nd => nd.value)]);
+                ctx.soldierFormKeys.add(key);
+            }
+            if (numbered) ctx.numberedScriptKeys.set(key, numbered);
             for (const [lang, nd] of g) {
                 ctx.addTranslation(key, lang, nd.value);
                 exact.push([nd.value, key]);
@@ -4270,7 +4363,17 @@
         const numbered = btaTemplates.filter(rule => btaKeys.has(rule.node)).map(({ node, head, tail, jobs, clock }) => [
             btaKeys.get(node), head, tail, jobs?.map(({ id, node }) => [id, node.value, btaKeys.get(node)]) ?? null, clock,
         ]);
-        for (const [key] of numbered) ctx.numberedScriptKeys.add(key);
+        for (const [key] of numbered) ctx.numberedScriptKeys.set(key, true);
+        const soldierForms = injectRuntime && sandoSoldierFormSites(ast, file);
+        if (soldierForms) {
+            const resolver = `${RT}_formText`;
+            usesRuntime = true;
+            overrides.set(soldierForms.parameter, () => `form, ${resolver} = R`);
+            overrides.set(soldierForms.delegate, () => resolver);
+            for (const form of soldierForms.forms) {
+                overrides.set(form, () => `${renderOrig(form)}, (p, a) => ${RT}.soldierText(a, getLang(p), STR, p)`);
+            }
+        }
         if (!usesGL) srcPats.length = 0;
         const hasRegistrations = exact.length > 0 || patterns.length > 0 || srcPats.length > 0 || deferredTopics.length > 0;
         if (overrides.size === 0 && !hasRegistrations) return { content: source, changed: false };
@@ -4285,6 +4388,7 @@
                 for (const [s, k] of exact) { if (!seen.has(s)) { seen.add(s); ex.push([s, k]); } }
                 prelude += `${RT}.reg(${JSON.stringify(ex)}, ${JSON.stringify(patterns)}${joinSeps.length || srcPats.length ? ', ' + JSON.stringify(joinSeps) : ''}${srcPats.length ? ', ' + JSON.stringify(srcPats) : ''});\n`;
             }
+            if (soldierEntries.length) prelude += `${RT}.regForm(${JSON.stringify(soldierEntries)});\n`;
             if (numbered.length) prelude += `${RT}.regNumbered(${JSON.stringify(numbered)});\n`;
             if ((opts.uiCompared && opts.uiCompared.size) || (opts.uiPrefixes && opts.uiPrefixes.size)) prelude += `${RT}.keep(${JSON.stringify([...(opts.uiCompared || [])])}, ${JSON.stringify([...(opts.uiPrefixes || [])])});\n`;
             const own = {};
@@ -4340,7 +4444,7 @@
     return ${RT}.M(message);
 };\n` : '';
         const content = head + oreImport + chatImport + (prelude ? `// ---- i18n runtime (auto-generated) ----\n${prelude}// ---- end i18n runtime ----\n` : '') + oreAdapter + chatAdapter + body;
-        return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length, tables: tableEntries }, deferredTopics, rtName: RT, keyBaseWord: keyBase('word') };
+        return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length, tables: tableEntries }, deferredTopics, soldierForms: !!soldierForms, rtName: RT, keyBaseWord: keyBase('word') };
     }
 
     /**
@@ -4360,7 +4464,7 @@
         const endMark = txt.indexOf('// ---- end i18n runtime ----', from);
         if (endMark < 0) return null;
         let to = txt.indexOf(`\n${rt}.reg(`, from);
-        for (const fn of ['regNumbered', 'regIds', 'keep', 'bake']) {
+        for (const fn of ['regForm', 'regFormLocales', 'regNumbered', 'regIds', 'keep', 'bake']) {
             const to2 = txt.indexOf(`\n${rt}.${fn}(`, from);
             if (to2 >= 0 && to2 < endMark && (to < 0 || to2 < to)) to = to2;
         }

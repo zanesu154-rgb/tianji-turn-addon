@@ -132,6 +132,7 @@
             lastBreathe = now;
             await new Promise(resolve => setTimeout(resolve, 0));
         };
+        const soldierFormScripts = new Map();
         const pending = new Map();                 // 路径 → 新内容
         const jsonCache = new Map();
         const readJson = async (p) => {
@@ -479,6 +480,7 @@
                 });
                 if (r.changed) {
                     pending.set(p, r.content);
+                    if (r.soldierForms) soldierFormScripts.set(p, r.rtName);
                     if (r.deferredTopics && r.deferredTopics.length) deferredScriptTopics.push({ file: p, topics: r.deferredTopics, rtName: r.rtName, keyBaseWord: r.keyBaseWord });
                     processed++;
                     log(`[脚本] ${p}（静态改写 ${r.stats.overrides} 处，运行时登记 ${r.stats.exact + r.stats.patterns} 条${r.stats.tables ? `，合并自带多语言 ${r.stats.tables} 条` : ''}）`);
@@ -890,23 +892,84 @@
             }
         }
 
-        // The author dictionaries still use {0}. Serialize only the display keys
+        // Serialize numbered author placeholders only for the display keys
         // proven to take an argument, after alignment has used the original values.
-        const numberedLangValue = (key, value) => ctx.numberedScriptKeys.has(key) ? value.replaceAll('{0}', '%1$s') : value;
+        const numberedLangValue = (key, value) => {
+            const style = ctx.numberedScriptKeys.get(key);
+            return style ? NS.numberedValue(value, style) : value;
+        };
         const numberedByRp = new Map();
-        for (const key of ctx.numberedScriptKeys) for (const rp of rpTargets(key)) {
+        for (const key of ctx.numberedScriptKeys.keys()) for (const rp of rpTargets(key)) {
             if (!numberedByRp.has(rp.root)) numberedByRp.set(rp.root, new Set());
             numberedByRp.get(rp.root).add(key);
         }
+        const soldierFormByRp = new Map();
+        for (const key of ctx.soldierFormKeys) for (const rp of rpTargets(key)) {
+            if (!soldierFormByRp.has(rp.root)) soldierFormByRp.set(rp.root, new Set());
+            soldierFormByRp.get(rp.root).add(key);
+        }
+        const soldierAlias = (key, language) => `${key}.lfmc_form_${language}`;
+        const soldierRoutes = new Map();
+        const writeSoldierFallbacks = (pk, languages) => {
+            const keys = soldierFormByRp.get(pk.root);
+            if (!keys || !soldierFormScripts.size) return;
+            const pack = packLangs.get(pk.root) || new Map();
+            const files = languages.map(lang => {
+                const existing = pack.get(lang);
+                const file = existing?.path || (pk.root ? pk.root + '/' : '') + `texts/${lang}.lang`;
+                const raw = pending.get(file) ?? existing?.raw ?? '';
+                return { lang, existing, file, raw, final: parseLang(raw), added: new Map() };
+            });
+            const routes = [], aliases = new Set();
+            const slots = value => [...new Set(Array.from(value.matchAll(/%%|%(\d+)\$s/g), m => m[1]).filter(Boolean))].sort().join(',');
+            for (const key of keys) {
+                const authored = ctx.translations.get(key);
+                const originals = new Set([...authored.values()].map(value => numberedLangValue(key, toLangValue(value)).trim()));
+                const expected = slots(originals.values().next().value);
+                const translated = new Map();
+                for (const { lang, existing, final } of files) {
+                    const input = existing?.map.get(key);
+                    const value = final.get(key);
+                    if (input == null || value == null) continue;
+                    const raw = numberedLangValue(key, input).trim();
+                    if (raw && !originals.has(raw) && slots(value) === expected) translated.set(lang, value);
+                }
+                const fallbackKeys = {};
+                for (const [language, locale] of [['en', 'en_US'], ['es', 'es_ES']]) {
+                    const alias = soldierAlias(key, language);
+                    if (authorKeys.has(alias)) continue;
+                    aliases.add(alias);
+                    const source = authored.get(locale);
+                    if (source == null || !translated.size) continue;
+                    fallbackKeys[language] = alias;
+                    const fallback = numberedLangValue(key, toLangValue(source));
+                    for (const file of files) file.added.set(alias, translated.get(file.lang) ?? fallback);
+                }
+                if (translated.size) routes.push([key, [...translated.keys()].map(lang => lang.toLowerCase()), fallbackKeys]);
+            }
+            soldierRoutes.set(pk.root, routes);
+            const heading = `${MARK} BTA soldier form fallback`;
+            for (const { file, raw, final, added } of files) {
+                if (!added.size && ![...aliases].some(key => final.has(key))) continue;
+                const kept = raw.split('\n').filter(line => {
+                    const eq = line.indexOf('=');
+                    return line.trim() !== heading && !(eq > 0 && aliases.has(line.slice(0, eq).trim()));
+                }).join('\n');
+                const rows = [...added].map(([key, value]) => `${key}=${value}`);
+                pending.set(file, rows.length ? kept.replace(/\s*$/, '\n') + `\n${heading}\n${rows.join('\n')}\n` : kept);
+            }
+        };
         const existingUntranslated = new Map();   // 键 → { value, file, langs }
         const writeLangs = (pk, entries, isRP) => {
             const numberedKeys = numberedByRp.get(pk.root);
+            const soldierKeys = soldierFormByRp.get(pk.root);
             const junk = junkByPack.get(pk.root) || new Set();
             const langs = packLangs.get(pk.root) || new Map();
             const texts = pk.root ? `${pk.root}/texts` : 'texts';
             // 脚本多语言表里的语言：只算写进这个包的键
             const ownTableLangs = new Set();
             if (isRP) for (const k of entries.keys()) { const t = ctx.translations.get(k); if (t) for (const l of t.keys()) ownTableLangs.add(l); }
+            for (const k of soldierKeys || []) for (const lang of ctx.translations.get(k).keys()) ownTableLangs.add(lang);
             const langSet = new Set([...langs.keys(), ...opt.targetLangs, sourceLang, 'en_US', ...ownTableLangs]);
             // 补全用：本包已有的所有键
             const fillFrom = (key) => {
@@ -976,10 +1039,15 @@
                 if (opt.fillMissing && isRP) {
                     for (const k of allExistingKeys) {
                         if (map.has(k) || entries.has(k) || ctx.hiddenKeys.has(k) || junk.has(k) || aliasOf(k)) continue;
-                        const v = fillFrom(k);
+                        const soldierBase = /^(.*)\.lfmc_form_(?:en|es)$/.exec(k)?.[1];
+                        if (soldierKeys?.has(soldierBase) && !authorKeys.has(k)) continue;
+                        // Reused soldier-form keys still have author-localized values for missing locales.
+                        const authored = soldierKeys?.has(k) ? ctx.translations.get(k).get(lang) : undefined;
+                        const v = authored == null ? fillFrom(k) : toLangValue(authored);
                         if (v != null) {
                             const value = numberedKeys?.has(k) ? numberedLangValue(k, v) : v;
                             filled.push(`${k}=${value}`);
+                            if (authored != null) continue;
                             // 包里原有、但这个语言还没有译文的键：也放进翻译表，不然只翻新提取的会漏掉它们
                             if (!existingUntranslated.has(k)) existingUntranslated.set(k, { value, file: `${pk.root ? pk.root + "/" : ""}texts/${lang}.lang`, langs: new Set() });
                             existingUntranslated.get(k).langs.add(lang);
@@ -1110,7 +1178,16 @@
                 if (dropped) ctx.warn(`${pk.manifestPath}: manifest 里直接写了${k === 'pack.name' ? '包名' : '简介'}「${v}」，lang 里另有 ${k}，以 manifest 为准，已删掉 ${dropped} 个语言里原来的 ${k}`);
             }
             const written = writeLangs(pk, entries, pk.type === 'RP');
+            if (pk.type === 'RP') writeSoldierFallbacks(pk, written);
             if (written.length) await writeLanguagesJson(pk, written);
+        }
+
+        for (const [file, runtime] of soldierFormScripts) {
+            const resource = pairOf.get(packOf(file)?.root);
+            const routes = resource && soldierRoutes.get(resource.root);
+            if (!routes?.length) continue;
+            const marker = '// ---- end i18n runtime ----';
+            pending.set(file, pending.get(file).replace(marker, () => `${runtime}.regFormLocales(${JSON.stringify(routes)});\n${marker}`));
         }
 
         // ---------------- 9. 写回 ----------------

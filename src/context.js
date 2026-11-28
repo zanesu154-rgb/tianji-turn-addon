@@ -27,7 +27,10 @@
     NS.dedentCode = dedentCode;
 
     // Compare the author and exported slot forms only for explicitly tagged allocations.
-    const numberedValue = s => s.replaceAll('{0}', '%1$s');
+    const numberedValue = (s, style) => style === 'sando'
+        ? s.replace(/%%|%([1-9][0-9]*)(?![0-9$])/g, (match, index) => index ? `%${index}$s` : match)
+        : s.replaceAll('{0}', '%1$s');
+    NS.numberedValue = numberedValue;
     const existingList = v => v instanceof Set ? [...v] : v != null ? [v] : [];
 
     // 认领上次的键时用来核对“这条译文是不是这句原文的”：占位符、格式代码、换行、数字要一致，长度大致相当
@@ -76,20 +79,20 @@
         const plan = new Map();
         if (!ctx.seriesLog || !ctx._seriesIdx) return plan;
         for (const [base, seq] of ctx.seriesLog) {
-            const hasNumbered = seq.some(row => row.numbered);
+            const styles = new Set(seq.map(row => row.numbered).filter(Boolean));
             const exactKeys = new Set(seq.map(x => x.exact).filter(Boolean));
             const olds = (ctx._seriesIdx.get(base) || []).filter(([, k]) => !exactKeys.has(k) && !ctx.referenced.has(k)).map(([i, k]) => {
                 const langs = [...(ctx.keyLangs.get(k) || [])];
                 // 有原文这一侧语言的旧键：只有上次本工具生成的（原文改过了）才能认领
                 const v = existingList(ctx.existingValues.get(k));
                 const f = v.map(seriesFeat);
-                const numbered = hasNumbered ? v.map(x => seriesFeat(numberedValue(x))) : f;
+                const numbered = styles.size ? new Map([...styles].map(style => [style, v.map(x => seriesFeat(numberedValue(x, style)))])) : null;
                 return { i, k, v, f, numbered, en: ctx.prevKeys.has(k) || !langs.some(l => /^en_/.test(l)),
                     cjk: ctx.prevKeys.has(k) || !langs.some(l => /^(zh|ja|ko)_/.test(l)) };
             });
             // 序号远远跳开的旧键（中间空了几百号）多半是早就不用的旧条目，不参与认领
             for (let t = 1; t < olds.length; t++) if (olds[t].i - olds[t - 1].i > 200) { olds.length = t; break; }
-            const news = seq.filter(x => !x.exact).map(x => ({ j: x.j, text: x.text, numbered: x.numbered, f: seriesFeat(x.numbered ? numberedValue(x.text) : x.text) }));
+            const news = seq.filter(x => !x.exact).map(x => ({ j: x.j, text: x.text, numbered: x.numbered, f: seriesFeat(x.numbered ? numberedValue(x.text, x.numbered) : x.text) }));
             if (!olds.length || !news.length) continue;
             const score = (a, bs) => {
                 let best = -1;
@@ -153,7 +156,7 @@
             };
             const baseScore = (n, m) => {
                 const o = olds[m], { f: a, numbered } = news[n];
-                return (a.cjk ? o.cjk : o.en) ? score(a, numbered ? o.numbered : o.f) : -1;
+                return (a.cjk ? o.cjk : o.en) ? score(a, numbered ? o.numbered.get(numbered) : o.f) : -1;
             };
             let pairs = runDP(baseScore);
             // 第二遍：从第一遍的配对里学“哪个词常对应哪个译词”（Banner ↔ 旗帜、Statue ↔ 雕像），
@@ -224,7 +227,8 @@
             this.untranslatable = [];      // { file, where, text, reason }
             this.warnings = [];
             this.inputTables = [];         // 玩家输入匹配（聊天关键词/正则），只导出
-            this.numberedScriptKeys = new Set();  // Already allocated keys with a zero-based author placeholder.
+            this.soldierFormKeys = new Set();  // Author dictionary keys used by the native soldier form.
+            this.numberedScriptKeys = new Map();  // Already allocated keys → author placeholder style.
             this.translations = new Map(); // 键 → Map(语言 → 已有译文)，来自脚本自带的多语言表
             this.packEntries = new Map();  // 包根目录 → Map(键→值)，用于 pack.name / pack.description
             this.stats = { files: 0 };
@@ -403,7 +407,7 @@
                 const pos = this._seriesPos.get(base);
                 let hit = null, hitI = Infinity;
                 const exact = this._valIdx.get(text) || [];
-                const equivalent = numbered ? this._valIdx.get(numberedValue(text)) || [] : [];
+                const equivalent = numbered ? this._valIdx.get(numberedValue(text, numbered)) || [] : [];
                 for (const k of exact.concat(equivalent)) {
                     if (!free(k)) continue;
                     const i = pos.get(k);
@@ -427,7 +431,7 @@
                 } else if (!hit && this.keyLangs.size) {
                     const cjk = NS.hasCJK(text);
                     const sideOf = (l) => cjk ? /^(zh|ja|ko)_/.test(l) : /^en_/.test(l);
-                    const a = seriesFeat(numbered ? numberedValue(text) : text);
+                    const a = seriesFeat(numbered ? numberedValue(text, numbered) : text);
                     const strong = a.ph + a.nl + a.codes.length / 2 + (a.nums ? 1 : 0) > 0;
                     const e = j + st.off;
                     // 没有占位符、换行、格式代码、数字的句子只能认原来的序号。有这些特征时才在前后 80 条里找最近的。
@@ -455,7 +459,7 @@
                     for (let p = from; p < seriesI.length && seriesI[p][0] <= to; p++) {
                         const [i, k] = seriesI[p];
                         if (!eligible(k)) continue;
-                        const profiles = numbered ? existingList(this.existingValues.get(k)).map(v => seriesFeat(numberedValue(v))) : feats(k);
+                        const profiles = numbered ? existingList(this.existingValues.get(k)).map(v => seriesFeat(numberedValue(v, numbered))) : feats(k);
                         if (!profiles.some(f => seriesCompat(a, f, i === e))) continue;
                         if (!best || Math.abs(i - e) < Math.abs(best[0] - e)) best = [i, k];
                     }
@@ -479,10 +483,10 @@
             // 附加包里已有这个键且值相同 → 直接复用
             const ev = this.existingValues.get(base);
             const evList = ev instanceof Set ? [...ev] : (ev != null ? [ev] : []);
-            if (evList.includes(text) || numbered && evList.includes(numberedValue(text))) {
+            if (evList.includes(text) || numbered && evList.includes(numberedValue(text, numbered))) {
                 key = base;
             } else if (evList.length && evList.every(v => NS.hasCJK(v) !== NS.hasCJK(text)) && !this.entries.has(base) && !this.referenced.has(base)
-                && evList.some(v => seriesCompat(seriesFeat(numbered ? numberedValue(text) : text), seriesFeat(numbered ? numberedValue(v) : v), true))) {
+                && evList.some(v => seriesCompat(seriesFeat(numbered ? numberedValue(text, numbered) : text), seriesFeat(numbered ? numberedValue(v, numbered) : v), true))) {
                 // 已有键的值是另一种文字（如 en_US 的 "Altar" 对应 "祭坛"）→ 视为同一条的译文，复用键，
                 // 原文只会补进缺少该键的语言文件
                 key = base;
