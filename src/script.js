@@ -1738,18 +1738,29 @@
       for (const original of originals) formKeys.get(id).set(original, key);
     }
   };
-  const soldierText = (message, lang, dictionary) => {
+  const formLocales = new Map();
+  const regFormLocales = (routes) => {
+    for (const [key, locales, fallbacks] of routes) formLocales.set(key, { locales, fallbacks });
+  };
+  const soldierText = (message, lang, dictionary, player) => {
     const own = (table, key) => Object.prototype.hasOwnProperty.call(table || {}, key) ? table[key] : undefined;
-    const sourceOf = key => own(dictionary[lang], key) ?? own(dictionary.en, key);
+    let locale = "";
+    try { locale = String(player?.clientSystemInfo?.locale || "").toLowerCase().replace(/-/g, "_"); } catch { }
     const resolve = x => {
       if (x == null || typeof x === "string" || typeof x === "number") return { text: String(x ?? "") };
       const id = x.__t || x.translate;
-      const source = id && sourceOf(id);
+      const authored = id && own(dictionary[lang], id);
+      const source = authored ?? (id && own(dictionary.en, id));
       if (x.__t || typeof source === "string") {
         const input = x.__t ? x.a : (Array.isArray(x.with) ? x.with : x.with?.rawtext);
         const args = (input || []).map(resolve);
         const key = formKeys.get(id)?.get(source);
-        if (key) return args.length ? { translate: key, with: { rawtext: args } } : { translate: key };
+        const route = formLocales.get(key);
+        // Older Script API versions cannot expose the game locale. The client
+        // selects the qualified key whose resource rows carry the author fallback.
+        const fallback = authored != null && lang === "es" ? "es" : "en";
+        const nativeKey = locale ? (route?.locales.includes(locale) ? key : null) : route?.fallbacks[fallback];
+        if (nativeKey) return args.length ? { translate: nativeKey, with: { rawtext: args } } : { translate: nativeKey };
         // Author fallback can contain a native translation as an argument.
         const template = source ?? id;
         const parts = template.split(/%([1-9][0-9]*)/);
@@ -1962,7 +1973,7 @@
     return tb ? bakeWith(tb, s) : s;
   };
   const BA = (a) => (Array.isArray(a) ? a.map(B) : a);
-  return (g[K] = { T, M, MA, J, TJ, C, currentJob, panelTitle, soldierText, regForm, reg, regNumbered, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
+  return (g[K] = { T, M, MA, J, TJ, C, currentJob, panelTitle, soldierText, regForm, regFormLocales, reg, regNumbered, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
 })();
 `;
     }
@@ -4360,7 +4371,7 @@
             overrides.set(soldierForms.parameter, () => `form, ${resolver} = R`);
             overrides.set(soldierForms.delegate, () => resolver);
             for (const form of soldierForms.forms) {
-                overrides.set(form, () => `${renderOrig(form)}, (p, a) => ${RT}.soldierText(a, getLang(p), STR)`);
+                overrides.set(form, () => `${renderOrig(form)}, (p, a) => ${RT}.soldierText(a, getLang(p), STR, p)`);
             }
         }
         if (!usesGL) srcPats.length = 0;
@@ -4433,7 +4444,7 @@
     return ${RT}.M(message);
 };\n` : '';
         const content = head + oreImport + chatImport + (prelude ? `// ---- i18n runtime (auto-generated) ----\n${prelude}// ---- end i18n runtime ----\n` : '') + oreAdapter + chatAdapter + body;
-        return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length, tables: tableEntries }, deferredTopics, rtName: RT, keyBaseWord: keyBase('word') };
+        return { content, changed: true, stats: { overrides: overrides.size, exact: exact.length, patterns: patterns.length, tables: tableEntries }, deferredTopics, soldierForms: !!soldierForms, rtName: RT, keyBaseWord: keyBase('word') };
     }
 
     /**
@@ -4453,7 +4464,7 @@
         const endMark = txt.indexOf('// ---- end i18n runtime ----', from);
         if (endMark < 0) return null;
         let to = txt.indexOf(`\n${rt}.reg(`, from);
-        for (const fn of ['regForm', 'regNumbered', 'regIds', 'keep', 'bake']) {
+        for (const fn of ['regForm', 'regFormLocales', 'regNumbered', 'regIds', 'keep', 'bake']) {
             const to2 = txt.indexOf(`\n${rt}.${fn}(`, from);
             if (to2 >= 0 && to2 < endMark && (to < 0 || to2 < to)) to = to2;
         }

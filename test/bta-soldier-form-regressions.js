@@ -52,22 +52,32 @@ function openOtherAction(player) { return LF(player, new ActionFormData()).title
     class MessageFormData extends ActionFormData {}
     const box = vm.createContext({ ActionFormData, MessageFormData });
     run(compile('lang.js', lang), box, 'globalThis.STR = STR;');
-    const then = run(compile('warfare.js', war), box, '({ openSoldierMenu, openMessage, openOtherAction, R, adapt: __i18n.soldierText });');
+    const then = run(compile('warfare.js', war), box, '({ openSoldierMenu, openMessage, openOtherAction, R, adapt: __i18n.soldierText, routes: __i18n.regFormLocales });');
     const lookup = text => [...context.entries].find(([, entry]) => entry.value === text)?.[0];
-    const player = { lang: 'missing' };
+    const player = { lang: 'missing', clientSystemInfo: { locale: 'zh-CN' } };
     const nativeTitle = { rawtext: [{ text: '§4[TRR]§r ' }, { translate: 'item.example.name', with: ['test'] }] };
-    const form = then.openSoldierMenu(player, nativeTitle);
-    assert.equal(form.heading, nativeTitle);
     const plain = value => JSON.parse(JSON.stringify(value));
     const close = lookup('Close'), team = lookup('Terrorists'), body = lookup('Member of %1. Wear %1.');
+    then.routes([close, team, body].map(key => [key, ['zh_cn'], { en: key + '.lfmc_form_en', es: key + '.lfmc_form_es' }]));
+    const form = then.openSoldierMenu(player, nativeTitle);
+    assert.equal(form.heading, nativeTitle);
     assert.deepEqual(plain(form.description), { translate: body, with: { rawtext: [{ translate: team }] } });
     assert.deepEqual(plain(form.close), [{ translate: close }, 'textures/ui/icon']);
     assert.equal(form.player, player);
     assert.equal(then.openMessage(player).heading, 'Close');
     assert.equal(then.openOtherAction(player).heading, 'Close');
     const alias = { translate: 'sando.ui.neutral.body', with: { rawtext: [{ translate: 'sando.team.terrorist' }] } };
-    assert.deepEqual(plain(then.adapt(alias, 'es', box.STR)), plain(form.description));
-    assert.deepEqual(plain(then.adapt({ ...alias, with: [{ __t: 'sando.team.terrorist' }] }, 'es', box.STR)), plain(form.description));
+    assert.deepEqual(plain(then.adapt(alias, 'es', box.STR, player)), plain(form.description));
+    assert.deepEqual(plain(then.adapt({ ...alias, with: [{ __t: 'sando.team.terrorist' }] }, 'es', box.STR, player)), plain(form.description));
+
+    const fallbackPlayer = { lang: 'es', clientSystemInfo: { locale: 'en_US' } };
+    const fallbackForm = then.openSoldierMenu(fallbackPlayer, nativeTitle);
+    assert.deepEqual(plain(fallbackForm.close), [{ text: 'Cerrar' }, 'textures/ui/icon']);
+    assert.deepEqual(plain(fallbackForm.description), { rawtext: [
+        { text: 'Miembro de ' }, { text: 'Terroristas' }, { text: '. Usa ' }, { text: 'Terroristas' }, { text: '.' },
+    ] });
+    const legacy = then.openSoldierMenu({ lang: 'es' }, nativeTitle);
+    assert.deepEqual(plain(legacy.close), [{ translate: close + '.lfmc_form_es' }, 'textures/ui/icon']);
     assert.equal(then.R(player, { __t: 'sando.ui.btn.close' }), 'Close');
     const unknown = { translate: 'vanilla.example', with: ['original'] };
     assert.equal(then.adapt(unknown, 'en', box.STR), unknown);
