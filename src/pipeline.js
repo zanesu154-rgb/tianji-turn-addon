@@ -890,23 +890,33 @@
             }
         }
 
-        // The author dictionaries still use {0}. Serialize only the display keys
+        // Serialize numbered author placeholders only for the display keys
         // proven to take an argument, after alignment has used the original values.
-        const numberedLangValue = (key, value) => ctx.numberedScriptKeys.has(key) ? value.replaceAll('{0}', '%1$s') : value;
+        const numberedLangValue = (key, value) => {
+            const style = ctx.numberedScriptKeys.get(key);
+            return style ? NS.numberedValue(value, style) : value;
+        };
         const numberedByRp = new Map();
-        for (const key of ctx.numberedScriptKeys) for (const rp of rpTargets(key)) {
+        for (const key of ctx.numberedScriptKeys.keys()) for (const rp of rpTargets(key)) {
             if (!numberedByRp.has(rp.root)) numberedByRp.set(rp.root, new Set());
             numberedByRp.get(rp.root).add(key);
+        }
+        const soldierFormByRp = new Map();
+        for (const key of ctx.soldierFormKeys) for (const rp of rpTargets(key)) {
+            if (!soldierFormByRp.has(rp.root)) soldierFormByRp.set(rp.root, new Set());
+            soldierFormByRp.get(rp.root).add(key);
         }
         const existingUntranslated = new Map();   // 键 → { value, file, langs }
         const writeLangs = (pk, entries, isRP) => {
             const numberedKeys = numberedByRp.get(pk.root);
+            const soldierKeys = soldierFormByRp.get(pk.root);
             const junk = junkByPack.get(pk.root) || new Set();
             const langs = packLangs.get(pk.root) || new Map();
             const texts = pk.root ? `${pk.root}/texts` : 'texts';
             // 脚本多语言表里的语言：只算写进这个包的键
             const ownTableLangs = new Set();
             if (isRP) for (const k of entries.keys()) { const t = ctx.translations.get(k); if (t) for (const l of t.keys()) ownTableLangs.add(l); }
+            for (const k of soldierKeys || []) for (const lang of ctx.translations.get(k).keys()) ownTableLangs.add(lang);
             const langSet = new Set([...langs.keys(), ...opt.targetLangs, sourceLang, 'en_US', ...ownTableLangs]);
             // 补全用：本包已有的所有键
             const fillFrom = (key) => {
@@ -976,10 +986,13 @@
                 if (opt.fillMissing && isRP) {
                     for (const k of allExistingKeys) {
                         if (map.has(k) || entries.has(k) || ctx.hiddenKeys.has(k) || junk.has(k) || aliasOf(k)) continue;
-                        const v = fillFrom(k);
+                        // Reused soldier-form keys still have author-localized values for missing locales.
+                        const authored = soldierKeys?.has(k) ? ctx.translations.get(k).get(lang) : undefined;
+                        const v = authored == null ? fillFrom(k) : toLangValue(authored);
                         if (v != null) {
                             const value = numberedKeys?.has(k) ? numberedLangValue(k, v) : v;
                             filled.push(`${k}=${value}`);
+                            if (authored != null) continue;
                             // 包里原有、但这个语言还没有译文的键：也放进翻译表，不然只翻新提取的会漏掉它们
                             if (!existingUntranslated.has(k)) existingUntranslated.set(k, { value, file: `${pk.root ? pk.root + "/" : ""}texts/${lang}.lang`, langs: new Set() });
                             existingUntranslated.get(k).langs.add(lang);

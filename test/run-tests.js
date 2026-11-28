@@ -3248,6 +3248,13 @@ export function show(player, item) {
     } catch (error) {
         check(btaHudLines, false, error.stack);
     }
+    const soldierForm = '#202 士兵表单保留原生 RawMessage、作者标记和代理行为';
+    try {
+        require('./bta-soldier-form-regressions.js').checkBtaSoldierForm();
+        check(soldierForm, true);
+    } catch (error) {
+        check(soldierForm, false, error.stack);
+    }
     const review = require('./review-regressions.js');
     const reviewResults = await review.runReviewRegressions();
     for (const result of reviewResults) {
