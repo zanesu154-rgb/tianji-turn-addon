@@ -3241,6 +3241,13 @@ export function show(player, item) {
     } catch (error) {
         check(btaTemplateCheck, false, error.stack);
     }
+    const btaHudLines = '#208 保留 BTA6 HUD 字段行、债务行及独立副标题';
+    try {
+        require('./bta-hud-lines-regressions.js').checkBtaHudLines();
+        check(btaHudLines, true);
+    } catch (error) {
+        check(btaHudLines, false, error.stack);
+    }
     const review = require('./review-regressions.js');
     const reviewResults = await review.runReviewRegressions();
     for (const result of reviewResults) {

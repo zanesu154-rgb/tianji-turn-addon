@@ -1072,6 +1072,32 @@
             id.right.type === 'Identifier' ? id.right.name : null;
     }
 
+    function btaHudTitleArgument(ast, file) {
+        if (!/(?:^|\/)scripts\/bta\/hud\.js$/.test(file)) return null;
+        const render = ast.body.find(n => n.type === 'FunctionDeclaration' && n.id?.name === 'renderPanel');
+        const player = render?.params[0];
+        if (player?.type !== 'Identifier') return null;
+        const block = render.body.body.find(n => n.type === 'TryStatement')?.block.body;
+        const title = block?.filter(n => n.type === 'VariableDeclaration' && n.kind === 'const')
+            .flatMap(n => n.declarations).find(({ init }) => {
+                if (init?.type !== 'ConditionalExpression' || init.alternate.name !== 'PANEL') return false;
+                const panel = init.consequent;
+                return panel.type === 'CallExpression' && panel.callee.name === 'panelText' &&
+                    panel.arguments.length === 1 && panel.arguments[0].name === player.name;
+            });
+        if (title?.id.type !== 'Identifier') return null;
+        for (const statement of block) {
+            const call = statement.expression;
+            if (call?.type !== 'CallExpression' || call.callee.type !== 'MemberExpression' ||
+                propName(call.callee) !== 'setTitle') continue;
+            const display = call.callee.object;
+            const arg = call.arguments[0];
+            if (display.type === 'MemberExpression' && propName(display) === 'onScreenDisplay' &&
+                display.object.name === player.name && arg?.name === title.id.name) return arg;
+        }
+        return null;
+    }
+
     function buildRuntime(rtName, globalKey) {
         return `const ${rtName} = (() => {
   const g = globalThis, K = ${JSON.stringify(globalKey)};
@@ -1676,6 +1702,20 @@
     return v;
   };
   const M = (v) => (typeof v === "string" ? lookup(v) || v : R(v, 0));
+  const panelTitle = (text) => {
+    if (typeof text !== "string" || !text.startsWith("§r§r§r") || !text.includes("\\n")) return M(text);
+    const rawtext = [];
+    let translated = false;
+    for (const [i, line] of text.split("\\n").entries()) {
+      if (i) rawtext.push({ text: "\\n" });
+      const mapped = lookup(line);
+      if (mapped) {
+        translated = true;
+        rawtext.push(...mapped.rawtext);
+      } else if (line) rawtext.push({ text: line });
+    }
+    return translated ? { rawtext } : text;
+  };
   const currentJob = (text, id) => {
     if (typeof text !== "string") return text;
     const line = numberedLine(text, id);
@@ -1850,7 +1890,7 @@
     return tb ? bakeWith(tb, s) : s;
   };
   const BA = (a) => (Array.isArray(a) ? a.map(B) : a);
-  return (g[K] = { T, M, MA, J, TJ, C, currentJob, reg, regNumbered, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
+  return (g[K] = { T, M, MA, J, TJ, C, currentJob, panelTitle, reg, regNumbered, H, regIds, keep, bake, B, BA, GL, bakeL, BL });
 })();
 `;
     }
@@ -2457,6 +2497,7 @@
         const ast = info.ast;
         const fb = fileBaseOf(file);
         const injectRuntime = opts.injectRuntime !== false;
+        const btaHudTitle = btaHudTitleArgument(ast, file);
         const btaTemplates = injectRuntime ? collectBtaDisplayTemplates(ast, file) : [];
         const btaTemplateNodes = new Set(btaTemplates.map(rule => rule.node));
         const btaRoleNodes = new Map(btaTemplates.flatMap(rule => (rule.jobs || [])
@@ -2980,6 +3021,10 @@
         function wrapM(e) {
             if (!injectRuntime) return;
             usesRuntime = true;
+            if (e === btaHudTitle) {
+                overrides.set(e, () => `${RT}.panelTitle(${renderOrig(e)})`);
+                return;
+            }
             const jobId = e.parent?.type === 'ConditionalExpression' && e.parent.test.type === 'Identifier' &&
                 e.parent.parent?.type === 'CallExpression' && propName(e.parent.parent.callee) === 'body' &&
                 btaCurrentJobArgument(e, btaJobLocalizer);
