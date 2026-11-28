@@ -890,8 +890,17 @@
             }
         }
 
+        // The author dictionaries still use {0}. Serialize only the display keys
+        // proven to take an argument, after alignment has used the original values.
+        const numberedLangValue = (key, value) => ctx.numberedScriptKeys.has(key) ? value.replaceAll('{0}', '%1$s') : value;
+        const numberedByRp = new Map();
+        for (const key of ctx.numberedScriptKeys) for (const rp of rpTargets(key)) {
+            if (!numberedByRp.has(rp.root)) numberedByRp.set(rp.root, new Set());
+            numberedByRp.get(rp.root).add(key);
+        }
         const existingUntranslated = new Map();   // 键 → { value, file, langs }
         const writeLangs = (pk, entries, isRP) => {
+            const numberedKeys = numberedByRp.get(pk.root);
             const junk = junkByPack.get(pk.root) || new Set();
             const langs = packLangs.get(pk.root) || new Map();
             const texts = pk.root ? `${pk.root}/texts` : 'texts';
@@ -961,7 +970,7 @@
                     if (map.has(k) || junk.has(k)) continue;
                     // 脚本自带的多语言表里有这种语言的译文 → 直接使用
                     const tr = ctx.translations.get(k);
-                    added.push(`${k}=${toLangValue(tr && tr.has(lang) ? tr.get(lang) : v)}`);
+                    added.push(`${k}=${numberedLangValue(k, toLangValue(tr && tr.has(lang) ? tr.get(lang) : v))}`);
                 }
                 const filled = [];
                 if (opt.fillMissing && isRP) {
@@ -969,9 +978,10 @@
                         if (map.has(k) || entries.has(k) || ctx.hiddenKeys.has(k) || junk.has(k) || aliasOf(k)) continue;
                         const v = fillFrom(k);
                         if (v != null) {
-                            filled.push(`${k}=${v}`);
+                            const value = numberedKeys?.has(k) ? numberedLangValue(k, v) : v;
+                            filled.push(`${k}=${value}`);
                             // 包里原有、但这个语言还没有译文的键：也放进翻译表，不然只翻新提取的会漏掉它们
-                            if (!existingUntranslated.has(k)) existingUntranslated.set(k, { value: v, file: `${pk.root ? pk.root + "/" : ""}texts/${lang}.lang`, langs: new Set() });
+                            if (!existingUntranslated.has(k)) existingUntranslated.set(k, { value, file: `${pk.root ? pk.root + "/" : ""}texts/${lang}.lang`, langs: new Set() });
                             existingUntranslated.get(k).langs.add(lang);
                         }
                     }
@@ -1021,6 +1031,17 @@
                     tagN++;
                     return `${k}=${v.slice(t.length)}`;
                 });
+                let numberedN = 0;
+                if (e && numberedKeys) raw = raw.replace(/^([^#\s=][^=\r\n]*)=([^\r\n]*)$/gm, (line, key, value) => {
+                    const k = key.trim();
+                    if (!numberedKeys.has(k)) return line;
+                    const commentAt = value.search(/##|\t#/);
+                    const text = commentAt < 0 ? value : value.slice(0, commentAt);
+                    const next = numberedLangValue(k, text);
+                    if (next === text) return line;
+                    numberedN++;
+                    return key + '=' + next + (commentAt < 0 ? '' : value.slice(commentAt));
+                });
                 let junkN = 0;
                 if (e && (junk.size || sameMoved.size)) raw = raw.split('\n').filter((line) => {
                     const t = line.trimStart();
@@ -1033,14 +1054,15 @@
                     junkN++;
                     return false;
                 }).join('\n');
-                if (!added.length && !filled.length && !fixedN && !junkN && !overN && !aliasN && !tagN && !copyN) { if (e) written.push(lang); continue; }
-                let out = e ? raw.replace(/\s*$/, '\n') : '';
+                const otherChanges = added.length || filled.length || fixedN || junkN || overN || aliasN || tagN || copyN;
+                if (!otherChanges && !numberedN) { if (e) written.push(lang); continue; }
+                let out = e ? (otherChanges ? raw.replace(/\s*$/, '\n') : raw) : '';
                 if (added.length) out += `\n${MARK} 自动提取（源语言 ${sourceLang}${lang === sourceLang ? '' : '，待翻译'}）\n${added.join('\n')}\n`;
                 if (filled.length) out += `\n${MARK} 从其他语言补全（待翻译）\n${fmtFilled(filled)}\n`;
                 const path = e ? e.path : `${texts}/${lang}.lang`;
                 pending.set(path, out);
                 written.push(lang);
-                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN ? `，修正占位符 ${fixedN}` : ''}${junkN ? `，删除无效条目 ${junkN}` : ''}${overN ? `，名称按 display_name 更新 ${overN}` : ''}${aliasN ? `，合并重复名称键 ${aliasN}` : ''}${tagN ? `，界面标识移出译文 ${tagN}` : ''}`);
+                log(`[lang] ${path}：新增 ${added.length}${filled.length ? `，补全 ${filled.length}` : ''}${fixedN + numberedN ? `，修正占位符 ${fixedN + numberedN}` : ''}${junkN ? `，删除无效条目 ${junkN}` : ''}${overN ? `，名称按 display_name 更新 ${overN}` : ''}${aliasN ? `，合并重复名称键 ${aliasN}` : ''}${tagN ? `，界面标识移出译文 ${tagN}` : ''}`);
             }
             return written;
         };
@@ -1071,7 +1093,7 @@
             let entries;
             if (pk.type === 'RP') entries = new Map([...(entriesByRp.get(pk.root) || []), ...own]);
             else entries = own;
-            if (!entries.size && !(pk.type === 'RP' && opt.fillMissing) && !junkByPack.has(pk.root)) continue;
+            if (!entries.size && !(pk.type === 'RP' && opt.fillMissing) && !junkByPack.has(pk.root) && !numberedByRp.has(pk.root)) continue;
             // lang 里已有 pack.name / pack.description，但 manifest 写的是文字（游戏显示的是 manifest）：
             // 以 manifest 为准，删掉各语言里原来的这一行，按 manifest 原文重新写入（其他语言列为待翻译）
             const langs = packLangs.get(pk.root);
@@ -1099,7 +1121,7 @@
         const rows = [['key', 'source_text', 'file', 'type', ...trLangs.map(l => `existing_${l}`)]];
         for (const [k, e] of ctx.entries) {
             const tr = ctx.translations.get(k);
-            rows.push([k, e.value, e.file, e.kind, ...trLangs.map(l => (tr && tr.get(l)) || '')]);
+            rows.push([k, numberedLangValue(k, e.value), e.file, e.kind, ...trLangs.map(l => numberedLangValue(k, (tr && tr.get(l)) || ''))]);
         }
         for (const [rootDir, m] of ctx.packEntries) for (const [k, v] of m) rows.push([k, v, rootDir + '/manifest.json', 'manifest']);
         for (const [k, x] of existingUntranslated) if (!ctx.entries.has(k)) rows.push([k, NS.fromLangValue ? NS.fromLangValue(x.value) : x.value, x.file, 'existing', ...trLangs.map(() => '')]);
@@ -1150,7 +1172,7 @@
             inputCsv = '\ufeff' + lines.map(r => r.map(csvCell).join(',')).join('\r\n');
             log(`玩家输入匹配（聊天关键词/正则）${merged.size} 组：游戏不会翻译玩家输入，已导出到翻译表 input_aliases.csv，可按语言补充说法`, 'warn');
         }
-        const sourceLangFile = [...ctx.entries].map(([k, e]) => `${k}=${toLangValue(e.value)}`).join('\n') + '\n'
+        const sourceLangFile = [...ctx.entries].map(([k, e]) => `${k}=${numberedLangValue(k, toLangValue(e.value))}`).join('\n') + '\n'
             + (existingUntranslated.size ? '\n## 包里原有、目标语言还没有译文的条目\n' + [...existingUntranslated].filter(([k]) => !ctx.entries.has(k)).map(([k, x]) => `${k}=${x.value}`).join('\n') + '\n' : '');
 
         const summary = {
